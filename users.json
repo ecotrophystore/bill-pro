@@ -1,0 +1,22 @@
+{"users": [
+{
+  "localId": "JCMWbxxPScPmtJ2JKXWLUoWt7DH2",
+  "email": "manager@ecotrophy.com",
+  "emailVerified": false,
+  "passwordHash": "tteIeHGe1WC+TeYF/Aibo+JnlUhtEklIAWl87hjVIxYHOLd0Vb1di6cQpHgLuNzHYVodWmpg+N1nOuHXRkbyOg==",
+  "salt": "xwmcOEZ2r8+2hg==",
+  "lastSignedInAt": "1777305632355",
+  "createdAt": "1774593680155",
+  "providerUserInfo": []
+},
+{
+  "localId": "r8ONTJWqdFfWgkye8OEbejGQ0143",
+  "email": "admin@ecobill.com",
+  "emailVerified": false,
+  "passwordHash": "8PjDjpW94z1cDy2fVhX1unHAZpBe2hKGGLL9mwk4snZ3zb7by6KEa5qyns5wSW/dCLBjRXVwTeCI1Gj89FqWHw==",
+  "salt": "52JobbDwq76bnQ==",
+  "lastSignedInAt": "1777375342729",
+  "createdAt": "1777302842459",
+  "disabled": false,
+  "providerUserInfo": []
+}]}

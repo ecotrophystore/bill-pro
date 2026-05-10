@@ -1,0 +1,141 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+  
+    // Helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserRole() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', null)
+        : null;
+    }
+    
+    function isActive() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('is_active', false) == true;
+    }
+    
+    function isAdmin() {
+      return isActive() && getUserRole() == 'admin';
+    }
+    
+    function isAccounts() {
+      return isActive() && getUserRole() == 'accounts';
+    }
+    
+    function isSales() {
+      return isActive() && getUserRole() == 'sales';
+    }
+    
+    function isUnchanged(field) {
+      return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
+    }
+    
+    function isLocked() {
+      return resource != null && resource.data.is_locked == true;
+    }
+
+    // 7. Role Isolation: Strict Firestore security rules (Admin override everything)
+    
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+      
+      // Chat history for AI Auditor
+      match /chat_history/{msgId} {
+        allow read, write: if request.auth.uid == uid;
+      }
+    }
+    
+    // CUSTOMERS COLLECTION
+    match /customers/{customerId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+    
+    // PRODUCTS COLLECTION
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+    
+    // SETTINGS COLLECTION
+    match /settings/{docId} {
+      allow read: if isAuthenticated();
+      // 15. Settings Integrity: Admin-only edits
+      allow write: if isAdmin(); 
+    }
+    
+    // QUOTATIONS COLLECTION
+    match /quotations/{quotationId} {
+      // Sales view own, Accounts/Admin R/W all
+      allow read: if isAdmin() || isAccounts() || (isSales() && resource.data.created_by == request.auth.uid);
+      
+      // Creation
+      allow create: if (isAdmin() || isAccounts() || isSales())
+                    // 5. Backdating Security Gate handled by UI, enforced by functions if needed, basic check here:
+                    && (request.resource.data.created_at.toMillis() > (request.time.toMillis() - 777600000)); // 9 days margin
+                    
+      // Updates
+      allow update: if (isAdmin() || isAccounts()) 
+                    || (isSales() && resource.data.created_by == request.auth.uid && resource.data.conversion_status != 'converted');
+    }
+    
+    // INVOICES COLLECTION
+    match /invoices/{invoiceId} {
+      allow read: if isAdmin() || isAccounts() || (isSales() && resource.data.created_by == request.auth.uid);
+      
+      allow create: if (isAdmin() || isAccounts()) 
+                    && request.resource.data.is_locked == false; // Usually created by function, but if client creates:
+      
+      allow update: if (isAdmin() || isAccounts())
+                    // 2. Invoice Lock: Once is_locked=true, NO edits allowed.
+                    && (!isLocked());
+                    
+      allow delete: if false; // 11. Data Retention: Never delete (use is_cancelled)
+    }
+    
+    // CASH MEMOS COLLECTION
+    match /cash_memos/{memoId} {
+      // Admin & Accounts only per Question 6c
+      allow read: if isAdmin() || isAccounts();
+      
+      allow create: if (isAdmin() || isAccounts()) 
+                    && request.resource.data.is_locked == false;
+      
+      allow update: if (isAdmin() || isAccounts())
+                    && (!isLocked());
+                    
+      allow delete: if false; // Data Retention
+    }
+    
+    // PURCHASES COLLECTION
+    match /purchases/{purchaseId} {
+      allow read: if isAdmin() || isAccounts();
+      allow write: if isAdmin() || isAccounts(); // OCR processing sets ai_extracted=true, user confirms it
+    }
+    
+    // TRANSACTIONS COLLECTION (Bank Recon)
+    match /transactions/{transactionId} {
+      allow read: if isAdmin() || isAccounts();
+      allow write: if isAdmin() || isAccounts();
+    }
+    
+    // REPORTS & NOTIFICATIONS
+    match /reports/{reportId} { allow read: if isAuthenticated(); }
+    match /notifications/{notifId} { 
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid; // for marking read
+    }
+    
+    // AUDIT LOG
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow write: if false; // Only Cloud Functions can write to audit logs
+    }
+    
+  }
+}

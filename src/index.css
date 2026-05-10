@@ -1,0 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-surface text-secondary font-sans antialiased min-h-screen;
+    background-color: #F3E9DD;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-[-0.01em] text-primary-dark;
+  }
+
+  /* Base Typography Scale as per design */
+  h1 { @apply text-3xl; }
+  h2 { @apply text-2xl; }
+  h3 { @apply text-xl; }
+  h4 { @apply text-lg; }
+  p { @apply text-base; }
+}
+
+@layer components {
+  /* Cards */
+  .neo-card {
+    @apply rounded-card bg-surface shadow-neo-raised p-6;
+  }
+
+  /* Inputs / Wells */
+  .neo-input {
+    @apply rounded-input bg-surface shadow-neo-inset p-3 outline-none text-primary-dark font-medium transition-shadow focus:shadow-neo-pressed;
+  }
+
+  /* Buttons */
+  .neo-btn {
+    @apply rounded-btn bg-surface shadow-neo-raised px-6 py-2 font-medium text-primary-dark transition-all duration-200;
+  }
+  .neo-btn:hover {
+    @apply shadow-neo-hover transform -translate-y-[1px];
+  }
+  .neo-btn:active {
+    @apply shadow-neo-pressed transform translate-y-0 text-primary;
+  }
+
+  .neo-btn-primary {
+    @apply rounded-btn bg-primary text-surface shadow-neo-raised px-6 py-2 font-medium transition-all duration-200 border border-[#007D7C];
+  }
+  .neo-btn-primary:active {
+    /* Different pressed state for primary teal button since background is dark */
+    @apply bg-primary-dark shadow-[inset_4px_4px_8px_rgba(0,0,0,0.2),_inset_-4px_-4px_8px_rgba(255,255,255,0.1)];
+  }
+
+  /* Stacked Button (Sidebar Navigation) */
+  .neo-nav-stacked {
+    @apply rounded-card bg-surface shadow-neo-raised px-4 py-3 font-medium text-secondary transition-all flex items-center gap-3;
+  }
+  .neo-nav-stacked.active {
+    @apply shadow-neo-pressed text-primary bg-surface;
+    /* teal background glow inside active state */
+    box-shadow: inset 4px 4px 8px #D1C4B2, inset -4px -4px 8px #FFFFFF, inset 0 0 10px rgba(0, 103, 102, 0.1);
+  }
+
+  /* Status Badges */
+  .neo-badge {
+    @apply rounded-[8px] px-3 py-1 text-sm font-semibold shadow-neo-surface;
+  }
+  .neo-badge-success {
+    @apply neo-badge text-success;
+  }
+  .neo-badge-warning {
+    @apply neo-badge text-warning;
+  }
+  .neo-badge-error {
+    @apply neo-badge text-error;
+  }
+}
