@@ -426,6 +426,103 @@ export const createInvoice = onCall(async (request) => {
     });
 });
 
+export const createProformaInvoice = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
+    
+    const uid = request.auth.uid;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
+       throw new HttpsError("permission-denied", "Only Accounts can create proforma invoices");
+    }
+
+    const { invoiceData: rawData } = request.data;
+    if (!rawData || !rawData.customer_id || !rawData.items) {
+        throw new HttpsError("invalid-argument", "Missing required proforma fields");
+    }
+
+    return await db.runTransaction(async (transaction) => {
+      let subtotal = 0;
+      let totalTax = 0;
+      
+      const validatedItems = rawData.items.map((item: any) => {
+        const lineTotalRaw = item.quantity * item.rate;
+        const taxAmountRaw = (lineTotalRaw * item.tax_percentage) / 100;
+        
+        const lineTotal = exactRound(lineTotalRaw);
+        const taxAmount = exactRound(taxAmountRaw);
+        
+        subtotal += lineTotal;
+        totalTax += taxAmount;
+        
+        return {
+          ...item,
+          line_total: lineTotal,
+          tax_amount: taxAmount
+        };
+      });
+
+      const grandTotalExact = subtotal + totalTax;
+      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
+      const finalGrandTotal = Math.round(grandTotalExact);
+
+      const d = new Date();
+      let fyYear = d.getFullYear();
+      if (d.getMonth() < 3) fyYear -= 1;
+
+      const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
+      const seqDoc = await transaction.get(sequenceRef);
+      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+      
+      currentSeq += 1;
+      const paddedSeq = currentSeq.toString().padStart(4, "0");
+      const proformaNumber = `PI/${fyYear}/${paddedSeq}`;
+
+      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+
+      const proformaRef = db.collection("proforma_invoices").doc();
+      const proformaData = {
+        ...rawData,
+        number: proformaNumber,
+        is_locked: false, // Proforma invoices can be unlocked/edited
+        status: "draft",
+        payment_status: "unpaid",
+        items: validatedItems,
+        subtotal: exactRound(subtotal),
+        tax_total: exactRound(totalTax),
+        cgst: rawData.is_igst ? 0 : exactRound(totalTax / 2),
+        sgst_igst: rawData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+        round_off: roundOff,
+        grand_total: finalGrandTotal,
+        advance_amount: rawData.advance_amount || 0,
+        balance_amount: rawData.balance_amount || finalGrandTotal,
+        payment_history: [],
+        created_by: uid,
+        created_at: FieldValue.serverTimestamp(),
+        audit_trail: [{
+          action: "direct_creation",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(proformaRef, proformaData);
+
+      const auditLogRef = db.collection("audit_logs").doc();
+      transaction.set(auditLogRef, {
+        document_type: "proforma_invoice",
+        document_id: proformaRef.id,
+        action: "create",
+        user_id: uid,
+        timestamp: FieldValue.serverTimestamp(),
+        notes: "Directly created proforma invoice"
+      });
+
+      await syncToLibrary(uid, validatedItems, rawData.customer_id, rawData.customer_name);
+
+      return { success: true, invoiceId: proformaRef.id, invoiceNumber: proformaNumber };
+    });
+});
+
 /**
  * NEW: Cash Memo Module (Choice 1a, 2b)
  * Handles non-GST billing with a separate sequence (MEMO/...).

@@ -21,6 +21,11 @@ export declare const createInvoice: import("firebase-functions/v2/https").Callab
     invoiceId: string;
     invoiceNumber: string;
 }>, unknown>;
+export declare const createProformaInvoice: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    invoiceId: string;
+    invoiceNumber: string;
+}>, unknown>;
 /**
  * NEW: Cash Memo Module (Choice 1a, 2b)
  * Handles non-GST billing with a separate sequence (MEMO/...).

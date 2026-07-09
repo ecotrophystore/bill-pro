@@ -1,11 +1,11 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Invoice, Quotation, CashMemo } from '../types';
+import type { Invoice, Quotation, CashMemo, ProformaInvoice } from '../types';
 
 export function downloadPDF(
-  docData: Invoice | Quotation | CashMemo,
+  docData: Invoice | Quotation | CashMemo | ProformaInvoice,
   customerName: string,
-  docType: 'Invoice' | 'Quotation' | 'Cash Memo',
+  docType: 'Invoice' | 'Quotation' | 'Cash Memo' | 'Proforma Invoice',
   action: 'download' | 'view' = 'download'
 ) {
   const doc = new jsPDF();

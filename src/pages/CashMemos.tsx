@@ -6,7 +6,6 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc } from '
 import type { CashMemo, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -131,12 +130,7 @@ export default function CashMemos() {
           <p className="text-secondary mt-1">Non-GST quick billing with separate sequential numbering.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-          <VoiceDictation 
-            onParsedItems={handleVoiceCashMemo} 
-            functionName="parseVoiceCommand" 
-            label="Voice Cash Memo" 
-          />
-          <div className="relative">
+                    <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"

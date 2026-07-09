@@ -349,7 +349,7 @@ export default function Dashboard() {
 
       {/* Main interaction space */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-        <div className="neo-card lg:col-span-2 min-h-[400px]">
+        <div className="neo-card lg:col-span-3 min-h-[400px]">
           <h3 className="mb-4">Recent Activity</h3>
           <div className="space-y-4">
             {metrics.recentInvoices.length === 0 ? (
@@ -372,21 +372,7 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-        </div>
-
-        <div className="neo-card flex flex-col">
-          <h3 className="mb-4">AI Auditor Tip</h3>
-          <div className="bg-primary/5 rounded-card p-4 flex-1 flex flex-col justify-center items-center text-center space-y-3">
-            <div className="w-12 h-12 rounded-full bg-primary-dark flex items-center justify-center shadow-neo-raised">
-              <span className="text-surface font-bold text-xl">!</span>
-            </div>
-            <p className="text-sm font-medium text-primary-dark">
-              There are {metrics.pendingPurchases} purchase receipts pending OCR verification.
-            </p>
-            <button onClick={() => navigate('/purchases')} className="neo-btn text-sm w-full mt-2">Review Now</button>
-          </div>
-        </div>
-      </div>
+        </div>      </div>
     </div>
   );
 }

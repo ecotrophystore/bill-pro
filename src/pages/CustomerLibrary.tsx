@@ -4,7 +4,6 @@ import { useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, getDocs, addDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Customer } from '../types';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -198,12 +197,7 @@ export default function CustomerLibrary() {
           <p className="text-secondary mt-1">Professional directory of all billed entities and walk-ins.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-          <VoiceDictation 
-            onParsedItems={handleVoiceCustomer} 
-            functionName="parseVoiceCommand" 
-            label="Voice Customer" 
-          />
-          <div className="relative">
+                    <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"

@@ -28,3 +28,7 @@ dist-ssr
 .env.*
 !.env.example
 
+# Secret and key files
+secret.txt
+test-key.js
+users.json

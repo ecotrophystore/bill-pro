@@ -6,7 +6,6 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteD
 import { httpsCallable } from 'firebase/functions';
 import type { Quotation, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -182,12 +181,7 @@ export default function Quotations() {
           <p className="text-secondary mt-1">Manage standard quotes and conversion requests.</p>
         </div>
         <div className="flex gap-4 items-center">
-          <VoiceDictation 
-            onParsedItems={handleVoiceQuotation} 
-            functionName="parseVoiceCommand" 
-            label="Voice Quotation" 
-          />
-          <div className="relative">
+                    <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"

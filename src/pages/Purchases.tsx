@@ -4,7 +4,6 @@ import { Plus, Search, Calendar, Filter, Loader2, Edit, Trash2, Download, Chevro
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import type { Purchase } from '../types';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -59,15 +58,18 @@ export default function Purchases() {
   };
 
   const handleEditPurchase = async (purchase: Purchase) => {
-    const vendor = window.prompt("Enter new vendor name:", purchase.vendor);
+    const vendorName = purchase.vendor?.name || '';
+    const vendor = window.prompt("Enter new vendor name:", vendorName);
     if (!vendor) return;
-    const amountStr = window.prompt("Enter new purchase amount (₹):", purchase.amount.toString());
+    const amountVal = purchase.amount || purchase.grandTotal || 0;
+    const amountStr = window.prompt("Enter new purchase amount (₹):", amountVal.toString());
     if (!amountStr) return;
     const amount = parseFloat(amountStr);
     if (isNaN(amount)) return;
     
     try {
-      await updateDoc(doc(db, 'purchases', purchase.id), { vendor, amount });
+      const updatedVendor = { ...purchase.vendor, name: vendor };
+      await updateDoc(doc(db, 'purchases', purchase.id), { vendor: updatedVendor, amount });
     } catch (err) {
       console.error(err);
       alert("Failed to update purchase.");
@@ -97,7 +99,7 @@ export default function Purchases() {
           amount: purchase.grandTotal || purchase.amount || 0,
           date: new Date(),
           type: 'debit',
-          description: `Payment to ${typeof purchase.vendor === 'string' ? purchase.vendor : purchase.vendor?.name || 'Vendor'}`,
+          description: `Payment to ${purchase.vendor?.name || 'Vendor'}`,
           category: 'Purchase',
           match_status: 'pending_review',
           reference_number: purchase.invoice?.invoice_number || purchase.reference || purchase.id,
@@ -183,12 +185,7 @@ export default function Purchases() {
           <p className="text-secondary mt-1">Track and reconcile incoming inventory / services.</p>
         </div>
         <div className="flex gap-4 items-center">
-          <VoiceDictation 
-            onParsedItems={handleVoicePurchase} 
-            functionName="parsePurchaseVoice" 
-            label="Voice Purchase" 
-          />
-          <div className="relative">
+                    <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"
@@ -277,7 +274,7 @@ export default function Purchases() {
                     {purchase.createdAt?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) || purchase.date?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) || '-'}
                   </td>
                   <td className="p-4">
-                    <div className="font-bold text-primary-dark">{typeof purchase.vendor === 'string' ? purchase.vendor : purchase.vendor?.name || 'Unknown'}</div>
+                    <div className="font-bold text-primary-dark">{purchase.vendor?.name || 'Unknown'}</div>
                     <div className="text-xs text-secondary">{purchase.category || 'General'}</div>
                   </td>
                   <td className="p-4 font-mono text-xs text-secondary">{purchase.invoice?.invoice_number || purchase.reference || 'N/A'}</td>

@@ -2,20 +2,16 @@ import { Timestamp } from 'firebase/firestore';
 
 export interface PaymentRecord {
   id: string;
-  payment_id: string;
-  document_type: 'quotation' | 'invoice' | 'cash_memo';
-  document_id: string;
-  customer_id: string;
-  payment_method: string;
-  payment_amount: number;
-  payment_date: Timestamp;
+  linked_document_id: string;
+  linked_document_type: 'invoice' | 'cash_memo' | 'proforma_invoice';
+  amount: number;
+  method: string;
+  date: string;
   reference_number?: string;
-  created_by: string;
-  created_at: Timestamp;
-  is_voided?: boolean;
+  status: 'completed' | 'voided';
   void_reason?: string;
-  voided_by?: string;
-  voided_at?: Timestamp;
+  created_at: Timestamp;
+  created_by: string;
 }
 
 export type UserRole = 'admin' | 'accounts' | 'sales';
@@ -120,6 +116,11 @@ export interface CashMemo extends Omit<Invoice, 'number'> {
   walk_in_customer?: boolean;
 }
 
+export interface ProformaInvoice extends Omit<Invoice, 'number' | 'status'> {
+  number: string; // format: PI/YYYY/0001
+  status: 'draft' | 'finalized' | 'cancelled' | 'converted';
+}
+
 export interface PurchaseItem {
   itemName: string;
   quantity: number;
@@ -129,14 +130,14 @@ export interface PurchaseItem {
 
 export interface Purchase {
   id: string;
-  status: 'draft' | 'uploaded' | 'processing' | 'extracting' | 'classifying' | 'review_ready' | 'submitted' | 'pending_approval' | 'approved' | 'confirmed' | 'rejected' | 'needs_revision' | 'extraction_failed';
+  status: 'draft' | 'uploaded' | 'processing' | 'extracting' | 'classifying' | 'review_ready' | 'submitted' | 'pending_approval' | 'approved' | 'confirmed' | 'rejected' | 'needs_revision' | 'extraction_failed' | 'pending' | 'bank_transfer' | 'cleared' | 'flagged';
   userId: string;
   category: string;
   vendor: {
     name: string;
-    address: string;
-    gst_number: string;
-    phone: string;
+    address?: string;
+    gst_number?: string;
+    phone?: string;
   };
   invoice: {
     invoice_number: string;
@@ -152,7 +153,7 @@ export interface Purchase {
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   // Fallback for Purchases.tsx display logic temporarily
-  amount?: number; 
+  amount: number; 
   reference?: string;
   date?: Timestamp;
 }

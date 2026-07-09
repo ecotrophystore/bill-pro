@@ -5,7 +5,6 @@ import { collection, query, orderBy, onSnapshot, where, limit } from 'firebase/f
 import { httpsCallable } from 'firebase/functions';
 import StatementUploadModal from '../components/Reconciliation/StatementUploadModal';
 import type { Transaction, StatementUploadLog } from '../types';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -257,12 +256,7 @@ export default function Reconciliation() {
         
         <div className="flex flex-wrap items-center gap-3">
           <div className="shadow-sm rounded-2xl bg-white/40 p-1 border border-black/5 hover:border-black/10 transition-colors">
-            <VoiceDictation 
-              onParsedItems={handleVoiceReconciliation} 
-              functionName="parseVoiceCommand" 
-              label="Voice Reconciliation" 
-            />
-          </div>
+                      </div>
           
           <div className="relative">
             <button 

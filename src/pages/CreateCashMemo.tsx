@@ -6,7 +6,6 @@ import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
-import VoiceDictation from '../components/VoiceDictation';
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
 
@@ -276,8 +275,7 @@ export default function CreateCashMemo() {
           <div className="neo-card p-8 sm:p-10">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="mb-0">Line Items</h3>
-              <VoiceDictation onParsedItems={handleVoiceParsed} />
-            </div>
+                          </div>
             <div className="space-y-8">
               {items.map((item: any, index: number) => (
                 <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-surface border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">

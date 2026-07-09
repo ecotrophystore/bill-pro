@@ -17,6 +17,10 @@ import Settings from './pages/Settings';
 import Reconciliation from './pages/Reconciliation';
 import AuditorPage from './pages/AuditorPage';
 import ReportsPage from './pages/ReportsPage';
+import ProformaInvoices from './pages/ProformaInvoices';
+import CreateProformaInvoice from './pages/CreateProformaInvoice';
+import ExpensePage from './pages/Expense';
+
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -55,6 +59,11 @@ export default function App() {
             <Route path="invoices/new" element={<CreateInvoice />} />
             <Route path="invoices/edit/:id" element={<CreateInvoice />} />
 
+            {/* Proforma Invoices */}
+            <Route path="proforma-invoices" element={<ProformaInvoices />} />
+            <Route path="proforma-invoices/new" element={<CreateProformaInvoice />} />
+            <Route path="proforma-invoices/edit/:id" element={<CreateProformaInvoice />} />
+
             {/* Cash Memo Module (New) */}
             <Route path="cash-memos" element={<CashMemos />} />
             <Route path="cash-memos/new" element={<CreateCashMemo />} />
@@ -69,6 +78,7 @@ export default function App() {
             <Route path="reconciliation" element={<Reconciliation />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="auditor" element={<AuditorPage />} />
+            <Route path="expense" element={<ExpensePage />} />
             <Route path="settings" element={<Settings />} />
           </Route>
           

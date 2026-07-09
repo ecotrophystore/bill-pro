@@ -7,30 +7,33 @@ import {
   ShoppingCart, 
   Building2, 
   BarChart3, 
-  Bot, 
   Settings,
   Bell,
   Search,
   Menu,
   X,
   Banknote,
-  LogOut
+  LogOut,
+  Coins,
+  PlusCircle,
+  BookOpen,
+  Wallet
 } from 'lucide-react';
 import clsx from 'clsx';
-import { AIAuditor } from '../AI/AIAuditor';
 import { useAuth } from '../../contexts/AuthContext';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/quotations', label: 'Quotations', icon: FileText },
+  { path: '/proforma-invoices', label: 'Proforma Invoices', icon: FileText },
   { path: '/invoices', label: 'Invoices', icon: Receipt },
   { path: '/cash-memos', label: 'Cash Memos', icon: Banknote },
   { path: '/library/products', label: 'Product Library', icon: Receipt }, // Using Receipt icon as a placeholder if BookOpen not available, but let's check Package
   { path: '/library/customers', label: 'Customer Library', icon: Building2 },
   { path: '/purchases', label: 'Purchases', icon: ShoppingCart },
+  { path: '/expense', label: 'Expense Tracking', icon: Wallet },
   { path: '/reconciliation', label: 'Reconciliation', icon: Building2 },
   { path: '/reports', label: 'Reports', icon: BarChart3 },
-  { path: '/auditor', label: 'AI Auditor', icon: Bot },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -135,8 +138,6 @@ export function AppLayout() {
         </div>
       </main>
 
-      {/* Global AI Assistant */}
-      <AIAuditor />
-    </div>
+      {/* Global AI Assistant */}    </div>
   );
 }

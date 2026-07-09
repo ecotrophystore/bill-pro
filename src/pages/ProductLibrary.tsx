@@ -3,7 +3,6 @@ import { collection, getDocs, addDoc, doc, deleteDoc, updateDoc } from 'firebase
 import { db } from '../lib/firebase';
 import type { Product } from '../types';
 import { Search, Plus, Edit, Trash2, X, Download, ChevronDown } from 'lucide-react';
-import VoiceDictation from '../components/VoiceDictation';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -211,12 +210,7 @@ export default function ProductLibrary() {
           <p className="text-secondary mt-1">Manage your products and pricing</p>
         </div>
         <div className="flex gap-4 items-center">
-          <VoiceDictation 
-            onParsedItems={handleVoiceProduct} 
-            functionName="parseVoiceCommand" 
-            label="Voice Product" 
-          />
-          <div className="relative">
+                    <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"

@@ -3,35 +3,35 @@ import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, Chevro
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc } from 'firebase/firestore';
-import type { Invoice, Customer } from '../types';
+import type { ProformaInvoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-export default function Invoices() {
+export default function ProformaInvoices() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const initialSearch = queryParams.get('customer') || '';
   
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [proformaInvoices, setProformaInvoices] = useState<ProformaInvoice[]>([]);
   const [customers, setCustomers] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<ProformaInvoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [showReportDropdown, setShowReportDropdown] = useState(false);
 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, 'invoices'), orderBy('created_at', 'desc'));
+    const q = query(collection(db, 'proforma_invoices'), orderBy('created_at', 'desc'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       try {
-        const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
-        setInvoices(invs);
+        const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProformaInvoice));
+        setProformaInvoices(invs);
         
         // Fetch missing customer names
         const newCustomerIds = invs
@@ -56,40 +56,36 @@ export default function Invoices() {
         setLoading(false);
       }
     }, (error) => {
-      console.error("Invoices onSnapshot error:", error);
+      console.error("Proforma Invoices onSnapshot error:", error);
       setLoading(false);
     });
     return () => unsubscribe();
   }, [customers]);
 
-  const openPaymentModal = (inv: Invoice) => {
+  const openPaymentModal = (inv: ProformaInvoice) => {
     setSelectedInvoice(inv);
     setIsPaymentModalOpen(true);
   };
 
   const deleteInvoice = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this invoice?")) {
+    if (window.confirm("Are you sure you want to delete this proforma invoice?")) {
       try {
-        await deleteDoc(doc(db, 'invoices', id));
+        await deleteDoc(doc(db, 'proforma_invoices', id));
       } catch (err) {
-        console.error("Error deleting invoice", err);
-        alert("Failed to delete invoice.");
+        console.error("Error deleting proforma invoice", err);
+        alert("Failed to delete proforma invoice.");
       }
     }
   };
 
-  const handleVoiceInvoice = (customerName: string | null, items: any[], customerType?: string | null) => {
-    navigate('/invoices/new', { state: { voiceData: { customerName, items, customerType } } });
-  };
-
   const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredInvoices = invoices
+    const filteredInvoices = proformaInvoices
       .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
 
     if (format === 'excel') {
       const reportData = filteredInvoices.map(inv => ({
-        'Invoice Number': inv.number,
+        'Proforma Invoice Number': inv.number,
         'Customer': customers[inv.customer_id] || 'Unknown Customer',
         'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
         'Subtotal (₹)': inv.subtotal || 0,
@@ -100,19 +96,19 @@ export default function Invoices() {
 
       const ws = XLSX.utils.json_to_sheet(reportData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Invoices");
-      XLSX.writeFile(wb, "Invoices_Report.xlsx");
+      XLSX.utils.book_append_sheet(wb, ws, "Proforma Invoices");
+      XLSX.writeFile(wb, "Proforma_Invoices_Report.xlsx");
     } else {
       const doc = new jsPDF();
       doc.setFontSize(18);
-      doc.text("Invoices Report", 14, 22);
+      doc.text("Proforma Invoices Report", 14, 22);
       doc.setFontSize(11);
       doc.setTextColor(100);
       doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 14, 30);
 
       autoTable(doc, {
         startY: 40,
-        head: [['Invoice #', 'Customer', 'Date', 'Grand Total', 'Status']],
+        head: [['Proforma #', 'Customer', 'Date', 'Grand Total', 'Status']],
         body: filteredInvoices.map(inv => [
           inv.number,
           customers[inv.customer_id] || 'Unknown Customer',
@@ -122,7 +118,7 @@ export default function Invoices() {
         ]),
         theme: 'striped',
       });
-      doc.save("Invoices_Report.pdf");
+      doc.save("Proforma_Invoices_Report.pdf");
     }
   };
 
@@ -130,11 +126,11 @@ export default function Invoices() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Invoices</h1>
-          <p className="text-secondary mt-1">Manage official tax invoices, tracked by FY sequence.</p>
+          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Proforma Invoices</h1>
+          <p className="text-secondary mt-1">Manage proforma invoices, tracked by separate sequence.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-                    <div className="relative">
+          <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"
@@ -161,8 +157,8 @@ export default function Invoices() {
               </div>
             )}
           </div>
-          <button onClick={() => navigate('/invoices/new')} className="neo-btn-primary flex items-center gap-2">
-            <Plus size={18} /> New Invoice
+          <button onClick={() => navigate('/proforma-invoices/new')} className="neo-btn-primary flex items-center gap-2">
+            <Plus size={18} /> New Proforma Invoice
           </button>
         </div>
       </div>
@@ -172,7 +168,7 @@ export default function Invoices() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={18} />
           <input 
             type="text" 
-            placeholder="Search by invoice number or customer..." 
+            placeholder="Search by proforma number or customer..." 
             className="neo-input w-full pl-10"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -198,7 +194,7 @@ export default function Invoices() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface border-b border-shadow-darker/10">
-                <th className="p-4 font-semibold text-primary-dark">Invoice #</th>
+                <th className="p-4 font-semibold text-primary-dark">Proforma #</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
                 <th className="p-4 font-semibold text-primary-dark text-right">Total</th>
@@ -209,11 +205,11 @@ export default function Invoices() {
             <tbody className="divide-y divide-shadow-darker/5">
               {loading ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
-                  <Loader2 className="animate-spin mx-auto mb-2" /> Loading invoices...
+                  <Loader2 className="animate-spin mx-auto mb-2" /> Loading proforma invoices...
                 </td></tr>
-              ) : invoices.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-secondary">No invoices found.</td></tr>
-              ) : invoices
+              ) : proformaInvoices.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
+              ) : proformaInvoices
                   .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
                   .map((inv) => (
@@ -234,21 +230,21 @@ export default function Invoices() {
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
                       <button 
-                        onClick={() => navigate(`/invoices/edit/${inv.id}`)}
+                        onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)}
                         className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Invoice"
+                        title="Edit Proforma Invoice"
                       >
                         <Edit size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view')}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="View PDF"
                       >
                         <FileText size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download')}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="Download"
                       >
@@ -257,7 +253,7 @@ export default function Invoices() {
                       <button 
                         onClick={() => deleteInvoice(inv.id)}
                         className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Invoice"
+                        title="Delete Proforma Invoice"
                       >
                         <Trash2 size={18} />
                       </button>
@@ -278,7 +274,7 @@ export default function Invoices() {
             setSelectedInvoice(null);
           }}
           document={selectedInvoice}
-          documentType="invoice"
+          documentType="proforma_invoice"
           onPaymentUpdated={() => {}}
         />
       )}

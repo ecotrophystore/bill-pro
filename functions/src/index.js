@@ -369,6 +369,87 @@ export const createInvoice = onCall(async (request) => {
         return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
     });
 });
+export const createProformaInvoice = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const uid = request.auth.uid;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
+        throw new HttpsError("permission-denied", "Only Accounts can create proforma invoices");
+    }
+    const { invoiceData: rawData } = request.data;
+    if (!rawData || !rawData.customer_id || !rawData.items) {
+        throw new HttpsError("invalid-argument", "Missing required proforma fields");
+    }
+    return await db.runTransaction(async (transaction) => {
+        let subtotal = 0;
+        let totalTax = 0;
+        const validatedItems = rawData.items.map((item) => {
+            const lineTotalRaw = item.quantity * item.rate;
+            const taxAmountRaw = (lineTotalRaw * item.tax_percentage) / 100;
+            const lineTotal = exactRound(lineTotalRaw);
+            const taxAmount = exactRound(taxAmountRaw);
+            subtotal += lineTotal;
+            totalTax += taxAmount;
+            return {
+                ...item,
+                line_total: lineTotal,
+                tax_amount: taxAmount
+            };
+        });
+        const grandTotalExact = subtotal + totalTax;
+        const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
+        const finalGrandTotal = Math.round(grandTotalExact);
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3)
+            fyYear -= 1;
+        const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        const proformaNumber = `PI/${fyYear}/${paddedSeq}`;
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        const proformaRef = db.collection("proforma_invoices").doc();
+        const proformaData = {
+            ...rawData,
+            number: proformaNumber,
+            is_locked: false, // Proforma invoices can be unlocked/edited
+            status: "draft",
+            payment_status: "unpaid",
+            items: validatedItems,
+            subtotal: exactRound(subtotal),
+            tax_total: exactRound(totalTax),
+            cgst: rawData.is_igst ? 0 : exactRound(totalTax / 2),
+            sgst_igst: rawData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+            round_off: roundOff,
+            grand_total: finalGrandTotal,
+            advance_amount: rawData.advance_amount || 0,
+            balance_amount: rawData.balance_amount || finalGrandTotal,
+            payment_history: [],
+            created_by: uid,
+            created_at: FieldValue.serverTimestamp(),
+            audit_trail: [{
+                    action: "direct_creation",
+                    user: uid,
+                    timestamp: new Date().toISOString()
+                }]
+        };
+        transaction.set(proformaRef, proformaData);
+        const auditLogRef = db.collection("audit_logs").doc();
+        transaction.set(auditLogRef, {
+            document_type: "proforma_invoice",
+            document_id: proformaRef.id,
+            action: "create",
+            user_id: uid,
+            timestamp: FieldValue.serverTimestamp(),
+            notes: "Directly created proforma invoice"
+        });
+        await syncToLibrary(uid, validatedItems, rawData.customer_id, rawData.customer_name);
+        return { success: true, invoiceId: proformaRef.id, invoiceNumber: proformaNumber };
+    });
+});
 /**
  * NEW: Cash Memo Module (Choice 1a, 2b)
  * Handles non-GST billing with a separate sequence (MEMO/...).
@@ -573,49 +654,12 @@ async function listInvoices(args) {
     const snapshot = await query.limit(5).get();
     return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 }
-async function getQuotationDetails(args) {
-    const id = args.quotation_id;
-    // 1. Direct ID get
-    const doc = await db.collection("quotations").doc(id).get();
-    if (doc.exists) {
-        return { id: doc.id, ...doc.data() };
-    }
-    // 2. Exact match on quotation number (e.g. QTN/2026/0005)
-    const exactQuery = db.collection("quotations").where("number", "==", id);
-    const exactSnap = await exactQuery.get();
-    if (!exactSnap.empty && exactSnap.docs[0]) {
-        return { id: exactSnap.docs[0].id, ...exactSnap.docs[0].data() };
-    }
-    // 3. Fallback matching numbers like "5" or "0005"
-    const numericMatch = id.match(/\d+/);
-    if (numericMatch) {
-        const seqNumber = parseInt(numericMatch[0], 10);
-        const paddedSeq = seqNumber.toString().padStart(4, "0");
-        const allSnap = await db.collection("quotations").get();
-        const matched = allSnap.docs.find(d => {
-            const num = d.data().number || "";
-            return num.endsWith(`/${paddedSeq}`) || num.endsWith(`/${seqNumber}`) || num === id;
-        });
-        if (matched) {
-            return { id: matched.id, ...matched.data() };
-        }
-    }
-    return { error: `Quotation not found for ID or number: ${id}` };
-}
 /**
- * AI Tool: List Quotations
+ * AI Tool: Get Quotation Details
  */
-async function listQuotations(args) {
-    let query = db.collection("quotations");
-    if (args.status)
-        query = query.where("status", "==", args.status);
-    const snapshot = await query.limit(20).get();
-    let results = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    if (args.customer_name) {
-        const lowerCust = args.customer_name.toLowerCase();
-        results = results.filter((q) => (q.customer_name || "").toLowerCase().includes(lowerCust));
-    }
-    return results;
+async function getQuotationDetails(args) {
+    const doc = await db.collection("quotations").doc(args.quotation_id).get();
+    return doc.exists ? { id: doc.id, ...doc.data() } : { error: "Not found" };
 }
 /**
  * AI Tool: Check GST Compliance
@@ -627,229 +671,6 @@ async function checkGSTCompliance(args) {
         is_compliant: isValid,
         message: isValid ? "Valid HSN format" : "Invalid HSN. Must be numeric and at least 4 digits"
     };
-}
-async function createCustomer(args) {
-    const ref = db.collection("customers").doc();
-    const customer = {
-        name: args.name,
-        gst_number: args.gst_number || "",
-        billing_address: args.billing_address || "",
-        type: args.type || "individual",
-        created_at: FieldValue.serverTimestamp()
-    };
-    await ref.set(customer);
-    return { success: true, customerId: ref.id, name: args.name };
-}
-async function createPurchaseOrder(args) {
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3)
-        fyYear -= 1;
-    const sequenceRef = db.collection("system").doc(`po_sequence_${fyYear}`);
-    const seqDoc = await sequenceRef.get();
-    let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-    currentSeq += 1;
-    await sequenceRef.set({ last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const poNumber = `PO/${fyYear}/${paddedSeq}`;
-    let grandTotal = 0;
-    const items = args.items.map(item => {
-        const total = (item.quantity || 1) * (item.unitPrice || 0);
-        grandTotal += total;
-        return {
-            itemName: item.itemName,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            total
-        };
-    });
-    const ref = db.collection("purchase_orders").doc();
-    const po = {
-        number: poNumber,
-        status: 'ordered',
-        vendor: {
-            name: args.vendor_name,
-            address: "",
-            gst_number: "",
-            phone: ""
-        },
-        items,
-        grandTotal,
-        purchasingOfficer: args.purchasing_officer || "AI Assistant",
-        paymentMethod: args.payment_method || "cash",
-        createdAt: FieldValue.serverTimestamp()
-    };
-    await ref.set(po);
-    const auditLogRef = db.collection("audit_logs").doc();
-    await auditLogRef.set({
-        document_type: "purchase_order",
-        document_id: ref.id,
-        action: "create",
-        user_id: "AI_Agent",
-        timestamp: FieldValue.serverTimestamp(),
-        notes: `Created Purchase Order ${poNumber} via AI Assistant`
-    });
-    return { success: true, poId: ref.id, poNumber, grandTotal };
-}
-async function createPurchaseBill(args) {
-    const ref = db.collection("purchases").doc();
-    const purchase = {
-        vendor: {
-            name: args.vendor_name,
-            address: "",
-            gst_number: "",
-            phone: ""
-        },
-        amount: Number(args.amount) || 0,
-        grandTotal: Number(args.amount) || 0,
-        reference: `V-${Math.floor(Math.random() * 10000)}`,
-        category: args.category || 'General',
-        status: args.status || 'pending',
-        date: new Date(),
-        created_at: FieldValue.serverTimestamp()
-    };
-    await ref.set(purchase);
-    const auditLogRef = db.collection("audit_logs").doc();
-    await auditLogRef.set({
-        document_type: "purchase",
-        document_id: ref.id,
-        action: "create",
-        user_id: "AI_Agent",
-        timestamp: FieldValue.serverTimestamp(),
-        notes: `Created Purchase Bill via AI Assistant`
-    });
-    return { success: true, purchaseId: ref.id, amount: args.amount };
-}
-async function createQuotationAI(args) {
-    const customerSnap = await db.collection("customers").where("name", "==", args.customer_name).limit(1).get();
-    let customerId = "walk_in";
-    if (customerSnap.docs.length > 0 && customerSnap.docs[0]) {
-        customerId = customerSnap.docs[0].id;
-    }
-    else {
-        const newCust = db.collection("customers").doc();
-        await newCust.set({ name: args.customer_name, type: "individual", created_at: FieldValue.serverTimestamp() });
-        customerId = newCust.id;
-    }
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3)
-        fyYear -= 1;
-    const sequenceRef = db.collection("system").doc(`quotation_sequence_${fyYear}`);
-    const seqDoc = await sequenceRef.get();
-    let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-    currentSeq += 1;
-    await sequenceRef.set({ last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const quotationNumber = `QTN/${fyYear}/${paddedSeq}`;
-    let subtotal = 0;
-    let totalTax = 0;
-    const items = args.items.map(item => {
-        const lineTotal = (item.quantity || 1) * (item.rate || 0);
-        const taxPercentage = item.tax_percentage || 18;
-        const taxAmount = (lineTotal * taxPercentage) / 100;
-        subtotal += lineTotal;
-        totalTax += taxAmount;
-        return {
-            description: item.description,
-            quantity: item.quantity,
-            rate: item.rate,
-            tax_percentage: taxPercentage,
-            tax_amount: Math.round(taxAmount * 100) / 100,
-            line_total: Math.round(lineTotal * 100) / 100
-        };
-    });
-    const ref = db.collection("quotations").doc();
-    const quotation = {
-        number: quotationNumber,
-        customer_id: customerId,
-        customer_name: args.customer_name,
-        status: 'draft',
-        items,
-        subtotal: Math.round(subtotal * 100) / 100,
-        tax_total: Math.round(totalTax * 100) / 100,
-        grand_total: Math.round(subtotal + totalTax),
-        created_by: "AI_Agent",
-        created_at: FieldValue.serverTimestamp()
-    };
-    await ref.set(quotation);
-    return { success: true, quotationId: ref.id, quotationNumber, grand_total: quotation.grand_total };
-}
-async function createInvoiceAI(args) {
-    const customerSnap = await db.collection("customers").where("name", "==", args.customer_name).limit(1).get();
-    let customerId = "walk_in";
-    if (customerSnap.docs.length > 0 && customerSnap.docs[0]) {
-        customerId = customerSnap.docs[0].id;
-    }
-    else {
-        const newCust = db.collection("customers").doc();
-        await newCust.set({ name: args.customer_name, type: "individual", created_at: FieldValue.serverTimestamp() });
-        customerId = newCust.id;
-    }
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3)
-        fyYear -= 1;
-    const seqName = args.is_gst ? `invoice_sequence_${fyYear}` : `memo_sequence_${fyYear}`;
-    const sequenceRef = db.collection("system").doc(seqName);
-    const seqDoc = await sequenceRef.get();
-    let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-    currentSeq += 1;
-    await sequenceRef.set({ last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const number = args.is_gst ? `ECO/${fyYear}/${paddedSeq}` : `MEMO/${fyYear}/${paddedSeq}`;
-    let subtotal = 0;
-    let totalTax = 0;
-    const items = args.items.map(item => {
-        const lineTotal = (item.quantity || 1) * (item.rate || 0);
-        const taxPercentage = args.is_gst ? (item.tax_percentage || 18) : 0;
-        const taxAmount = args.is_gst ? ((lineTotal * taxPercentage) / 100) : 0;
-        subtotal += lineTotal;
-        totalTax += taxAmount;
-        return {
-            description: item.description,
-            quantity: item.quantity,
-            rate: item.rate,
-            tax_percentage: taxPercentage,
-            tax_amount: Math.round(taxAmount * 100) / 100,
-            line_total: Math.round(lineTotal * 100) / 100
-        };
-    });
-    const grandTotalExact = subtotal + totalTax;
-    const roundOff = Math.round(grandTotalExact) - grandTotalExact;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const ref = db.collection(args.is_gst ? "invoices" : "cash_memos").doc();
-    const invoiceData = {
-        number,
-        customer_id: customerId,
-        customer_name: args.customer_name,
-        is_gst: args.is_gst,
-        is_locked: true,
-        status: "finalized",
-        payment_status: args.is_gst ? "unpaid" : "paid",
-        items,
-        subtotal: Math.round(subtotal * 100) / 100,
-        tax_total: Math.round(totalTax * 100) / 100,
-        cgst: args.is_gst ? Math.round((totalTax / 2) * 100) / 100 : 0,
-        sgst_igst: args.is_gst ? Math.round((totalTax / 2) * 100) / 100 : 0,
-        round_off: Math.round(roundOff * 100) / 100,
-        grand_total: finalGrandTotal,
-        balance_amount: args.is_gst ? finalGrandTotal : 0,
-        payment_history: [],
-        created_by: "AI_Agent",
-        created_at: FieldValue.serverTimestamp()
-    };
-    await ref.set(invoiceData);
-    const auditLogRef = db.collection("audit_logs").doc();
-    await auditLogRef.set({
-        document_type: args.is_gst ? "invoice" : "cash_memo",
-        document_id: ref.id,
-        action: "create",
-        user_id: "AI_Agent",
-        timestamp: FieldValue.serverTimestamp(),
-        notes: `Created ${args.is_gst ? 'Invoice' : 'Cash Memo'} ${number} via AI Assistant`
-    });
-    return { success: true, docId: ref.id, number, grand_total: finalGrandTotal };
 }
 /**
  * 15. AI Auditor Layer (gemini-3.5-flash)
@@ -875,23 +696,12 @@ export const aiAuditor = onCall(async (request) => {
                     }
                 },
                 {
-                    name: "list_quotations",
-                    description: "List recent quotations, optionally filtered by status or customer name.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            status: { type: Type.STRING, description: "Filter by status ('draft', 'converted', 'cancelled')" },
-                            customer_name: { type: Type.STRING, description: "Filter by customer name" }
-                        }
-                    }
-                },
-                {
                     name: "get_quotation_details",
-                    description: "Get full details of a specific quotation by its ID or quotation number (e.g. '5' or 'QTN/2026/0005').",
+                    description: "Get full details of a specific quotation by its ID.",
                     parameters: {
                         type: Type.OBJECT,
                         properties: {
-                            quotation_id: { type: Type.STRING, description: "The unique ID or number of the quotation" }
+                            quotation_id: { type: Type.STRING, description: "The unique ID of the quotation" }
                         },
                         required: ["quotation_id"]
                     }
@@ -906,108 +716,6 @@ export const aiAuditor = onCall(async (request) => {
                         },
                         required: ["hsn_code"]
                     }
-                },
-                {
-                    name: "create_customer",
-                    description: "Create a new customer in the customer base library.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            name: { type: Type.STRING, description: "The customer's name" },
-                            gst_number: { type: Type.STRING, description: "Optional GST number of the customer" },
-                            billing_address: { type: Type.STRING, description: "Optional billing address" },
-                            type: { type: Type.STRING, description: "Customer type ('business' or 'individual')", enum: ["business", "individual"] }
-                        },
-                        required: ["name"]
-                    }
-                },
-                {
-                    name: "create_purchase_order",
-                    description: "Create a new Purchase Order for maintenance or buying products.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            vendor_name: { type: Type.STRING, description: "Name of the vendor" },
-                            purchasing_officer: { type: Type.STRING, description: "Who is making the purchase order (employee name)" },
-                            payment_method: { type: Type.STRING, description: "Payment mode ('cash', 'check', 'account')", enum: ["cash", "check", "account"] },
-                            items: {
-                                type: Type.ARRAY,
-                                description: "List of items to purchase",
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        itemName: { type: Type.STRING, description: "Item description" },
-                                        quantity: { type: Type.INTEGER, description: "Quantity" },
-                                        unitPrice: { type: Type.NUMBER, description: "Unit price" }
-                                    },
-                                    required: ["itemName", "quantity", "unitPrice"]
-                                }
-                            }
-                        },
-                        required: ["vendor_name", "items"]
-                    }
-                },
-                {
-                    name: "create_purchase_bill",
-                    description: "Create a direct purchase bill/record without PO.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            vendor_name: { type: Type.STRING, description: "Vendor name" },
-                            amount: { type: Type.NUMBER, description: "Total bill amount" },
-                            category: { type: Type.STRING, description: "Category of purchase (e.g. Expenses, Maintenance, Food, Asset)", enum: ["Asset", "Subscription", "Production", "Maintenance", "Expenses"] }
-                        },
-                        required: ["vendor_name", "amount"]
-                    }
-                },
-                {
-                    name: "create_quotation",
-                    description: "Create a quotation draft.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            customer_name: { type: Type.STRING, description: "Customer name" },
-                            items: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        description: { type: Type.STRING, description: "Item description" },
-                                        quantity: { type: Type.INTEGER, description: "Quantity" },
-                                        rate: { type: Type.NUMBER, description: "Rate / Unit price" },
-                                        tax_percentage: { type: Type.INTEGER, description: "Tax % (default 18)" }
-                                    },
-                                    required: ["description", "quantity", "rate"]
-                                }
-                            }
-                        },
-                        required: ["customer_name", "items"]
-                    }
-                },
-                {
-                    name: "create_invoice",
-                    description: "Create a tax invoice or cash memo.",
-                    parameters: {
-                        type: Type.OBJECT,
-                        properties: {
-                            customer_name: { type: Type.STRING, description: "Customer name" },
-                            is_gst: { type: Type.BOOLEAN, description: "True for GST Tax Invoice, False for Cash Memo" },
-                            items: {
-                                type: Type.ARRAY,
-                                items: {
-                                    type: Type.OBJECT,
-                                    properties: {
-                                        description: { type: Type.STRING, description: "Item description" },
-                                        quantity: { type: Type.INTEGER, description: "Quantity" },
-                                        rate: { type: Type.NUMBER, description: "Rate / Unit price" },
-                                        tax_percentage: { type: Type.INTEGER, description: "Tax % (default 18)" }
-                                    },
-                                    required: ["description", "quantity", "rate"]
-                                }
-                            }
-                        },
-                        required: ["customer_name", "items", "is_gst"]
-                    }
                 }
             ]
         }];
@@ -1016,18 +724,9 @@ export const aiAuditor = onCall(async (request) => {
         model: "gemini-3.5-flash",
         config: {
             tools,
-            systemInstruction: `You are the EcoBill AI Assistant, an interactive voice and text agent.
-            Your tone is professional yet helpful and conversational. You can manage, search, and CREATE records.
-            You can:
-            - Create customers using 'create_customer'.
-            - Create purchase orders using 'create_purchase_order'.
-            - Create purchase bills using 'create_purchase_bill'.
-            - Create quotations using 'create_quotation'.
-            - Create tax invoices or cash memos using 'create_invoice'.
-            - List quotations using 'list_quotations'.
-            - Get details of a quotation using 'get_quotation_details' (supports doc IDs or visible numbers like QTN/2026/0005 or 5).
-            - List invoices using 'list_invoices'.
-            Explain what you did and confirm to the user.`
+            systemInstruction: `You are the EcoBill AI Auditor, an expert financial assistant at Ecotrophy Innovations. 
+            Your tone is professional yet conversational and helpful. You analyze invoices, quotations, and compliance.
+            Always stay within your toolset. If an action like "Converting a Quotation" is suggested, inform the user they must click the 'Convert' button in the UI for safety (Rule #13).`
         }
     });
     const result = await chat.sendMessage({ message });
@@ -1041,22 +740,10 @@ export const aiAuditor = onCall(async (request) => {
             let toolResult;
             if (call.name === "list_invoices")
                 toolResult = await listInvoices(call.args);
-            if (call.name === "list_quotations")
-                toolResult = await listQuotations(call.args);
             if (call.name === "get_quotation_details")
                 toolResult = await getQuotationDetails(call.args);
             if (call.name === "check_gst_compliance")
                 toolResult = await checkGSTCompliance(call.args);
-            if (call.name === "create_customer")
-                toolResult = await createCustomer(call.args);
-            if (call.name === "create_purchase_order")
-                toolResult = await createPurchaseOrder(call.args);
-            if (call.name === "create_purchase_bill")
-                toolResult = await createPurchaseBill(call.args);
-            if (call.name === "create_quotation")
-                toolResult = await createQuotationAI(call.args);
-            if (call.name === "create_invoice")
-                toolResult = await createInvoiceAI(call.args);
             toolResponses.push({
                 functionResponse: {
                     name: call.name,

@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
-import type { PaymentRecord, Invoice, CashMemo } from '../../types';
+import type { PaymentRecord, Invoice, CashMemo, ProformaInvoice } from '../../types';
 
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  document: Invoice | CashMemo;
-  documentType: 'invoice' | 'cash_memo';
+  document: Invoice | CashMemo | ProformaInvoice;
+  documentType: 'invoice' | 'cash_memo' | 'proforma_invoice';
   onPaymentUpdated: () => void;
 }
 
@@ -78,7 +78,8 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
       const newBalance = (document.balance_amount || 0) - amount;
       const newStatus = newBalance <= 0 ? 'paid' : 'partial';
 
-      const docRef = doc(db!, documentType === 'invoice' ? 'invoices' : 'cash_memos', document.id);
+      const collectionName = documentType === 'invoice' ? 'invoices' : (documentType === 'proforma_invoice' ? 'proforma_invoices' : 'cash_memos');
+      const docRef = doc(db!, collectionName, document.id);
       batch.update(docRef, {
         balance_amount: newBalance,
         payment_status: newStatus
