@@ -94,7 +94,16 @@ export default function Dashboard() {
       if (startDate || endDate) {
         invs = invs.filter(inv => {
           if (!inv.created_at) return false;
-          const invDate = inv.created_at.toDate();
+          
+          let invDate: Date;
+          if (typeof (inv.created_at as any).toDate === 'function') {
+            invDate = (inv.created_at as any).toDate();
+          } else if ((inv.created_at as any).seconds) {
+            invDate = new Date((inv.created_at as any).seconds * 1000);
+          } else {
+            invDate = new Date(inv.created_at as unknown as string);
+          }
+
           if (startDate && invDate < startDate) return false;
           if (endDate && invDate > endDate) return false;
           return true;
@@ -104,11 +113,18 @@ export default function Dashboard() {
       const revenue = invs.filter(i => i.payment_status === 'paid').reduce((sum, i) => sum + i.grand_total, 0);
       const pending = invs.filter(i => i.payment_status === 'unpaid' || i.payment_status === 'partial').reduce((sum, i) => sum + (i.balance_amount || i.grand_total), 0);
       
+      const getMillis = (dateObj: any) => {
+        if (!dateObj) return 0;
+        if (typeof dateObj.toMillis === 'function') return dateObj.toMillis();
+        if (dateObj.seconds) return dateObj.seconds * 1000;
+        return new Date(dateObj).getTime() || 0;
+      };
+
       setMetrics(prev => ({
         ...prev,
         totalRevenue: revenue,
         pendingInvoices: pending,
-        recentInvoices: [...invs].sort((a, b) => (b.created_at?.toMillis() || 0) - (a.created_at?.toMillis() || 0)).slice(0, 5)
+        recentInvoices: [...invs].sort((a, b) => getMillis(b.created_at) - getMillis(a.created_at)).slice(0, 5)
       }));
       setLoading(false);
     }, (error) => {
@@ -326,8 +342,10 @@ export default function Dashboard() {
             <AlertCircle size={18} className="text-error opacity-50" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-2xl font-black text-error tracking-tight">{metrics.pendingQuotes}</span>
-            <span className="neo-badge-error text-[10px] py-0.5 shadow-none ring-1 ring-error/20">Critical</span>
+            <span className={`text-2xl font-black tracking-tight ${metrics.pendingQuotes > 0 ? 'text-error' : 'text-success'}`}>{metrics.pendingQuotes}</span>
+            {metrics.pendingQuotes > 0 && (
+              <span className="neo-badge-error text-[10px] py-0.5 shadow-none ring-1 ring-error/20">Action Needed</span>
+            )}
           </div>
         </div>
 
@@ -337,12 +355,12 @@ export default function Dashboard() {
             <FileText size={18} className="text-primary-dark opacity-30" />
           </div>
           <div className="flex gap-2">
-            <div className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
-              <IndianRupee size={14} className="text-primary-dark" />
-            </div>
-            <div className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
+            <button onClick={() => navigate('/invoices/new')} title="Create Invoice" className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
               <Plus size={14} className="text-primary-dark" />
-            </div>
+            </button>
+            <button onClick={() => navigate('/cash-memos/new')} title="Create Cash Memo" className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
+              <IndianRupee size={14} className="text-primary-dark" />
+            </button>
           </div>
         </div>
       </div>
@@ -361,12 +379,20 @@ export default function Dashboard() {
               <div key={inv.id} className="flex justify-between items-center p-4 neo-input hover:shadow-neo-pressed transition-shadow cursor-default border border-transparent">
                 <div>
                   <p className="font-bold text-primary-dark">{inv.number}</p>
-                  <p className="text-sm text-secondary font-medium">Auto-synced from Firestore</p>
+                  <p className="text-sm text-secondary font-medium">
+                    {inv.customer_name || 'Walk-in Customer'} • {
+                      inv.created_at ? (
+                        typeof (inv.created_at as any).toDate === 'function' 
+                          ? (inv.created_at as any).toDate().toLocaleDateString()
+                          : new Date((inv.created_at as any).seconds ? (inv.created_at as any).seconds * 1000 : inv.created_at as unknown as string).toLocaleDateString()
+                      ) : 'Unknown Date'
+                    }
+                  </p>
                 </div>
                 <div className="text-right">
                   <p className="font-black text-primary-dark">₹ {inv.grand_total.toLocaleString()}</p>
                   <span className={`text-[10px] font-black uppercase tracking-widest ${
-                    inv.payment_status === 'paid' ? 'text-success' : 'text-warning'
+                    inv.payment_status === 'paid' ? 'text-success' : inv.payment_status === 'partial' ? 'text-warning' : 'text-error'
                   }`}>{inv.payment_status}</span>
                 </div>
               </div>

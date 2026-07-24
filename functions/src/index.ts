@@ -5,20 +5,18 @@ import { getFirestore, FieldValue, Query } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { GoogleGenAI, Type } from "@google/genai";
 
+
 initializeApp();
 const db = getFirestore();
 
-import { defineSecret } from "firebase-functions/params";
-
-const googleGenAIKey = defineSecret("GOOGLE_GENAI_API_KEY");
 
 function getAI() {
-  return new GoogleGenAI({ apiKey: googleGenAIKey.value() });
+  const apiKey = process.env.GOOGLE_GENAI_API_KEY || '';
+  return new GoogleGenAI({ apiKey });
 }
 
 setGlobalOptions({ 
-    region: "asia-south1",
-    secrets: [googleGenAIKey]
+    region: "asia-south1"
 });
 
 // Math utility to round exactly to nearest paise (2 decimals)
@@ -62,7 +60,7 @@ async function syncToLibrary(uid: string, items: any[], customerId?: string, cus
         
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: prompt,
         });
         const aiText = aiResult.text || "";
@@ -145,19 +143,22 @@ export const convertQuotationToInvoice = onCall(async (request) => {
       const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
       const finalGrandTotal = Math.round(grandTotalExact);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
+      let invoiceNumber: string | undefined;
+      if (!invoiceNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
 
-      const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
+        const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
 
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       const invoiceRef = db.collection("invoices").doc();
       const advanceAmount = qData.advance_amount || 0;
@@ -323,6 +324,205 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
     });
   });
 
+export const convertQuotationToProforma = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
+    
+    const uid = request.auth.uid;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
+       throw new HttpsError("permission-denied", "Only Accounts can convert quotes");
+    }
+
+    const { quotationId } = request.data;
+    if (!quotationId) throw new HttpsError("invalid-argument", "Missing quotationId");
+
+    const quotationRef = db.collection("quotations").doc(quotationId);
+
+    return await db.runTransaction(async (transaction) => {
+      const qDoc = await transaction.get(quotationRef);
+      if (!qDoc.exists) throw new HttpsError("not-found", "Quotation not found");
+      const qData = qDoc.data();
+      if (!qData) throw new HttpsError("internal", "No data");
+
+      if (qData.conversion_status === "converted") {
+        throw new HttpsError("already-exists", "This quotation was already converted");
+      }
+
+      let subtotal = 0;
+      let totalTax = 0;
+      
+      const validatedItems = qData.items.map((item: any) => {
+        const lineTotalRaw = item.quantity * item.rate;
+        const taxAmountRaw = (lineTotalRaw * item.tax_percentage) / 100;
+        
+        const lineTotal = exactRound(lineTotalRaw);
+        const taxAmount = exactRound(taxAmountRaw);
+        
+        subtotal += lineTotal;
+        totalTax += taxAmount;
+        
+        return {
+          ...item,
+          line_total: lineTotal,
+          tax_amount: taxAmount
+        };
+      });
+
+      const grandTotalExact = subtotal + totalTax;
+      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
+      const finalGrandTotal = Math.round(grandTotalExact);
+
+      let proformaNumber: string | undefined;
+      if (!proformaNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
+
+        const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        proformaNumber = `PI/${fyYear}/${paddedSeq}`;
+
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
+
+      const advanceAmount = qData.advance_amount || 0;
+      const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
+      const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
+
+      const proformaRef = db.collection("proforma_invoices").doc();
+      const proformaData = {
+        ...qData,
+        number: proformaNumber,
+        is_locked: false,
+        status: "draft",
+        payment_status: initialPaymentStatus,
+        items: validatedItems,
+        subtotal: exactRound(subtotal),
+        tax_total: exactRound(totalTax),
+        cgst: qData.is_igst ? 0 : exactRound(totalTax / 2),
+        sgst_igst: qData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+        round_off: roundOff,
+        grand_total: finalGrandTotal,
+        advance_amount: advanceAmount,
+        balance_amount: balanceAmount,
+        payment_history: [],
+        linked_quotation_id: quotationId,
+        created_by: uid,
+        created_at: FieldValue.serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_quotation",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(proformaRef, proformaData);
+
+      transaction.update(quotationRef, {
+        conversion_status: "converted",
+        linked_proforma_id: proformaRef.id,
+        status: "converted"
+      });
+      
+      const auditLogRef = db.collection("audit_logs").doc();
+      transaction.set(auditLogRef, {
+        document_type: "proforma_invoice",
+        document_id: proformaRef.id,
+        action: "create",
+        user_id: uid,
+        timestamp: FieldValue.serverTimestamp(),
+        notes: `Converted from Quotation ${quotationId}`
+      });
+
+      return { success: true, proformaId: proformaRef.id, proformaNumber };
+    });
+  });
+
+export const convertProformaToInvoice = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
+    
+    const uid = request.auth.uid;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
+       throw new HttpsError("permission-denied", "Only Accounts can convert invoices");
+    }
+
+    const { proformaId } = request.data;
+    if (!proformaId) throw new HttpsError("invalid-argument", "Missing proformaId");
+
+    const proformaRef = db.collection("proforma_invoices").doc(proformaId);
+
+    return await db.runTransaction(async (transaction) => {
+      const pDoc = await transaction.get(proformaRef);
+      if (!pDoc.exists) throw new HttpsError("not-found", "Proforma Invoice not found");
+      const pData = pDoc.data();
+      if (!pData) throw new HttpsError("internal", "No data");
+
+      if (pData.conversion_status === "converted") {
+        throw new HttpsError("already-exists", "This Proforma Invoice was already converted");
+      }
+
+      let invoiceNumber: string | undefined;
+      if (!invoiceNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
+
+        const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
+
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
+
+      const invoiceRef = db.collection("invoices").doc();
+      const invoiceData = {
+        ...pData,
+        number: invoiceNumber,
+        is_locked: true,
+        status: "finalized",
+        payment_status: "paid", // auto converted when fully paid
+        balance_amount: 0,
+        linked_proforma_id: proformaId,
+        created_by: uid,
+        created_at: FieldValue.serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_proforma",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(invoiceRef, invoiceData);
+
+      transaction.update(proformaRef, {
+        conversion_status: "converted",
+        linked_invoice_id: invoiceRef.id,
+        status: "converted"
+      });
+      
+      const auditLogRef = db.collection("audit_logs").doc();
+      transaction.set(auditLogRef, {
+        document_type: "invoice",
+        document_id: invoiceRef.id,
+        action: "create",
+        user_id: uid,
+        timestamp: FieldValue.serverTimestamp(),
+        notes: `Converted from Proforma Invoice ${proformaId}`
+      });
+
+      return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
+    });
+  });
+
 /**
  * 1. Invoice Numbering & 2. Immutability
  * Creates a direct invoice with atomicity.
@@ -366,19 +566,22 @@ export const createInvoice = onCall(async (request) => {
       const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
       const finalGrandTotal = Math.round(grandTotalExact);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
+      let invoiceNumber = rawData.number;
+      if (!invoiceNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
 
-      const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
+        const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
 
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       const invoiceRef = db.collection("invoices").doc();
       const invoiceData = {
@@ -465,19 +668,22 @@ export const createProformaInvoice = onCall(async (request) => {
       const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
       const finalGrandTotal = Math.round(grandTotalExact);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
+      let proformaNumber = rawData.number;
+      if (!proformaNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
 
-      const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const proformaNumber = `PI/${fyYear}/${paddedSeq}`;
+        const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        proformaNumber = `PI/${fyYear}/${paddedSeq}`;
 
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       const proformaRef = db.collection("proforma_invoices").doc();
       const proformaData = {
@@ -561,19 +767,22 @@ export const createCashMemo = onCall(async (request) => {
       const finalGrandTotal = Math.round(subtotal);
       const roundOff = exactRound(finalGrandTotal - subtotal);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
+      let memoNumber = rawData.number;
+      if (!memoNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
 
-      const sequenceRef = db.collection("system").doc(`memo_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const memoNumber = `MEMO/${fyYear}/${paddedSeq}`;
+        const sequenceRef = db.collection("system").doc(`memo_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        memoNumber = `MEMO/${fyYear}/${paddedSeq}`;
 
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       const memoRef = db.collection("cash_memos").doc();
       const memoData = {
@@ -582,7 +791,8 @@ export const createCashMemo = onCall(async (request) => {
         is_gst: false,
         is_locked: true,
         status: "finalized",
-        payment_status: "paid", // Cash memos are assumed paid immediately
+        payment_status: rawData.payment_status || "unpaid",
+        payment_date: rawData.payment_status === "paid" ? (rawData.advance_payment_date || new Date().toISOString().split('T')[0]) : null,
         items: validatedItems,
         subtotal: exactRound(subtotal),
         tax_total: 0,
@@ -651,19 +861,22 @@ export const createQuotation = onCall(async (request) => {
       const grandTotalExact = subtotal + totalTax;
       const finalGrandTotal = Math.round(grandTotalExact);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
+      let quotationNumber = rawData.number;
+      if (!quotationNumber) {
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
 
-      const sequenceRef = db.collection("system").doc(`quotation_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const quotationNumber = `QTN/${fyYear}/${paddedSeq}`;
+        const sequenceRef = db.collection("system").doc(`quotation_sequence_${fyYear}`);
+        const seqDoc = await transaction.get(sequenceRef);
+        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
+        
+        currentSeq += 1;
+        const paddedSeq = currentSeq.toString().padStart(4, "0");
+        quotationNumber = `QTN/${fyYear}/${paddedSeq}`;
 
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      }
 
       const quotationRef = db.collection("quotations").doc();
       const quotationData = {
@@ -782,7 +995,7 @@ async function checkGSTCompliance(args: { hsn_code: string }) {
 }
 
 /**
- * 15. AI Auditor Layer (gemini-3.5-flash)
+ * 15. AI Auditor Layer (gemini-2.5-flash)
  */
 export const aiAuditor = onCall(async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
@@ -831,7 +1044,7 @@ export const aiAuditor = onCall(async (request) => {
 
     const ai = getAI();
     const chat = ai.chats.create({ 
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         config: {
             tools,
             systemInstruction: `You are the EcoBill AI Auditor, an expert financial assistant at Ecotrophy Innovations. 
@@ -936,7 +1149,7 @@ export const parseVoiceCommand = onCall(async (request) => {
         console.log("[API] parseVoiceCommand Request with input:", audio ? "Audio Base64 Input" : transcript);
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: contents,
         });
         const aiText = aiResult.text || "";
@@ -1009,7 +1222,7 @@ export const parsePurchaseVoice = onCall(async (request) => {
         console.log("[API] parsePurchaseVoice Request with input:", audio ? "Audio Base64 Input" : transcript);
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: contents,
         });
         const aiText = aiResult.text || "";
@@ -1076,7 +1289,7 @@ export const analyzePendingTransactions = onCall(async (request) => {
         try {
             const ai = getAI();
             const aiResult = await ai.models.generateContent({
-                model: "gemini-3.5-flash",
+                model: "gemini-2.5-flash",
                 contents: prompt,
             });
             const aiText = aiResult.text || "";
@@ -1142,7 +1355,7 @@ export const parsePDFStatement = onCall(async (request) => {
 
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: requestPayload.contents,
         });
         const aiText = aiResult.text || "[]";
@@ -1232,7 +1445,7 @@ Classification Rules:
 
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-3.5-flash",
+            model: "gemini-2.5-flash",
             contents: requestPayload.contents,
             config: {
                 responseMimeType: "application/json"
@@ -1288,5 +1501,57 @@ Classification Rules:
             createdAt: FieldValue.serverTimestamp()
         });
         throw new HttpsError("internal", "Failed to extract invoice data: " + e.message);
+    }
+});
+
+
+export const extractExpenseReceipt = onCall(async (request) => {
+    if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
+    
+    const { base64Data, mimeType } = request.data;
+    if (!base64Data || !mimeType) {
+        throw new HttpsError("invalid-argument", "Missing required fields");
+    }
+
+    const prompt = `You are an expert OCR and data extraction system.
+Extract the key details from this expense receipt.
+Return the output as a JSON object matching this schema exactly:
+{
+  "date": "YYYY-MM-DD",
+  "description": "Short description of what was purchased",
+  "amount": 0.00,
+  "category": "General",
+  "notes": "Any extra details or vendor name"
+}
+Important: Ensure amount is a number.`;
+
+    try {
+        const requestPayload = {
+            contents: [{
+                role: 'user',
+                parts: [
+                    { inlineData: { data: base64Data, mimeType } },
+                    { text: prompt }
+                ]
+            }]
+        };
+
+        const ai = getAI();
+        const aiResult = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: requestPayload.contents,
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+        
+        const aiText = aiResult.text || "{}";
+        const cleanedText = aiText.replace(/\`\`\`json|\`\`\`/g, "").trim();
+        const extracted = JSON.parse(cleanedText);
+
+        return { data: extracted };
+    } catch (error) {
+        console.error('Gemini AI Extraction Error:', error);
+        throw new HttpsError('internal', 'Failed to extract data');
     }
 });

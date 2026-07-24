@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Camera, FileText, CheckCircle, AlertTriangle, Loader2, Edit3, Trash2, Plus } from 'lucide-react';
+import SpeechInput from '../components/Shared/SpeechInput';
 import { db, functions } from '../lib/firebase';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../contexts/AuthContext';
+import { extractDataFromDocument } from '../services/ai';
 import type { Purchase, PurchaseItem } from '../types';
 
 type Step = 'entry_method' | 'upload' | 'processing' | 'review' | 'confirmation';
@@ -142,17 +144,8 @@ export default function CreatePurchase() {
 
   const extractData = async (base64Data: string, mimeType: string, pId: string, fileName: string) => {
     try {
-      const extractInvoiceData = httpsCallable(functions, 'extractInvoiceData');
-      
-      const result = await extractInvoiceData({
-        base64Data,
-        mimeType,
-        userId: user?.uid,
-        purchaseId: pId,
-        fileName
-      });
+      const data = await extractDataFromDocument(base64Data, mimeType, 'purchase');
 
-      const data = (result.data as any).data;
       
       setProcessingStatus('Checking for duplicates...');
       
@@ -393,15 +386,15 @@ export default function CreatePurchase() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">Vendor Name</label>
-                    <input type="text" className="neo-input w-full" value={formData.vendor?.name || ''} onChange={(e) => handleFieldChange('vendor', 'name', e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" value={formData.vendor?.name || ''} onChange={(e) => handleFieldChange('vendor', 'name', e.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">GST Number</label>
-                    <input type="text" className="neo-input w-full" value={formData.vendor?.gst_number || ''} onChange={(e) => handleFieldChange('vendor', 'gst_number', e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" value={formData.vendor?.gst_number || ''} onChange={(e) => handleFieldChange('vendor', 'gst_number', e.target.value)} />
                   </div>
                   <div className="col-span-2">
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">Address</label>
-                    <input type="text" className="neo-input w-full" value={formData.vendor?.address || ''} onChange={(e) => handleFieldChange('vendor', 'address', e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" value={formData.vendor?.address || ''} onChange={(e) => handleFieldChange('vendor', 'address', e.target.value)} />
                   </div>
                 </div>
               </div>
@@ -419,7 +412,7 @@ export default function CreatePurchase() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">Invoice Number</label>
-                    <input type="text" className="neo-input w-full" value={formData.invoice?.invoice_number || ''} onChange={(e) => handleFieldChange('invoice', 'invoice_number', e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" value={formData.invoice?.invoice_number || ''} onChange={(e) => handleFieldChange('invoice', 'invoice_number', e.target.value)} />
                   </div>
                   <div>
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">Date</label>
@@ -437,7 +430,7 @@ export default function CreatePurchase() {
                   </div>
                   <div>
                     <label className="text-xs font-bold text-secondary uppercase mb-1 block">Payment Method</label>
-                    <input type="text" className="neo-input w-full" value={formData.invoice?.payment_method || ''} onChange={(e) => handleFieldChange('invoice', 'payment_method', e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" value={formData.invoice?.payment_method || ''} onChange={(e) => handleFieldChange('invoice', 'payment_method', e.target.value)} />
                   </div>
                 </div>
               </div>
@@ -465,13 +458,13 @@ export default function CreatePurchase() {
                       {formData.items?.map((item, idx) => (
                         <tr key={idx} className="border-b border-gray-100">
                           <td className="py-2 pr-2">
-                            <input type="text" className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.itemName} onChange={e => handleItemChange(idx, 'itemName', e.target.value)} />
+                            <SpeechInput type="text" className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.itemName} onChange={e => handleItemChange(idx, 'itemName', e.target.value)} />
                           </td>
                           <td className="py-2 pr-2">
-                            <input type="number" className="w-full text-center bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.quantity} onChange={e => handleItemChange(idx, 'quantity', Number(e.target.value))} />
+                            <SpeechInput type="number" className="w-full text-center bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.quantity} onChange={e => handleItemChange(idx, 'quantity', Number(e.target.value))} />
                           </td>
                           <td className="py-2 pr-2">
-                            <input type="number" className="w-full text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.unitPrice} onChange={e => handleItemChange(idx, 'unitPrice', Number(e.target.value))} />
+                            <SpeechInput type="number" className="w-full text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-primary outline-none" value={item.unitPrice} onChange={e => handleItemChange(idx, 'unitPrice', Number(e.target.value))} />
                           </td>
                           <td className="py-2 text-right font-bold">
                             ₹{(item.quantity * item.unitPrice).toLocaleString()}
@@ -488,11 +481,11 @@ export default function CreatePurchase() {
                 <div className="flex flex-col items-end pt-4 space-y-2 border-t">
                   <div className="flex justify-between w-48 text-sm">
                     <span className="text-secondary">Tax Amount:</span>
-                    <input type="number" className="w-24 text-right bg-transparent border-b border-transparent hover:border-gray-300 outline-none" value={formData.taxAmount} onChange={e => setFormData({...formData, taxAmount: Number(e.target.value)})} />
+                    <SpeechInput type="number" className="w-24 text-right bg-transparent border-b border-transparent hover:border-gray-300 outline-none" value={formData.taxAmount} onChange={e => setFormData({...formData, taxAmount: Number(e.target.value)})} />
                   </div>
                   <div className="flex justify-between w-48 font-bold text-lg text-primary-dark">
                     <span>Grand Total:</span>
-                    <input type="number" className="w-24 text-right bg-transparent border-b border-transparent hover:border-gray-300 outline-none" value={formData.grandTotal} onChange={e => setFormData({...formData, grandTotal: Number(e.target.value)})} />
+                    <SpeechInput type="number" className="w-24 text-right bg-transparent border-b border-transparent hover:border-gray-300 outline-none" value={formData.grandTotal} onChange={e => setFormData({...formData, grandTotal: Number(e.target.value)})} />
                   </div>
                 </div>
 

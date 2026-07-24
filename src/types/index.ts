@@ -82,6 +82,7 @@ export interface Quotation {
   validity_days?: number;
   conversion_status?: 'converted';
   linked_invoice_id?: string;
+  payment_method_to_show?: 'Bank Details' | 'UPI Details' | 'GPay Details' | 'All Payment Details' | 'None';
   created_by: string;
   created_at: Timestamp;
 }
@@ -106,6 +107,7 @@ export interface Invoice {
   balance_amount?: number;
   payment_history?: string[]; // IDs of PaymentRecords
   linked_quotation_id?: string;
+  payment_method_to_show?: 'Bank Details' | 'UPI Details' | 'GPay Details' | 'All Payment Details' | 'None';
   created_by: string;
   created_at: Timestamp;
   amount_in_words: string;
@@ -197,12 +199,45 @@ export interface Notification {
 }
 
 export interface Settings {
-  company_name: string;
-  gst_number: string;
+  // Company Details
+  companyName: string;
+  companyLogo?: string;
+  companyAddress: string;
+  companyCity: string;
+  companyState: string;
+  companyPincode: string;
+  companyGstin: string;
+  companyPhone: string;
+  companyEmail: string;
+  companyWebsite: string;
+
+  // Bank Details
+  bankName: string;
+  accountHolderName: string;
+  accountNumber: string;
+  ifscCode: string;
+  branchName: string;
+
+  // UPI Details
+  upiId: string;
+  upiPaymentLink: string;
+  qrCode?: string;
+
+  // GPay Details
+  gpayNumber: string;
+  gpayHolderName: string;
+
+  // Other Details
+  termsAndConditions: string;
+  notes: string;
+  authorizedSignature?: string;
+  defaultGst: number;
+
+  // Global settings (existing)
   invoice_prefix: string;
   email_list: string[];
-  weekly_report_day: string; // e.g., 'Monday'
-  monthly_report_date: number; // e.g., 1
+  weekly_report_day: string;
+  monthly_report_date: number;
   allow_backdate_days: number;
 }
 

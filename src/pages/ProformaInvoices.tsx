@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown } from 'lucide-react';
+import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown, Sparkles } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { db } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc } from 'firebase/firestore';
+import { db, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { ProformaInvoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
+import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
 
 export default function ProformaInvoices() {
@@ -17,38 +19,42 @@ export default function ProformaInvoices() {
   const initialSearch = queryParams.get('customer') || '';
   
   const [proformaInvoices, setProformaInvoices] = useState<ProformaInvoice[]>([]);
-  const [customers, setCustomers] = useState<Record<string, string>>({});
+  const [customers, setCustomers] = useState<Record<string, Customer>>({});
   const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<ProformaInvoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const { settings } = useSettings();
 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, 'proforma_invoices'), orderBy('created_at', 'desc'));
+    const q = query(collection(db, 'proforma_invoices'), orderBy('number', 'asc'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       try {
         const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProformaInvoice));
         setProformaInvoices(invs);
         
-        // Fetch missing customer names
+        // Fetch missing customer objects
         const newCustomerIds = invs
           .map(i => i.customer_id)
           .filter(id => id && !customers[id]);
         
         if (newCustomerIds.length > 0 && db) {
-          const names = { ...customers };
+          const loaded = { ...customers };
           for (const id of newCustomerIds) {
             try {
               const cDoc = await getDoc(doc(db, 'customers', id));
-              names[id] = cDoc.exists() ? (cDoc.data() as Customer).name : 'Unknown Customer';
+              if (cDoc.exists()) {
+                loaded[id] = { id, ...cDoc.data() } as Customer;
+              }
             } catch (err) {
-              names[id] = 'Customer (Access Denied)';
+              console.error("Error fetching customer", id, err);
             }
           }
-          setCustomers(names);
+          setCustomers(loaded);
         }
       } catch (err) {
         console.error("Firestore Mapping Error:", err);
@@ -70,7 +76,26 @@ export default function ProformaInvoices() {
   const deleteInvoice = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this proforma invoice?")) {
       try {
-        await deleteDoc(doc(db, 'proforma_invoices', id));
+        const piRef = doc(db, 'proforma_invoices', id);
+        const piSnap = await getDoc(piRef);
+        if (piSnap.exists()) {
+          const piData = piSnap.data();
+          if (piData.linked_quotation_id) {
+            const qRef = doc(db, 'quotations', piData.linked_quotation_id);
+            await updateDoc(qRef, {
+              conversion_status: null,
+              linked_proforma_id: null,
+              status: 'draft'
+            });
+          }
+        }
+        await deleteDoc(piRef);
+
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
+        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+        await syncSequenceAfterDelete("proforma_invoices", `proforma_sequence_${fyYear}`, `PI/${fyYear}/`);
       } catch (err) {
         console.error("Error deleting proforma invoice", err);
         alert("Failed to delete proforma invoice.");
@@ -78,15 +103,47 @@ export default function ProformaInvoices() {
     }
   };
 
+  const handleConvertToInvoice = async (inv: ProformaInvoice) => {
+    if (!functions) return;
+    if (inv.payment_status !== 'paid') {
+      alert("Proforma Invoice can only be converted to a Tax Invoice when it is FULLY PAID.");
+      return;
+    }
+    const confirm = window.confirm(`Convert Proforma "${inv.number}" to a Tax Invoice? This cannot be undone.`);
+    if (!confirm) return;
+    setConvertingId(inv.id);
+    try {
+      const convertFn = httpsCallable(functions, 'convertProformaToInvoice');
+      const result = await convertFn({ proformaId: inv.id });
+      const invoiceNumber = (result.data as any).invoiceNumber;
+      alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
+      navigate('/invoices');
+    } catch (error: any) {
+      console.warn("Cloud function conversion failed, trying client fallback:", error);
+      try {
+        const { clientConvertProformaToInvoice } = await import('../utils/clientBillingCreator');
+        const result = await clientConvertProformaToInvoice(inv.id);
+        const invoiceNumber = (result as any).invoiceNumber;
+        alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
+        navigate('/invoices');
+      } catch (fallbackErr: any) {
+        console.error("Client fallback conversion failed:", fallbackErr);
+        alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
+      }
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
   const handleDownloadReport = (format: 'excel' | 'pdf') => {
     const filteredInvoices = proformaInvoices
-      .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
 
     if (format === 'excel') {
       const reportData = filteredInvoices.map(inv => ({
         'Proforma Invoice Number': inv.number,
-        'Customer': customers[inv.customer_id] || 'Unknown Customer',
+        'Customer': customers[inv.customer_id]?.name || 'Unknown Customer',
         'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
         'Subtotal (₹)': inv.subtotal || 0,
         'Tax Amount (₹)': inv.tax_total || 0,
@@ -111,7 +168,7 @@ export default function ProformaInvoices() {
         head: [['Proforma #', 'Customer', 'Date', 'Grand Total', 'Status']],
         body: filteredInvoices.map(inv => [
           inv.number,
-          customers[inv.customer_id] || 'Unknown Customer',
+          customers[inv.customer_id]?.name || 'Unknown Customer',
           inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
           `Rs. ${inv.grand_total?.toLocaleString() || '0'}`,
           (inv.payment_status || 'unpaid').toUpperCase()
@@ -210,25 +267,47 @@ export default function ProformaInvoices() {
               ) : proformaInvoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
               ) : proformaInvoices
-                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
                   .map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
-                  <td className="p-4 text-secondary">{customers[inv.customer_id] || 'Loading...'}</td>
+                  <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
-                  <td className="p-4 text-right font-medium text-primary-dark">₹ {inv.grand_total?.toLocaleString() || '0'}</td>
+                  <td className="p-4 text-right font-medium text-primary-dark">
+                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-semibold mt-0.5">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-4 text-center">
-                    <button 
-                      onClick={() => openPaymentModal(inv)}
-                      className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
-                      inv.payment_status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-200' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
-                    }`}>
-                      {inv.payment_status?.toUpperCase() || 'UNPAID'}
-                    </button>
+                    {(inv as any).conversion_status === 'converted' ? (
+                      <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+                    ) : (
+                      <button 
+                        onClick={() => openPaymentModal(inv)}
+                        className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                        inv.payment_status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-200' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}>
+                        {inv.payment_status?.toUpperCase() || 'UNPAID'}
+                      </button>
+                    )}
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
+                      {(inv as any).conversion_status !== 'converted' && inv.payment_status === 'paid' && (
+                        <button 
+                          onClick={() => handleConvertToInvoice(inv)}
+                          disabled={convertingId === inv.id}
+                          className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold"
+                          title="Convert to Tax Invoice"
+                        >
+                          {convertingId === inv.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                          Convert
+                        </button>
+                      )}
                       <button 
                         onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)}
                         className="p-2 text-secondary hover:text-primary transition-colors" 
@@ -237,14 +316,14 @@ export default function ProformaInvoices() {
                         <Edit size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="View PDF"
                       >
                         <FileText size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="Download"
                       >

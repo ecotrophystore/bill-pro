@@ -8,42 +8,46 @@ import type { Quotation, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
+import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
 
 export default function Quotations() {
   const navigate = useNavigate();
   const [quotations, setQuotations] = useState<Quotation[]>([]);
-  const [customers, setCustomers] = useState<Record<string, string>>({});
+  const [customers, setCustomers] = useState<Record<string, Customer>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const [showReportDropdown, setShowReportDropdown] = useState(false);
-
+  const { settings } = useSettings();
+ 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, 'quotations'), orderBy('created_at', 'desc'));
+    const q = query(collection(db, 'quotations'), orderBy('number', 'asc'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       try {
         const qts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Quotation));
         setQuotations(qts);
         
-        // Fetch missing customer names
+        // Fetch missing customer objects
         const newCustomerIds = qts
           .map(q => q.customer_id)
           .filter(id => id && !customers[id]);
         
         if (newCustomerIds.length > 0 && db) {
-          const names = { ...customers };
+          const loaded = { ...customers };
           for (const id of newCustomerIds) {
             try {
               const cDoc = await getDoc(doc(db, 'customers', id));
-              names[id] = cDoc.exists() ? (cDoc.data() as Customer).name : 'Unknown Customer';
+              if (cDoc.exists()) {
+                loaded[id] = { id, ...cDoc.data() } as Customer;
+              }
             } catch (err) {
-              names[id] = 'Customer (Access Denied)';
+              console.error("Error fetching customer", id, err);
             }
           }
-          setCustomers(names);
+          setCustomers(loaded);
         }
       } catch (err) {
         console.error("Firestore Mapping Error:", err);
@@ -61,23 +65,35 @@ export default function Quotations() {
     if (!functions) return;
     
     const isGST = quotation.customer_type === 'gst' || !quotation.customer_type;
-    const targetDoc = isGST ? 'Tax Invoice' : 'Cash Memo';
+    const targetDoc = isGST ? 'Proforma Invoice' : 'Cash Memo';
     
-    const confirm = window.confirm(`This will generate a LOCKED ${targetDoc}. Proceed?`);
+    const confirm = window.confirm(`This will generate a ${targetDoc}. Proceed?`);
     if (!confirm) return;
 
     setConvertingId(quotation.id);
     try {
-      const fnName = isGST ? 'convertQuotationToInvoice' : 'convertQuotationToCashMemo';
+      // GST quotations now go to Proforma Invoice first, then to Invoice
+      const fnName = isGST ? 'convertQuotationToProforma' : 'convertQuotationToCashMemo';
       const convertFn = httpsCallable(functions, fnName);
       const result = await convertFn({ quotationId: quotation.id });
       
-      const docNum = (result.data as any).invoiceNumber || (result.data as any).memoNumber;
+      const docNum = (result.data as any).proformaNumber || (result.data as any).memoNumber;
       alert(`Successfully converted! Document: ${docNum}`);
-      navigate(isGST ? '/invoices' : '/cash-memos');
+      navigate(isGST ? '/proforma-invoices' : '/cash-memos');
     } catch (error) {
-      console.error("Conversion failed:", error);
-      alert("Failed to convert. Check permissions or if already converted.");
+      console.warn("Cloud function conversion failed, trying client fallback:", error);
+      try {
+        const { clientConvertQuotationToProforma, clientConvertQuotationToCashMemo } = await import('../utils/clientBillingCreator');
+        const result = isGST 
+          ? await clientConvertQuotationToProforma(quotation.id) 
+          : await clientConvertQuotationToCashMemo(quotation.id);
+        const docNum = (result as any).proformaNumber || (result as any).memoNumber;
+        alert(`Successfully converted! Document: ${docNum}`);
+        navigate(isGST ? '/proforma-invoices' : '/cash-memos');
+      } catch (fallbackErr: any) {
+        console.error("Client fallback conversion failed:", fallbackErr);
+        alert("Failed to convert. Check permissions or if already converted.");
+      }
     } finally {
       setConvertingId(null);
     }
@@ -96,6 +112,8 @@ export default function Quotations() {
     if (window.confirm("Are you sure you want to delete this quotation?")) {
       try {
         await deleteDoc(doc(db, 'quotations', id));
+        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+        await syncSequenceAfterDelete("quotations", "quotation_sequence", "QTN-");
       } catch (err) {
         console.error("Error deleting quotation", err);
         alert("Failed to delete quotation.");
@@ -131,13 +149,13 @@ export default function Quotations() {
 
   const handleDownloadReport = (format: 'excel' | 'pdf') => {
     const filteredQuotations = quotations
-      .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(q => statusFilter === 'all' || q.status === statusFilter);
 
     if (format === 'excel') {
       const reportData = filteredQuotations.map(q => ({
         'Quotation Number': q.number,
-        'Customer': customers[q.customer_id] || 'Unknown Customer',
+        'Customer': customers[q.customer_id]?.name || 'Unknown Customer',
         'Date': q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
         'Subtotal (₹)': q.subtotal || 0,
         'Tax Amount (₹)': q.tax_total || 0,
@@ -162,7 +180,7 @@ export default function Quotations() {
         head: [['Quotation #', 'Customer', 'Date', 'Grand Total', 'Status']],
         body: filteredQuotations.map(q => [
           q.number,
-          customers[q.customer_id] || 'Unknown Customer',
+          customers[q.customer_id]?.name || 'Unknown Customer',
           q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
           `Rs. ${q.grand_total?.toLocaleString() || '0'}`,
           q.status.toUpperCase()
@@ -271,12 +289,12 @@ export default function Quotations() {
               ) : quotations.length === 0 ? (
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">No quotations found.</td></tr>
               ) : quotations
-                  .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .filter(q => statusFilter === 'all' || q.status === statusFilter)
                   .map((q) => (
                 <tr key={q.id} className="border-b border-shadow-darker/10 hover:bg-shadow-darker/5 transition-colors group">
                   <td className="py-4 px-4 pl-0 font-medium text-primary-dark">{q.number}</td>
-                  <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id] || 'Loading...'}</td>
+                  <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id]?.name || 'Loading...'}</td>
                   <td className="py-4 px-4 text-secondary">{q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="py-4 px-4 font-bold text-primary-dark text-right">{q.grand_total?.toLocaleString() || '0'}</td>
                   <td className="py-4 px-4 text-center">{getStatusBadge(q)}</td>
@@ -299,17 +317,17 @@ export default function Quotations() {
                        >
                          <Edit size={18} />
                        </button>
-                       <button 
-                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view')}
-                         className="p-2 text-secondary hover:text-primary-dark transition-colors"
+                        <button 
+                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)}
+                         className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
                          title="View PDF"
                        >
                          <FileText size={18} />
                        </button>
                        <button 
-                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download')}
-                         className="p-2 text-secondary hover:text-primary-dark transition-colors"
-                         title="Download"
+                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)}
+                         className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
+                         title="Download PDF"
                        >
                          <Download size={18} />
                        </button>

@@ -31,6 +31,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { extractDataFromDocument } from '../services/ai';
 
 interface ExpenseItem {
   id: string;
@@ -58,8 +59,7 @@ export default function ExpensePage() {
   // System parameters
   const [openingCash, setOpeningCash] = useState<number>(() => {
     const saved = localStorage.getItem('ecobill_opening_cash');
-    const parsed = saved ? parseFloat(saved) : 0;
-    return parsed > 0 ? parsed : 100000; // default 1,00,000 INR
+    return saved !== null ? parseFloat(saved) : 0;
   });
   const [isEditingOpeningCash, setIsEditingOpeningCash] = useState(false);
   const [tempOpeningCash, setTempOpeningCash] = useState(openingCash.toString());
@@ -244,26 +244,38 @@ export default function ExpensePage() {
         };
         reader.readAsArrayBuffer(file);
       } else {
-        // Image or PDF - simulate AI OCR parsing extraction
-        const ocrMock: ExpenseItem = {
-          id: `ocr-${Date.now()}`,
-          date: new Date().toISOString().split('T')[0],
-          member: 'Spacetech Plastics & Acrylics',
-          purpose: 'Raw material procurement (2.5mm sheets)',
-          requested: 8500,
-          paid: 8500,
-          taxStatus: 'GST',
-          gstPercent: 18,
-          gstAmount: exactRound((8500 * 18) / 118),
-          nonGstAmount: 0,
-          paymentMode: 'UPI',
-          billNo: `ST-${Math.floor(1000 + Math.random() * 9000)}`,
-          notes: 'AI OCR Extraction: Confirmed match with invoice snapshot.'
+        // Image or PDF - AI Extraction
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          try {
+            const base64Data = (e.target?.result as string).split(',')[1];
+            const data = await extractDataFromDocument(base64Data, file.type, 'expense');
+            const ocrRow: ExpenseItem = {
+              id: `ocr-${Date.now()}`,
+              date: data.date || new Date().toISOString().split('T')[0],
+              member: 'Imported Vendor',
+              purpose: data.description || 'Parsed from AI',
+              requested: parseFloat(data.amount) || 0,
+              paid: parseFloat(data.amount) || 0,
+              taxStatus: 'Non-GST',
+              gstPercent: 0,
+              gstAmount: 0,
+              nonGstAmount: parseFloat(data.amount) || 0,
+              paymentMode: 'UPI',
+              billNo: '',
+              notes: (data.notes || 'AI OCR Extraction') + (data.category ? ` [Category: ${data.category}]` : '')
+            };
+            setPreviewRows(prev => [...prev, ocrRow]);
+          } catch(err) {
+            console.error(err);
+            alert("Failed to extract data with AI.");
+          } finally {
+            setIsParsing(false);
+          }
         };
-        setPreviewRows(prev => [...prev, ocrMock]);
-        setIsParsing(false);
+        reader.readAsDataURL(file);
       }
-    }, 1500);
+    }, 500);
   };
 
   const exactRound = (num: number) => Math.round(num * 100) / 100;

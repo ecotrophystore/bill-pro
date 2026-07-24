@@ -6,6 +6,9 @@ import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
+import SpeechInput from '../components/Shared/SpeechInput';
+import { useSettings } from '../contexts/SettingsContext';
+
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
 
@@ -25,6 +28,10 @@ export default function CreateCashMemo() {
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Cash');
   const [advancePaymentDate, setAdvancePaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [advanceReferenceNumber, setAdvanceReferenceNumber] = useState('');
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [chargeAmount, setChargeAmount] = useState(0);
+  const [paymentStatus, setPaymentStatus] = useState<'unpaid' | 'paid'>('unpaid');
+
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
   const [loadingData, setLoadingData] = useState(true);
@@ -54,6 +61,9 @@ export default function CreateCashMemo() {
             setAdvancePaymentMethod(data.advance_payment_method || 'Cash');
             setAdvancePaymentDate(data.advance_payment_date || new Date().toISOString().split('T')[0]);
             setAdvanceReferenceNumber(data.advance_reference_number || '');
+            setDiscountPercent(data.discount_percent || 0);
+            setChargeAmount(data.charge_amount || 0);
+            setPaymentStatus(data.payment_status || 'unpaid');
           }
         }
       } catch (error) {
@@ -123,10 +133,16 @@ export default function CreateCashMemo() {
       subtotal += exactRound(lineTotal);
     });
 
-    const finalGrandTotal = Math.round(subtotal);
+    const discountAmount = exactRound((subtotal * discountPercent) / 100);
+    const afterDiscount = exactRound(subtotal - discountAmount);
+    const charge = exactRound(chargeAmount || 0);
+    const grandTotalExact = afterDiscount + charge;
+    const finalGrandTotal = Math.round(grandTotalExact);
     return {
       subtotal: exactRound(subtotal),
-      roundOff: exactRound(finalGrandTotal - subtotal),
+      discountAmount,
+      chargeAmount: charge,
+      roundOff: exactRound(finalGrandTotal - grandTotalExact),
       grandTotal: finalGrandTotal
     };
   };
@@ -152,12 +168,20 @@ export default function CreateCashMemo() {
           customer_id: isWalkIn ? null : selectedCustomerId,
           customer_name: selectedCustomerName,
           items: items,
+          discount_percent: discountPercent,
           advance_amount: advanceAmount,
           advance_payment_method: advancePaymentMethod,
           advance_payment_date: advancePaymentDate,
           advance_reference_number: advanceReferenceNumber,
+          payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
           balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
-          ...totals
+          subtotal: totals.subtotal,
+          discount_amount: totals.discountAmount,
+          charge_amount: totals.chargeAmount,
+          round_off: totals.roundOff,
+          grand_total: totals.grandTotal,
+          payment_status: paymentStatus,
+          payment_date: paymentStatus === 'paid' ? advancePaymentDate : null,
         });
         navigate('/cash-memos');
       } catch (error) {
@@ -180,18 +204,47 @@ export default function CreateCashMemo() {
         customer_name: isWalkIn ? walkInName : selectedCustomerName,
         walk_in_customer: isWalkIn,
         items: items.map(it => ({ ...it, tax_percentage: 0 })),
+        discount_percent: discountPercent,
+        charge_amount: chargeAmount,
         advance_amount: advanceAmount,
         advance_payment_method: advancePaymentMethod,
         advance_payment_date: advancePaymentDate,
         advance_reference_number: advanceReferenceNumber,
+        payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
         balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+        payment_status: paymentStatus,
+        payment_date: paymentStatus === 'paid' ? advancePaymentDate : null,
       };
 
       await createCashMemoFn({ memoData });
       navigate('/cash-memos');
     } catch (error) {
-      console.error("Error creating memo:", error);
-      alert("Failed to create memo. Unauthorized or sequence error.");
+      console.warn("Cloud function failed, attempting client-side save fallback:", error);
+      try {
+        const memoData = {
+          customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
+          customer_name: isWalkIn ? walkInName : selectedCustomerName,
+          walk_in_customer: isWalkIn,
+          items: items.map(it => ({ ...it, tax_percentage: 0 })),
+          discount_percent: discountPercent,
+          charge_amount: chargeAmount,
+          advance_amount: advanceAmount,
+          advance_payment_method: advancePaymentMethod,
+          advance_payment_date: advancePaymentDate,
+          advance_reference_number: advanceReferenceNumber,
+          payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
+          balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+          payment_status: paymentStatus,
+          payment_date: paymentStatus === 'paid' ? advancePaymentDate : null,
+          ...totals
+        };
+        const { clientCreateCashMemo } = await import('../utils/clientBillingCreator');
+        await clientCreateCashMemo(memoData);
+        navigate('/cash-memos');
+      } catch (clientError) {
+        console.error("Client-side fallback also failed:", clientError);
+        alert("Failed to create memo. Connection or Permission issue.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -213,9 +266,11 @@ export default function CreateCashMemo() {
           <ArrowLeft size={20} className="text-secondary" />
         </button>
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
-            {id ? 'Edit Cash Memo' : 'New Cash Memo'}
-          </h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
+              {id ? 'Edit Cash Memo' : 'New Cash Memo'}
+            </h1>
+          </div>
           <p className="text-secondary mt-1">
             {id ? 'Update the details of the selected cash memo.' : 'Choice 1a: Generating memo with MEMO/ sequence. Choice 3b: GST set to 0%.'}
           </p>
@@ -241,7 +296,7 @@ export default function CreateCashMemo() {
               {isWalkIn ? (
                 <div className="space-y-1">
                   <label className="text-sm font-semibold text-primary-dark px-1">Customer Display Name</label>
-                  <input 
+                  <SpeechInput 
                     type="text" 
                     className="neo-input w-full" 
                     placeholder="Enter name for memo..."
@@ -276,8 +331,9 @@ export default function CreateCashMemo() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="mb-0">Line Items</h3>
                           </div>
-            <div className="space-y-8">
-              {items.map((item: any, index: number) => (
+            <div className="overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-0 sm:px-0">
+              <div className="min-w-[950px] space-y-8">
+                {items.map((item: any, index: number) => (
                 <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-surface border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
                   <div className="flex-[2] space-y-1 w-full">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Description</label>}
@@ -331,7 +387,7 @@ export default function CreateCashMemo() {
                   </div>
                   <div className="w-full sm:w-20 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
-                    <input 
+                    <SpeechInput 
                       type="number" 
                       className="neo-input w-full font-bold" 
                       placeholder="1" 
@@ -345,7 +401,7 @@ export default function CreateCashMemo() {
                   </div>
                   <div className="w-full sm:w-28 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
-                    <input 
+                    <SpeechInput 
                       type="number" 
                       className="neo-input w-full font-mono text-primary-dark" 
                       placeholder="0.00" 
@@ -369,6 +425,7 @@ export default function CreateCashMemo() {
                 </div>
               ))}
             </div>
+          </div>
             
             <button onClick={addItem} className="neo-btn mt-6 flex items-center gap-2 text-sm text-secondary hover:text-primary-dark">
               <Plus size={16} /> Add New Row
@@ -388,21 +445,83 @@ export default function CreateCashMemo() {
                 <span>Tax (GST 0%)</span>
                 <span className="text-secondary/50">₹ 0.00</span>
               </div>
+
+              {/* Discount */}
+              <div className="flex justify-between items-center gap-2">
+                <label className="text-secondary shrink-0">Discount</label>
+                <select
+                  className="neo-input text-xs py-1 w-28"
+                  value={discountPercent}
+                  onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
+                >
+                  <option value={0}>None (0%)</option>
+                  <option value={5}>5%</option>
+                  <option value={10}>10%</option>
+                  <option value={20}>20%</option>
+                  <option value={30}>30%</option>
+                  <option value={50}>50%</option>
+                </select>
+              </div>
+              {discountPercent > 0 && (
+                <div className="flex justify-between text-green-600 text-xs">
+                  <span>Discount ({discountPercent}%)</span>
+                  <span className="font-semibold">- ₹ {totals.discountAmount.toLocaleString()}</span>
+                </div>
+              )}
+
+              {/* Charge */}
+              <div className="flex justify-between items-center gap-2">
+                <label className="text-secondary shrink-0">Design Charge</label>
+                <SpeechInput
+                  type="number"
+                  className="neo-input text-xs py-1 w-28 font-mono"
+                  placeholder="0.00"
+                  value={chargeAmount || ''}
+                  onChange={(e) => setChargeAmount(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              {chargeAmount > 0 && (
+                <div className="flex justify-between text-orange-600 text-xs">
+                  <span>Design Charge</span>
+                  <span className="font-semibold">+ ₹ {totals.chargeAmount.toLocaleString()}</span>
+                </div>
+              )}
+
               <div className="flex justify-between text-secondary">
                 <span>Round-off</span>
                 <span className="font-semibold text-primary-dark">₹ {totals.roundOff.toFixed(2)}</span>
               </div>
-              <div className="h-px bg-shadow-darker/20 my-2"></div>
               <div className="flex justify-between text-xl">
                 <span className="font-bold text-primary-dark">Grand Total</span>
                 <span className="font-bold text-primary-dark text-primary">₹ {totals.grandTotal.toLocaleString()}</span>
               </div>
               <div className="h-px bg-shadow-darker/20 my-4"></div>
+              
+              <div className="space-y-1 mb-4">
+                <label className="text-xs font-semibold text-secondary px-1">Payment Status</label>
+                <select 
+                  className="neo-input w-full text-xs" 
+                  value={paymentStatus} 
+                  onChange={(e) => {
+                    const status = e.target.value as 'unpaid' | 'paid';
+                    setPaymentStatus(status);
+                    if (status === 'paid') {
+                      setAdvanceAmount(totals.grandTotal);
+                    } else {
+                      setAdvanceAmount(0);
+                    }
+                  }}
+                >
+                  <option value="unpaid">Unpaid</option>
+                  <option value="paid">Paid</option>
+                </select>
+              </div>
+
               <h4 className="font-semibold text-primary-dark mb-4 text-sm mt-4">Advance Payment</h4>
               <div className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary px-1">Amount</label>
-                  <input type="number" className="neo-input w-full" value={advanceAmount || ''} onChange={(e) => setAdvanceAmount(parseFloat(e.target.value) || 0)} max={totals.grandTotal} />
+                  <SpeechInput type="number" className="neo-input w-full" value={advanceAmount || ''} onChange={(e) => setAdvanceAmount(parseFloat(e.target.value) || 0)} max={totals.grandTotal} />
                 </div>
                 <div className="animate-fade-in space-y-3 mt-3">
                   <div className="grid grid-cols-2 gap-2">
@@ -421,9 +540,11 @@ export default function CreateCashMemo() {
                       <input type="date" className="neo-input w-full text-xs" value={advancePaymentDate} onChange={(e) => setAdvancePaymentDate(e.target.value)} />
                     </div>
                   </div>
-                  <div className="space-y-1">
+
+
+                  <div className="pt-6">
                     <label className="text-xs font-semibold text-secondary px-1">Ref Number</label>
-                    <input type="text" className="neo-input w-full" placeholder="Optional" value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full" placeholder="Optional" value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
                   </div>
                   <div className="h-px bg-shadow-darker/20 my-4"></div>
                   <div className="flex justify-between text-lg mt-4">

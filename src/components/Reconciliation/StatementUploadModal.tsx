@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx';
 import { db, functions } from '../../lib/firebase';
 import { collection, addDoc, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
+import { extractDataFromDocument } from '../../services/ai';
 
 export default function StatementUploadModal({ 
   isOpen, 
@@ -161,12 +162,9 @@ export default function StatementUploadModal({
             const base64Url = e.target?.result as string;
             const base64Data = base64Url.split(',')[1];
             
-            if (!functions) throw new Error("Functions not initialized");
-            const parsePdfFn = httpsCallable(functions, 'parsePDFStatement');
-            const res = await parsePdfFn({ base64Data, mimeType: file.type || 'application/pdf' });
-            const data = res.data as any;
+            const data = await extractDataFromDocument(base64Data, file.type || 'application/pdf', 'statement');
             
-            if (!data.success || !data.transactions) throw new Error("Failed to extract data from PDF");
+            if (!data.transactions) throw new Error("Failed to extract data from PDF");
             
             const validRows = data.transactions.map((r: any) => ({
               date: new Date(r.date),

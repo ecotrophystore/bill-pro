@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Invoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
+import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
 
 export default function Invoices() {
@@ -17,38 +18,41 @@ export default function Invoices() {
   const initialSearch = queryParams.get('customer') || '';
   
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [customers, setCustomers] = useState<Record<string, string>>({});
+  const [customers, setCustomers] = useState<Record<string, Customer>>({});
   const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const { settings } = useSettings();
 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, 'invoices'), orderBy('created_at', 'desc'));
+    const q = query(collection(db, 'invoices'), orderBy('number', 'asc'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       try {
         const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
         setInvoices(invs);
         
-        // Fetch missing customer names
+        // Fetch missing customer objects
         const newCustomerIds = invs
           .map(i => i.customer_id)
           .filter(id => id && !customers[id]);
         
         if (newCustomerIds.length > 0 && db) {
-          const names = { ...customers };
+          const loaded = { ...customers };
           for (const id of newCustomerIds) {
             try {
               const cDoc = await getDoc(doc(db, 'customers', id));
-              names[id] = cDoc.exists() ? (cDoc.data() as Customer).name : 'Unknown Customer';
+              if (cDoc.exists()) {
+                loaded[id] = { id, ...cDoc.data() } as Customer;
+              }
             } catch (err) {
-              names[id] = 'Customer (Access Denied)';
+              console.error("Error fetching customer", id, err);
             }
           }
-          setCustomers(names);
+          setCustomers(loaded);
         }
       } catch (err) {
         console.error("Firestore Mapping Error:", err);
@@ -70,7 +74,29 @@ export default function Invoices() {
   const deleteInvoice = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this invoice?")) {
       try {
-        await deleteDoc(doc(db, 'invoices', id));
+        const invRef = doc(db, 'invoices', id);
+        const invSnap = await getDoc(invRef);
+        if (invSnap.exists()) {
+          const invData = invSnap.data();
+          if (invData.linked_proforma_id) {
+            const pRef = doc(db, 'proforma_invoices', invData.linked_proforma_id);
+            const pSnap = await getDoc(pRef);
+            if (pSnap.exists()) {
+              await updateDoc(pRef, {
+                conversion_status: null,
+                linked_invoice_id: null,
+                status: 'draft'
+              });
+            }
+          }
+        }
+        await deleteDoc(invRef);
+
+        const d = new Date();
+        let fyYear = d.getFullYear();
+        if (d.getMonth() < 3) fyYear -= 1;
+        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+        await syncSequenceAfterDelete("invoices", `invoice_sequence_${fyYear}`, `ECO/${fyYear}/`);
       } catch (err) {
         console.error("Error deleting invoice", err);
         alert("Failed to delete invoice.");
@@ -84,13 +110,13 @@ export default function Invoices() {
 
   const handleDownloadReport = (format: 'excel' | 'pdf') => {
     const filteredInvoices = invoices
-      .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
 
     if (format === 'excel') {
       const reportData = filteredInvoices.map(inv => ({
         'Invoice Number': inv.number,
-        'Customer': customers[inv.customer_id] || 'Unknown Customer',
+        'Customer': customers[inv.customer_id]?.name || 'Unknown Customer',
         'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
         'Subtotal (₹)': inv.subtotal || 0,
         'Tax Amount (₹)': inv.tax_total || 0,
@@ -115,7 +141,7 @@ export default function Invoices() {
         head: [['Invoice #', 'Customer', 'Date', 'Grand Total', 'Status']],
         body: filteredInvoices.map(inv => [
           inv.number,
-          customers[inv.customer_id] || 'Unknown Customer',
+          customers[inv.customer_id]?.name || 'Unknown Customer',
           inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
           `Rs. ${inv.grand_total?.toLocaleString() || '0'}`,
           (inv.payment_status || 'unpaid').toUpperCase()
@@ -214,14 +240,21 @@ export default function Invoices() {
               ) : invoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No invoices found.</td></tr>
               ) : invoices
-                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id] || '').toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
                   .map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
-                  <td className="p-4 text-secondary">{customers[inv.customer_id] || 'Loading...'}</td>
+                  <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
-                  <td className="p-4 text-right font-medium text-primary-dark">₹ {inv.grand_total?.toLocaleString() || '0'}</td>
+                  <td className="p-4 text-right font-medium text-primary-dark">
+                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-semibold mt-0.5">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-4 text-center">
                     <button 
                       onClick={() => openPaymentModal(inv)}
@@ -241,14 +274,14 @@ export default function Invoices() {
                         <Edit size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="View PDF"
                       >
                         <FileText size={18} />
                       </button>
                       <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download')}
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)}
                         className="p-2 text-secondary hover:text-primary-dark transition-colors" 
                         title="Download"
                       >

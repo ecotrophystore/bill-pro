@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { SettingsProvider } from './contexts/SettingsContext';
 import { AppLayout } from './components/Layout/AppLayout';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
@@ -35,8 +36,9 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
+      <SettingsProvider>
+        <BrowserRouter>
+          <Routes>
           <Route path="/login" element={<Login />} />
           
           <Route 
@@ -83,8 +85,9 @@ export default function App() {
           </Route>
           
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        </Routes>
-      </BrowserRouter>
+          </Routes>
+        </BrowserRouter>
+      </SettingsProvider>
     </AuthProvider>
   );
 }

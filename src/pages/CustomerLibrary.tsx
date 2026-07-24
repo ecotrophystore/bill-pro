@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Users, Search, Plus, ExternalLink, Mail, Phone, MapPin, X, Edit, Trash2, Download, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import SpeechInput from '../components/Shared/SpeechInput';
+import FieldMicButton from '../components/Shared/FieldMicButton';
 import { db } from '../lib/firebase';
 import { collection, getDocs, addDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Customer } from '../types';
@@ -336,7 +338,7 @@ export default function CustomerLibrary() {
                 <label className="block text-sm font-semibold text-primary-dark mb-1">
                   Customer Name <span className="text-red-500">*</span>
                 </label>
-                <input 
+                <SpeechInput 
                   type="text" 
                   required
                   placeholder="Enter name"
@@ -350,7 +352,7 @@ export default function CustomerLibrary() {
                 <label className="block text-sm font-semibold text-primary-dark mb-1">
                   GST Number (Optional)
                 </label>
-                <input 
+                <SpeechInput 
                   type="text" 
                   placeholder="Enter 15-digit GSTIN"
                   className="neo-input w-full"
@@ -364,7 +366,7 @@ export default function CustomerLibrary() {
                   <label className="block text-sm font-semibold text-primary-dark mb-1">
                     Phone Number
                   </label>
-                  <input 
+                  <SpeechInput 
                     type="tel" 
                     placeholder="Enter phone number"
                     className="neo-input w-full"
@@ -377,7 +379,7 @@ export default function CustomerLibrary() {
                   <label className="block text-sm font-semibold text-primary-dark mb-1">
                     Email ID (Optional)
                   </label>
-                  <input 
+                  <SpeechInput 
                     type="email" 
                     placeholder="Enter email address"
                     className="neo-input w-full"
@@ -391,12 +393,19 @@ export default function CustomerLibrary() {
                 <label className="block text-sm font-semibold text-primary-dark mb-1">
                   Billing Address
                 </label>
-                <textarea 
-                  placeholder="Enter billing address"
-                  className="neo-input w-full min-h-[80px] resize-none"
-                  value={billingAddress}
-                  onChange={e => setBillingAddress(e.target.value)}
-                />
+                <div className="relative flex items-center w-full">
+                  <textarea 
+                    placeholder="Enter billing address"
+                    className="neo-input w-full min-h-[80px] resize-none pr-8"
+                    value={billingAddress}
+                    onChange={e => setBillingAddress(e.target.value)}
+                  />
+                  <div className="absolute right-1 top-2 flex items-center z-10">
+                    <FieldMicButton
+                      onTranscript={(text) => setBillingAddress(text)}
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-shadow-darker/10">

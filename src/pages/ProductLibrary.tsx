@@ -6,6 +6,7 @@ import { Search, Plus, Edit, Trash2, X, Download, ChevronDown } from 'lucide-rea
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import SpeechInput from '../components/Shared/SpeechInput';
 
 export default function ProductLibrary() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -248,7 +249,7 @@ export default function ProductLibrary() {
         <div className="flex justify-between items-center mb-4">
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={20} />
-            <input 
+            <SpeechInput 
               type="text" 
               placeholder="Search products..." 
               value={searchQuery}
@@ -326,7 +327,7 @@ export default function ProductLibrary() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
-                <input 
+                <SpeechInput 
                   type="text" 
                   value={name} 
                   onChange={(e) => setName(e.target.value)} 
@@ -338,7 +339,7 @@ export default function ProductLibrary() {
 
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
-                <input 
+                <SpeechInput 
                   type="text" 
                   value={hsnCode} 
                   onChange={(e) => setHsnCode(e.target.value)} 
@@ -348,9 +349,9 @@ export default function ProductLibrary() {
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
+                 <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Retail Price (₹) *</label>
-                  <input 
+                  <SpeechInput 
                     type="number" 
                     value={retailPrice} 
                     onChange={(e) => setRetailPrice(e.target.value)} 
@@ -363,7 +364,7 @@ export default function ProductLibrary() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Wholesale Price (₹) *</label>
-                  <input 
+                  <SpeechInput 
                     type="number" 
                     value={wholesalePrice} 
                     onChange={(e) => setWholesalePrice(e.target.value)} 

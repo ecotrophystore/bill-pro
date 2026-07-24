@@ -6,6 +6,9 @@ import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
+import SpeechInput from '../components/Shared/SpeechInput';
+import { useSettings } from '../contexts/SettingsContext';
+
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
 
@@ -23,7 +26,11 @@ export default function CreateProformaInvoice() {
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Bank Transfer');
   const [advancePaymentDate, setAdvancePaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [advanceReferenceNumber, setAdvanceReferenceNumber] = useState('');
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [chargeAmount, setChargeAmount] = useState(0);
+
   const [isGstInfo, setIsGstInfo] = useState({ isIgst: false });
+  const [applyGst, setApplyGst] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
   const [loadingData, setLoadingData] = useState(true);
@@ -48,11 +55,15 @@ export default function CreateProformaInvoice() {
             setSelectedCustomerId(data.customer_id);
             setSelectedCustomerName(data.customer_name);
             setItems(data.items || []);
+            const hasGst = (data.items || []).some((item: any) => (item.tax_percentage || 0) > 0);
+            setApplyGst(hasGst);
             setIsGstInfo({ isIgst: data.is_igst || false });
             setAdvanceAmount(data.advance_amount || 0);
             setAdvancePaymentMethod(data.advance_payment_method || 'Bank Transfer');
             setAdvancePaymentDate(data.advance_payment_date || new Date().toISOString().split('T')[0]);
             setAdvanceReferenceNumber(data.advance_reference_number || '');
+            setDiscountPercent(data.discount_percent || 0);
+            setChargeAmount(data.charge_amount || 0);
           }
         }
       } catch (error) {
@@ -78,17 +89,23 @@ export default function CreateProformaInvoice() {
     
     items.forEach(item => {
       const lineTotal = (item.quantity || 0) * (item.rate || 0);
-      const taxAmount = (lineTotal * (item.tax_percentage || 0)) / 100;
-      subtotal += exactRound(lineTotal);
+      const discountedLine = exactRound(lineTotal - (lineTotal * discountPercent) / 100);
+      const taxAmount = (discountedLine * (applyGst ? 18 : 0)) / 100;
+      subtotal += exactRound(discountedLine);
       taxTotal += exactRound(taxAmount);
     });
 
-    const grandTotalExact = subtotal + taxTotal;
+    const rawSubtotal = items.reduce((acc, item) => acc + exactRound((item.quantity || 0) * (item.rate || 0)), 0);
+    const discountAmount = exactRound((rawSubtotal * discountPercent) / 100);
+    const charge = exactRound(chargeAmount || 0);
+    const grandTotalExact = subtotal + taxTotal + charge;
     const finalGrandTotal = Math.round(grandTotalExact);
 
     return {
-      subtotal: exactRound(subtotal),
+      subtotal: exactRound(rawSubtotal),
+      discountAmount,
       taxTotal: exactRound(taxTotal),
+      chargeAmount: charge,
       roundOff: exactRound(finalGrandTotal - grandTotalExact),
       grandTotal: finalGrandTotal
     };
@@ -102,6 +119,11 @@ export default function CreateProformaInvoice() {
       return;
     }
 
+    const mappedItems = items.map(item => ({
+      ...item,
+      tax_percentage: applyGst ? 18 : 0
+    }));
+
     if (id) {
       const confirm = window.confirm("Are you sure you want to update this proforma invoice?");
       if (!confirm) return;
@@ -111,13 +133,22 @@ export default function CreateProformaInvoice() {
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           is_igst: isGstInfo.isIgst,
-          items: items,
+          items: mappedItems,
+          discount_percent: discountPercent,
           advance_amount: advanceAmount,
           advance_payment_method: advancePaymentMethod,
           advance_payment_date: advancePaymentDate,
           advance_reference_number: advanceReferenceNumber,
+          payment_method_to_show: advanceAmount > 0 ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
           balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
-          ...totals
+          subtotal: totals.subtotal,
+          tax_total: totals.taxTotal,
+          cgst: isGstInfo.isIgst ? 0 : exactRound(totals.taxTotal / 2),
+          sgst_igst: isGstInfo.isIgst ? exactRound(totals.taxTotal) : exactRound(totals.taxTotal / 2),
+          discount_amount: totals.discountAmount,
+          charge_amount: totals.chargeAmount,
+          round_off: totals.roundOff,
+          grand_total: totals.grandTotal
         });
         navigate('/proforma-invoices');
       } catch (error) {
@@ -139,19 +170,45 @@ export default function CreateProformaInvoice() {
         customer_id: selectedCustomerId || `new_${Date.now()}`,
         customer_name: selectedCustomerName,
         is_igst: isGstInfo.isIgst,
-        items: items,
+        items: mappedItems,
+        discount_percent: discountPercent,
+        charge_amount: chargeAmount,
         advance_amount: advanceAmount,
-        advance_payment_method: advancePaymentMethod,
-        advance_payment_date: advancePaymentDate,
-        advance_reference_number: advanceReferenceNumber,
+        advance_payment_method: advanceAmount > 0 ? advancePaymentMethod : '',
+        advance_payment_date: advanceAmount > 0 ? advancePaymentDate : '',
+        advance_reference_number: advanceAmount > 0 ? advanceReferenceNumber : '',
+        payment_method_to_show: advanceAmount > 0 ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
         balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+        ...totals
       };
 
       await createProformaInvoiceFn({ invoiceData });
       navigate('/proforma-invoices');
     } catch (error) {
-      console.error("Error creating proforma invoice:", error);
-      alert("Failed to create proforma invoice. Ensure you have 'accounts' or 'admin' role.");
+      console.warn("Cloud function failed, attempting client-side save fallback:", error);
+      try {
+        const invoiceData: any = {
+          customer_id: selectedCustomerId || `new_${Date.now()}`,
+          customer_name: selectedCustomerName,
+          is_igst: isGstInfo.isIgst,
+          items: mappedItems,
+          discount_percent: discountPercent,
+          charge_amount: chargeAmount,
+          advance_amount: advanceAmount,
+          advance_payment_method: advancePaymentMethod,
+          advance_payment_date: advancePaymentDate,
+          advance_reference_number: advanceReferenceNumber,
+          payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
+          balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+          ...totals
+        };
+        const { clientCreateProformaInvoice } = await import('../utils/clientBillingCreator');
+        await clientCreateProformaInvoice(invoiceData);
+        navigate('/proforma-invoices');
+      } catch (clientError) {
+        console.error("Client-side fallback also failed:", clientError);
+        alert("Failed to create proforma invoice. Connection or Permission issue.");
+      }
     } finally {
       setIsSaving(false);
     }
@@ -173,9 +230,11 @@ export default function CreateProformaInvoice() {
           <ArrowLeft size={20} className="text-secondary" />
         </button>
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
-            {id ? 'Edit Proforma Invoice' : 'Create Proforma Invoice'}
-          </h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
+              {id ? 'Edit Proforma Invoice' : 'Create Proforma Invoice'}
+            </h1>
+          </div>
           <p className="text-secondary mt-1">
             {id ? 'Update the details of the selected proforma invoice.' : 'Generate a Proforma Invoice draft. Can be edited or converted later.'}
           </p>
@@ -208,9 +267,41 @@ export default function CreateProformaInvoice() {
                 <input type="date" className="neo-input w-full" defaultValue={new Date().toISOString().split('T')[0]} />
               </div>
             </div>
-            <div className="mt-4 flex items-center gap-2">
-               <input type="checkbox" id="igst" className="rounded text-primary focus:ring-primary border-shadow-darker/20" checked={isGstInfo.isIgst} onChange={e => setIsGstInfo({ isIgst: e.target.checked })} />
-               <label htmlFor="igst" className="text-sm font-medium text-secondary">Apply IGST (Inter-state)</label>
+            <div className="mt-4 flex flex-col sm:flex-row gap-4">
+              <div className="flex items-center gap-2">
+                 <input 
+                   type="checkbox" 
+                   id="applyGst" 
+                   className="rounded text-primary focus:ring-primary border-shadow-darker/20" 
+                   checked={applyGst && !isGstInfo.isIgst} 
+                   onChange={e => {
+                     if (e.target.checked) {
+                       setApplyGst(true);
+                       setIsGstInfo({ isIgst: false });
+                     } else {
+                       setApplyGst(false);
+                     }
+                   }} 
+                 />
+                 <label htmlFor="applyGst" className="text-sm font-medium text-secondary">Apply GST (18%)</label>
+              </div>
+              <div className="flex items-center gap-2">
+                 <input 
+                   type="checkbox" 
+                   id="igst" 
+                   className="rounded text-primary focus:ring-primary border-shadow-darker/20" 
+                   checked={applyGst && isGstInfo.isIgst} 
+                   onChange={e => {
+                     if (e.target.checked) {
+                       setApplyGst(true);
+                       setIsGstInfo({ isIgst: true });
+                     } else {
+                       setApplyGst(false);
+                     }
+                   }} 
+                 />
+                 <label htmlFor="igst" className="text-sm font-medium text-secondary">Apply IGST (Inter-state)</label>
+              </div>
             </div>
           </div>
 
@@ -218,8 +309,9 @@ export default function CreateProformaInvoice() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="mb-0">Line Items</h3>
             </div>
-            <div className="space-y-8">
-              {items.map((item, index) => (
+            <div className="overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-0 sm:px-0">
+              <div className="min-w-[850px] space-y-8">
+                {items.map((item, index) => (
                 <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-surface border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
                   <div className="flex-[2] space-y-1 w-full">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Product & Description</label>}
@@ -274,7 +366,7 @@ export default function CreateProformaInvoice() {
                   </div>
                   <div className="w-full sm:w-24 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">HSN</label>}
-                    <input 
+                    <SpeechInput 
                       type="text" 
                       className="neo-input w-full" 
                       placeholder="HSN" 
@@ -288,7 +380,7 @@ export default function CreateProformaInvoice() {
                   </div>
                   <div className="w-full sm:w-20 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
-                    <input 
+                    <SpeechInput 
                       type="number" 
                       className="neo-input w-full font-bold" 
                       placeholder="1" 
@@ -302,7 +394,7 @@ export default function CreateProformaInvoice() {
                   </div>
                   <div className="w-full sm:w-28 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
-                    <input 
+                    <SpeechInput 
                       type="number" 
                       className="neo-input w-full font-mono text-primary-dark" 
                       placeholder="0.00" 
@@ -314,30 +406,14 @@ export default function CreateProformaInvoice() {
                       }} 
                     />
                   </div>
-                  <div className="w-full sm:w-24 space-y-1">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">GST %</label>}
-                    <select 
-                      className="neo-input w-full bg-surface" 
-                      value={item.tax_percentage} 
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].tax_percentage = parseFloat(e.target.value) || 0;
-                        setItems(newItems);
-                      }}
-                    >
-                      <option value="0">0%</option>
-                      <option value="5">5%</option>
-                      <option value="12">12%</option>
-                      <option value="18">18%</option>
-                      <option value="28">28%</option>
-                    </select>
-                  </div>
+
                   <button onClick={() => removeItem(index)} className="p-2 neo-btn !px-3 !py-2 text-error h-[42px] mb-[2px]">
                     <Trash2 size={18} />
                   </button>
                 </div>
               ))}
             </div>
+          </div>
             
             <button onClick={addItem} className="neo-btn mt-6 flex items-center gap-2 text-sm text-secondary hover:text-primary-dark">
               <Plus size={16} /> Add Item
@@ -353,6 +429,30 @@ export default function CreateProformaInvoice() {
                 <span>Subtotal</span>
                 <span className="font-semibold text-primary-dark">₹ {totals.subtotal.toLocaleString()}</span>
               </div>
+
+              {/* Discount */}
+              <div className="flex justify-between items-center gap-2">
+                <label className="text-secondary shrink-0">Discount</label>
+                <select
+                  className="neo-input text-xs py-1 w-28"
+                  value={discountPercent}
+                  onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
+                >
+                  <option value={0}>None (0%)</option>
+                  <option value={5}>5%</option>
+                  <option value={10}>10%</option>
+                  <option value={20}>20%</option>
+                  <option value={30}>30%</option>
+                  <option value={50}>50%</option>
+                </select>
+              </div>
+              {discountPercent > 0 && (
+                <div className="flex justify-between text-green-600 text-xs">
+                  <span>Discount ({discountPercent}%)</span>
+                  <span className="font-semibold">- ₹ {totals.discountAmount.toLocaleString()}</span>
+                </div>
+              )}
+
               {isGstInfo.isIgst ? (
                 <div className="flex justify-between text-secondary">
                   <span>IGST</span>
@@ -370,6 +470,25 @@ export default function CreateProformaInvoice() {
                   </div>
                 </>
               )}
+
+              {/* Charge */}
+              <div className="flex justify-between items-center gap-2">
+                <label className="text-secondary shrink-0">Design Charge</label>
+                <SpeechInput
+                  type="number"
+                  className="neo-input text-xs py-1 w-28 font-mono"
+                  placeholder="0.00"
+                  value={chargeAmount || ''}
+                  onChange={(e) => setChargeAmount(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              {chargeAmount > 0 && (
+                <div className="flex justify-between text-orange-600 text-xs">
+                  <span>Design Charge</span>
+                  <span className="font-semibold">+ ₹ {totals.chargeAmount.toLocaleString()}</span>
+                </div>
+              )}
+
               <div className="flex justify-between text-secondary">
                 <span>Round-off</span>
                 <span className="font-semibold text-primary-dark">₹ {totals.roundOff.toFixed(2)}</span>
@@ -384,7 +503,7 @@ export default function CreateProformaInvoice() {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary px-1">Amount</label>
-                  <input type="number" className="neo-input w-full" value={advanceAmount || ''} onChange={(e) => setAdvanceAmount(parseFloat(e.target.value) || 0)} max={totals.grandTotal} />
+                  <SpeechInput type="number" className="neo-input w-full" value={advanceAmount || ''} onChange={(e) => setAdvanceAmount(parseFloat(e.target.value) || 0)} max={totals.grandTotal} />
                 </div>
                 <div className="animate-fade-in space-y-3">
                   <div className="grid grid-cols-2 gap-2">
@@ -392,6 +511,11 @@ export default function CreateProformaInvoice() {
                       <label className="text-xs font-semibold text-secondary px-1">Method</label>
                       <select className="neo-input w-full text-xs" value={advancePaymentMethod} onChange={(e) => setAdvancePaymentMethod(e.target.value)}>
                         <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Cash">Cash</option>
+                        <option value="GPay">GPay</option>
+                        <option value="PhonePe">PhonePe</option>
+                        <option value="Paytm">Paytm</option>
+                        <option value="UPI">UPI</option>
                         <option value="NEFT">NEFT</option>
                         <option value="RTGS">RTGS</option>
                         <option value="IMPS">IMPS</option>
@@ -404,10 +528,12 @@ export default function CreateProformaInvoice() {
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-semibold text-secondary px-1">Ref Number (Optional)</label>
-                    <input type="text" className="neo-input w-full text-xs animate-fade-in" value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
+                    <SpeechInput type="text" className="neo-input w-full text-xs animate-fade-in" value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
                   </div>
                 </div>
               </div>
+
+
               <div className="pt-6">
                 <button 
                   onClick={handleGenerateInvoice} 

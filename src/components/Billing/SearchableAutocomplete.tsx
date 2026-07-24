@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, ChevronDown, Check } from 'lucide-react';
+import FieldMicButton from '../Shared/FieldMicButton';
 
 interface Item {
   id: string;
@@ -67,6 +68,12 @@ export default function SearchableAutocomplete({
           }}
           onFocus={() => setIsOpen(true)}
         />
+        <FieldMicButton
+          onTranscript={(text) => {
+            setSearchTerm(text);
+            onCustomChange?.(text);
+          }}
+        />
         <ChevronDown size={16} className={`text-secondary transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </div>
 
@@ -100,3 +107,4 @@ export default function SearchableAutocomplete({
     </div>
   );
 }
+

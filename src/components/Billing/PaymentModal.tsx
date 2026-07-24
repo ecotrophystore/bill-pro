@@ -102,10 +102,11 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
       }
 
       await batch.commit();
+
+      alert("Payment added successfully!");
       
       setAmount((document.balance_amount || 0) - amount);
       setReference('');
-      alert("Payment added successfully!");
       fetchPayments();
       onPaymentUpdated();
     } catch (err: any) {
@@ -177,22 +178,15 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Method</label>
                   <select className="neo-input w-full" value={method} onChange={e => setMethod(e.target.value)}>
-                    {documentType === 'invoice' ? (
-                      <>
-                        <option value="Bank Transfer">Bank Transfer</option>
-                        <option value="NEFT">NEFT</option>
-                        <option value="RTGS">RTGS</option>
-                        <option value="IMPS">IMPS</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="Cash">Cash</option>
-                        <option value="GPay">GPay</option>
-                        <option value="PhonePe">PhonePe</option>
-                        <option value="Paytm">Paytm</option>
-                        <option value="UPI">UPI</option>
-                      </>
-                    )}
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="GPay">GPay</option>
+                    <option value="PhonePe">PhonePe</option>
+                    <option value="Paytm">Paytm</option>
+                    <option value="UPI">UPI</option>
+                    <option value="NEFT">NEFT</option>
+                    <option value="RTGS">RTGS</option>
+                    <option value="IMPS">IMPS</option>
                   </select>
                 </div>
                 <div className="space-y-1">

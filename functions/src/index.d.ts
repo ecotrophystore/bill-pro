@@ -12,6 +12,16 @@ export declare const convertQuotationToCashMemo: import("firebase-functions/v2/h
     memoId: string;
     memoNumber: string;
 }>, unknown>;
+export declare const convertQuotationToProforma: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    proformaId: string;
+    proformaNumber: string;
+}>, unknown>;
+export declare const convertProformaToInvoice: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    invoiceId: string;
+    invoiceNumber: string;
+}>, unknown>;
 /**
  * 1. Invoice Numbering & 2. Immutability
  * Creates a direct invoice with atomicity.
@@ -19,12 +29,12 @@ export declare const convertQuotationToCashMemo: import("firebase-functions/v2/h
 export declare const createInvoice: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     invoiceId: string;
-    invoiceNumber: string;
+    invoiceNumber: any;
 }>, unknown>;
 export declare const createProformaInvoice: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     invoiceId: string;
-    invoiceNumber: string;
+    invoiceNumber: any;
 }>, unknown>;
 /**
  * NEW: Cash Memo Module (Choice 1a, 2b)
@@ -33,7 +43,7 @@ export declare const createProformaInvoice: import("firebase-functions/v2/https"
 export declare const createCashMemo: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     memoId: string;
-    memoNumber: string;
+    memoNumber: any;
 }>, unknown>;
 /**
  * 1. Sequential Numbering
@@ -42,7 +52,7 @@ export declare const createCashMemo: import("firebase-functions/v2/https").Calla
 export declare const createQuotation: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     quotationId: string;
-    quotationNumber: string;
+    quotationNumber: any;
 }>, unknown>;
 /**
  * 4. Bank Reconciliation Gate
@@ -52,7 +62,7 @@ export declare const matchTransaction: import("firebase-functions/v2/https").Cal
     success: boolean;
 }>, unknown>;
 /**
- * 15. AI Auditor Layer (gemini-3.5-flash)
+ * 15. AI Auditor Layer (gemini-2.5-flash)
  */
 export declare const aiAuditor: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     text: any;
@@ -81,6 +91,9 @@ export declare const parsePDFStatement: import("firebase-functions/v2/https").Ca
  */
 export declare const extractInvoiceData: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
+    data: any;
+}>, unknown>;
+export declare const extractExpenseReceipt: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     data: any;
 }>, unknown>;
 //# sourceMappingURL=index.d.ts.map
