@@ -129,6 +129,67 @@ service cloud.firestore {
       allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
       allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid; // for marking read
     }
+
+    // SYSTEM CONFIG COLLECTION
+    match /system/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // META INTEGRATION CONFIG
+    match /meta_integrations/{docId} {
+      allow read: if isAuthenticated(); // All authenticated users can see connection status
+      allow write: if isAdmin();        // Only admins save config; Cloud Functions also write via admin SDK (bypasses rules)
+    }
+    
+    match /leads/{leadId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
+    match /pipelines/{pipelineId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
+    match /message_templates/{templateId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts();
+    }
+
+    match /message_queue/{queueId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update: if isAdmin(); // only Admin (Cloud Functions) can update status/delivery parameters
+    }
+
+    match /activities/{activityId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
+    match /whatsapp_automations/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isSales();
+    }
+
+    match /automation_enrollments/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isSales();
+      allow update: if isAdmin(); // only Cloud Functions can update scheduler status
+      allow delete: if isAdmin();
+    }
+
+    match /lead_intake_events/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+    
+    // META WEBHOOK EVENTS
+    match /meta_webhook_events/{eventId} {
+      allow read: if isAdmin();
+      allow write: if false; // Only Cloud Functions write to this
+    }
     
     // AUDIT LOG
     match /audit_logs/{logId} {
@@ -138,3 +199,4 @@ service cloud.firestore {
     
   }
 }
+

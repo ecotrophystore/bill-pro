@@ -1,11 +1,18 @@
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue, Query } from "firebase-admin/firestore";
+import { getFirestore, FieldValue, Query, Timestamp } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 import { getStorage } from "firebase-admin/storage";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 initializeApp();
 const db = getFirestore();
+export * from './metaIntegration.js';
+export * from './metaWebhookProcessor.js';
+export * from './meta/facebook.js';
+export * from './meta/instagram.js';
 function getAI() {
     const apiKey = process.env.GOOGLE_GENAI_API_KEY || '';
     return new GoogleGenAI({ apiKey });
@@ -682,7 +689,8 @@ export const createCashMemo = onCall(async (request) => {
             is_gst: false,
             is_locked: true,
             status: "finalized",
-            payment_status: "paid", // Cash memos are assumed paid immediately
+            payment_status: rawData.payment_status || "unpaid",
+            payment_date: rawData.payment_status === "paid" ? (rawData.advance_payment_date || new Date().toISOString().split('T')[0]) : null,
             items: validatedItems,
             subtotal: exactRound(subtotal),
             tax_total: 0,
@@ -1155,7 +1163,7 @@ export const analyzePendingTransactions = onCall(async (request) => {
             if ((result.confidence_score || 0) < 0.6 || result.category === 'General') {
                 await db.collection("notifications").add({
                     title: "AI Auditor Question",
-                    message: `I found a cryptic transaction for ₹${tx.amount} (Ref: ${tx.bank_transaction_id || tx.description.substring(0, 20)}). I placed it in ${result.category || 'General'}, but I suspect it might be a new vendor or unmapped entity. Please review it.`,
+                    message: `I found a cryptic transaction for Ã¢â€šÂ¹${tx.amount} (Ref: ${tx.bank_transaction_id || tx.description.substring(0, 20)}). I placed it in ${result.category || 'General'}, but I suspect it might be a new vendor or unmapped entity. Please review it.`,
                     user_id: "system",
                     is_read: false,
                     created_at: new Date()
@@ -1386,6 +1394,1645 @@ Important: Ensure amount is a number.`;
     catch (error) {
         console.error('Gemini AI Extraction Error:', error);
         throw new HttpsError('internal', 'Failed to extract data');
+    }
+});
+function cleanValue(value) {
+    if (value === null || value === undefined)
+        return "";
+    return String(value).trim();
+}
+function normalizePhone(value) {
+    const digits = cleanValue(value).replace(/\D/g, "");
+    if (!digits)
+        return "";
+    return digits.length > 10 ? digits.slice(-10) : digits;
+}
+function getRawBody(request) {
+    if (typeof request.rawBody === "string")
+        return request.rawBody;
+    if (request.rawBody && Buffer.isBuffer(request.rawBody))
+        return request.rawBody.toString("utf8");
+    if (request.body && typeof request.body === "string")
+        return request.body;
+    return JSON.stringify(request.body || {});
+}
+function verifyMetaSignature(request) {
+    const appSecret = cleanValue(process.env.META_APP_SECRET);
+    if (!appSecret)
+        return true;
+    const header = cleanValue(request.get?.("x-hub-signature-256") || request.headers?.["x-hub-signature-256"]);
+    if (!header.startsWith("sha256="))
+        return false;
+    const payload = getRawBody(request);
+    const expected = `sha256=${createHmac("sha256", appSecret).update(payload, "utf8").digest("hex")}`;
+    const expectedBuf = Buffer.from(expected, "utf8");
+    const headerBuf = Buffer.from(header, "utf8");
+    if (expectedBuf.length !== headerBuf.length)
+        return false;
+    return timingSafeEqual(expectedBuf, headerBuf);
+}
+function verifyGoogleKey(raw) {
+    const expectedKey = cleanValue(process.env.GOOGLE_LEAD_WEBHOOK_KEY);
+    if (!expectedKey)
+        return true;
+    return cleanValue(raw?.google_key || raw?.key) === expectedKey;
+}
+function sourceLabel(platform, sourceType) {
+    if (platform === "meta")
+        return sourceType === "dm" ? "Meta DM" : "Meta Lead Ads";
+    if (platform === "google")
+        return "Google Ads";
+    if (platform === "manual")
+        return "Manual";
+    return "Test Ingest";
+}
+function stableEventId(platform, raw, explicitId) {
+    const explicit = cleanValue(explicitId);
+    if (explicit)
+        return explicit;
+    const hash = createHash("sha1").update(`${platform}:${JSON.stringify(raw || {})}`).digest("hex");
+    return `${platform}_${hash.slice(0, 20)}`;
+}
+function extractMetaLeadFields(raw) {
+    const value = raw?.entry?.[0]?.changes?.[0]?.value || raw?.data || raw;
+    const fieldData = Array.isArray(value?.field_data) ? value.field_data : [];
+    const fieldMap = {};
+    for (const item of fieldData) {
+        const key = cleanValue(item?.name);
+        if (!key)
+            continue;
+        fieldMap[key] = cleanValue(item?.values?.[0] ?? item?.value);
+    }
+    return { value, fieldMap };
+}
+function extractGoogleLeadFields(raw) {
+    const source = raw?.user_column_data || raw?.lead_form_submission_fields || raw?.custom_lead_form_submission_fields || [];
+    const fieldMap = {};
+    for (const item of Array.isArray(source) ? source : []) {
+        const key = cleanValue(item?.column_id || item?.field_id || item?.column_name || item?.name);
+        const value = cleanValue(item?.string_value || item?.value || item?.text_value);
+        if (!key || !value)
+            continue;
+        fieldMap[key] = value;
+        fieldMap[key.toLowerCase()] = value;
+    }
+    const name = cleanValue(raw?.full_name) ||
+        cleanValue(fieldMap.FULL_NAME) ||
+        cleanValue(fieldMap.full_name) ||
+        cleanValue(fieldMap.NAME) ||
+        cleanValue(fieldMap.name);
+    const phone = normalizePhone(raw?.phone_number) ||
+        normalizePhone(fieldMap.PHONE_NUMBER) ||
+        normalizePhone(fieldMap.phone_number) ||
+        normalizePhone(fieldMap.PHONE) ||
+        normalizePhone(fieldMap.phone);
+    const email = cleanValue(raw?.email).toLowerCase() ||
+        cleanValue(fieldMap.EMAIL).toLowerCase() ||
+        cleanValue(fieldMap.email).toLowerCase();
+    const campaign_id = cleanValue(raw?.campaign_id);
+    const adgroup_id = cleanValue(raw?.adgroup_id);
+    const ad_id = cleanValue(raw?.creative_id || raw?.ad_id);
+    const form_id = cleanValue(raw?.form_id);
+    const eventId = cleanValue(raw?.lead_id);
+    const campaign = cleanValue(raw?.campaign_name || raw?.campaign);
+    const message = cleanValue(raw?.lead_stage || raw?.lead_source || raw?.api_version);
+    return {
+        fieldMap,
+        name,
+        phone,
+        email,
+        campaign_id,
+        adgroup_id,
+        ad_id,
+        form_id,
+        eventId,
+        campaign,
+        message,
+    };
+}
+function normalizeInboundLead(input, fallbackPlatform = "test") {
+    const raw = input?.raw_payload ?? input?.payload ?? input?.data ?? input?.lead ?? input;
+    let platform = input?.platform || fallbackPlatform;
+    let sourceType = cleanValue(input?.sourceType);
+    let source = cleanValue(input?.source) || sourceLabel(platform, sourceType || undefined);
+    let eventId = cleanValue(input?.event_id || input?.eventId);
+    let name = cleanValue(input?.name);
+    let phone = normalizePhone(input?.phone);
+    let email = cleanValue(input?.email).toLowerCase();
+    let campaign = cleanValue(input?.campaign);
+    let campaign_id = cleanValue(input?.campaign_id);
+    let ad_id = cleanValue(input?.ad_id);
+    let form_id = cleanValue(input?.form_id);
+    let message = cleanValue(input?.message);
+    const isMetaWebhook = Array.isArray(raw?.entry) && raw?.object;
+    if (isMetaWebhook) {
+        platform = "meta";
+        const entry = raw.entry?.[0] || {};
+        const change = entry.changes?.[0] || {};
+        const value = change.value || {};
+        if (value?.field_data) {
+            sourceType = "lead_ads";
+            const { fieldMap } = extractMetaLeadFields(raw);
+            name = name || fieldMap.full_name || fieldMap.name || [fieldMap.first_name, fieldMap.last_name].filter(Boolean).join(" ").trim();
+            phone = phone || normalizePhone(fieldMap.phone_number || fieldMap.phone || fieldMap.whatsapp_number);
+            email = email || cleanValue(fieldMap.email).toLowerCase();
+            campaign = campaign || cleanValue(value.campaign_name || value.campaign || raw.campaign_name);
+            campaign_id = campaign_id || cleanValue(value.campaign_id || raw.campaign_id);
+            ad_id = ad_id || cleanValue(value.ad_id || raw.ad_id);
+            form_id = form_id || cleanValue(value.form_id || raw.form_id);
+            eventId = eventId || cleanValue(value.leadgen_id || value.lead_id || entry.id);
+            source = source || "Meta Lead Ads";
+            message = message || cleanValue(value.custom_disclaimer || "");
+        }
+        else if (Array.isArray(entry.messaging) && entry.messaging.length > 0) {
+            sourceType = "dm";
+            const messaging = entry.messaging[0] || {};
+            eventId = eventId || cleanValue(messaging.message?.mid || `${entry.id || "meta"}_${messaging.sender?.id || "sender"}_${messaging.timestamp || Date.now()}`);
+            name = name || cleanValue(messaging.sender?.name || messaging.sender?.id || "Meta DM Lead");
+            phone = phone || normalizePhone(messaging.sender?.phone_number);
+            message = message || cleanValue(messaging.message?.text || messaging.message?.caption || messaging.message?.attachments?.[0]?.payload?.url);
+            source = source || (raw.object === "instagram" ? "Instagram DM" : "Facebook DM");
+        }
+    }
+    const googleLead = raw?.leadFormSubmissionData || raw?.lead_form_submission_data || raw?.lead || raw?.payload || raw;
+    const looksLikeGoogleWebhook = Array.isArray(raw?.user_column_data) || raw?.google_key || raw?.is_test || raw?.lead_id;
+    if (platform === "google" || String(source).toLowerCase().includes("google") || googleLead?.lead_form_submission_data || looksLikeGoogleWebhook) {
+        platform = "google";
+        sourceType = sourceType || "lead_form";
+        const googleFields = extractGoogleLeadFields(raw);
+        name = name || googleFields.name || cleanValue(googleLead?.name || googleLead?.full_name || googleLead?.fullName || googleLead?.customer_name || raw?.customer_name);
+        phone = phone || googleFields.phone || normalizePhone(googleLead?.phone || googleLead?.phone_number || raw?.phone_number);
+        email = email || googleFields.email || cleanValue(googleLead?.email || raw?.email).toLowerCase();
+        campaign = campaign || googleFields.campaign || cleanValue(googleLead?.campaign_name || raw?.campaign_name || raw?.campaign);
+        campaign_id = campaign_id || googleFields.campaign_id || cleanValue(googleLead?.campaign_id || raw?.campaign_id);
+        ad_id = ad_id || googleFields.ad_id || cleanValue(googleLead?.ad_id || raw?.ad_id || raw?.ad_group_id);
+        form_id = form_id || googleFields.form_id || cleanValue(googleLead?.form_id || raw?.form_id || googleLead?.lead_form_id);
+        eventId = eventId || googleFields.eventId || cleanValue(googleLead?.submission_id || googleLead?.lead_id || raw?.lead_id);
+        source = source || "Google Ads";
+        message = message || googleFields.message || cleanValue(googleLead?.message || raw?.message);
+    }
+    if (!eventId)
+        eventId = stableEventId(platform, raw, raw?.eventId || raw?.event_id);
+    if (!name)
+        name = cleanValue(raw?.name || raw?.full_name || raw?.fullName || raw?.customer_name || "Unknown Lead");
+    return {
+        eventId,
+        platform,
+        source: source || sourceLabel(platform, sourceType || undefined),
+        sourceType: sourceType || (platform === "meta" ? "lead_ads" : platform === "google" ? "lead_form" : "manual"),
+        name,
+        phone,
+        email,
+        campaign,
+        campaign_id,
+        ad_id,
+        form_id,
+        message,
+        raw,
+    };
+}
+async function findMatchingLead(transaction, normalized) {
+    if (normalized.phone) {
+        const phoneSnap = await transaction.get(db.collection("leads").where("normalized_phone", "==", normalized.phone).limit(1));
+        if (!phoneSnap.empty)
+            return phoneSnap.docs[0];
+    }
+    if (normalized.email) {
+        const emailSnap = await transaction.get(db.collection("leads").where("normalized_email", "==", normalized.email).limit(1));
+        if (!emailSnap.empty)
+            return emailSnap.docs[0];
+    }
+    return null;
+}
+function renderTemplateText(template, context) {
+    return String(template || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key) => context[key] || "");
+}
+async function queueTemplateActivity(transaction, leadId, leadData, pipelineId, stageId) {
+    const templateSnap = await transaction.get(db.collection("message_templates").where("pipeline_id", "==", pipelineId));
+    if (templateSnap.empty)
+        return null;
+    const template = templateSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() })).find((item) => item.is_active !== false && item.trigger_stage_id === stageId);
+    if (!template)
+        return null;
+    // Idempotency check for automation run
+    const idempotencyKey = `${leadId}_stage_change_${stageId}_${template.id}`;
+    const runRef = db.collection("automation_runs").doc(idempotencyKey);
+    const runSnap = await transaction.get(runRef);
+    if (runSnap.exists) {
+        const skippedActivityRef = db.collection("activities").doc();
+        transaction.create(skippedActivityRef, {
+            lead_id: leadId,
+            type: "automation.run.skipped",
+            message: `Skipped duplicate automation trigger for stage "${stageId}" (Idempotency Active)`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp(),
+        });
+        return null;
+    }
+    const pipelineSnap = await transaction.get(db.collection("pipelines").doc(pipelineId));
+    const pipelineData = pipelineSnap.exists ? (pipelineSnap.data() || {}) : {};
+    const stageLabel = Array.isArray(pipelineData.stages)
+        ? (pipelineData.stages.find((stage) => String(stage?.id || "") === stageId)?.label || stageId)
+        : stageId;
+    const context = {
+        name: cleanValue(leadData?.name) || "",
+        phone: cleanValue(leadData?.phone) || "",
+        email: cleanValue(leadData?.email) || "",
+        source: cleanValue(leadData?.source) || "",
+        campaign: cleanValue(leadData?.campaign) || "",
+        pipeline: cleanValue(pipelineData.name) || pipelineId,
+        pipeline_id: pipelineId,
+        stage: stageLabel,
+        status: stageLabel,
+        reason: cleanValue(leadData?.reason) || "",
+        channel: template.channel || "",
+        template_name: template.name || "",
+    };
+    const subject = template.subject ? renderTemplateText(String(template.subject), context) : "";
+    const body = renderTemplateText(String(template.body || ""), context);
+    // Write the automation run record
+    transaction.create(runRef, {
+        lead_id: leadId,
+        automation_id: template.id,
+        trigger_type: "stage_change",
+        stage_id: stageId,
+        status: "success",
+        run_at: FieldValue.serverTimestamp(),
+        idempotency_key: idempotencyKey,
+    });
+    const activityRef = db.collection("activities").doc();
+    transaction.create(activityRef, {
+        lead_id: leadId,
+        type: "message.template.prepared",
+        message: `${template.name}${subject ? ` | ${subject}` : ""}: ${body}`,
+        actor: "system",
+        created_at: FieldValue.serverTimestamp(),
+    });
+    // Test WhatsApp action stub & Real WhatsApp Queue
+    if (template.channel === 'whatsapp' || template.channel === 'stub') {
+        const isStub = template.channel === 'stub';
+        const queueRef = db.collection("message_queue").doc();
+        transaction.create(queueRef, {
+            lead_id: leadId,
+            template_id: template.id,
+            pipeline_id: pipelineId,
+            channel: template.channel,
+            subject,
+            body,
+            status: isStub ? "sent" : "queued",
+            created_by: "system",
+            created_at: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp(),
+        });
+        if (isStub) {
+            const whatsappActivityRef = db.collection("activities").doc();
+            transaction.create(whatsappActivityRef, {
+                lead_id: leadId,
+                type: "message.template.sent",
+                message: `WhatsApp stub message successfully sent to ${context.phone || 'unspecified number'}. Status: completed.`,
+                actor: "system",
+                created_at: FieldValue.serverTimestamp(),
+            });
+        }
+    }
+    return { templateId: template.id, rendered: body, subject };
+}
+async function processInboundLead(input, fallbackPlatform = "test") {
+    const normalized = normalizeInboundLead(input, fallbackPlatform);
+    const pipelineId = cleanValue(input?.pipeline_id || input?.pipelineId) || "default";
+    const eventRef = db.collection("lead_intake_events").doc(normalized.eventId);
+    const activityRef = db.collection("activities").doc();
+    return await db.runTransaction(async (transaction) => {
+        const existingEvent = await transaction.get(eventRef);
+        if (existingEvent.exists) {
+            return {
+                status: "duplicate",
+                eventId: normalized.eventId,
+                message: "Duplicate event ignored"
+            };
+        }
+        const matchedLead = await findMatchingLead(transaction, normalized);
+        if (matchedLead) {
+            const leadUpdate = {
+                updated_at: FieldValue.serverTimestamp(),
+                last_event_id: normalized.eventId,
+            };
+            if (normalized.name)
+                leadUpdate.name = normalized.name;
+            if (normalized.phone) {
+                leadUpdate.phone = normalized.phone;
+                leadUpdate.normalized_phone = normalized.phone;
+            }
+            if (normalized.email) {
+                leadUpdate.email = normalized.email;
+                leadUpdate.normalized_email = normalized.email;
+            }
+            if (normalized.source)
+                leadUpdate.source = normalized.source;
+            if (normalized.platform)
+                leadUpdate.platform = normalized.platform;
+            if (normalized.campaign)
+                leadUpdate.campaign = normalized.campaign;
+            if (normalized.campaign_id)
+                leadUpdate.campaign_id = normalized.campaign_id;
+            if (normalized.ad_id)
+                leadUpdate.ad_id = normalized.ad_id;
+            if (normalized.form_id)
+                leadUpdate.form_id = normalized.form_id;
+            leadUpdate.pipeline_id = pipelineId;
+            transaction.update(matchedLead.ref, leadUpdate);
+            transaction.create(eventRef, {
+                event_id: normalized.eventId,
+                source: normalized.source,
+                platform: normalized.platform,
+                status: "matched",
+                lead_id: matchedLead.id,
+                message: "Matched and updated existing lead",
+                raw_payload: normalized.raw,
+                created_at: FieldValue.serverTimestamp(),
+            });
+            transaction.create(activityRef, {
+                lead_id: matchedLead.id,
+                type: "lead.matched",
+                message: `${normalized.source} matched existing lead`,
+                actor: "system",
+                created_at: FieldValue.serverTimestamp(),
+            });
+            return {
+                status: "matched",
+                leadId: matchedLead.id,
+                eventId: normalized.eventId,
+                source: normalized.source,
+            };
+        }
+        const leadRef = db.collection("leads").doc();
+        const leadData = {
+            id: leadRef.id,
+            name: normalized.name,
+            source: normalized.source,
+            platform: normalized.platform,
+            pipeline_id: pipelineId,
+            status: "new",
+            last_event_id: normalized.eventId,
+            created_at: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp(),
+        };
+        if (normalized.phone) {
+            leadData.phone = normalized.phone;
+            leadData.normalized_phone = normalized.phone;
+        }
+        if (normalized.email) {
+            leadData.email = normalized.email;
+            leadData.normalized_email = normalized.email;
+        }
+        if (normalized.campaign)
+            leadData.campaign = normalized.campaign;
+        if (normalized.campaign_id)
+            leadData.campaign_id = normalized.campaign_id;
+        if (normalized.ad_id)
+            leadData.ad_id = normalized.ad_id;
+        if (normalized.form_id)
+            leadData.form_id = normalized.form_id;
+        transaction.create(leadRef, leadData);
+        transaction.create(eventRef, {
+            event_id: normalized.eventId,
+            source: normalized.source,
+            platform: normalized.platform,
+            status: "created",
+            lead_id: leadRef.id,
+            message: "Created new lead",
+            raw_payload: normalized.raw,
+            created_at: FieldValue.serverTimestamp(),
+        });
+        transaction.create(activityRef, {
+            lead_id: leadRef.id,
+            type: "lead.created",
+            message: `${normalized.source} created a new lead`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp(),
+        });
+        await queueTemplateActivity(transaction, leadRef.id, leadData, pipelineId, leadData.status);
+        return {
+            status: "created",
+            leadId: leadRef.id,
+            eventId: normalized.eventId,
+            source: normalized.source,
+        };
+    });
+}
+async function handleWebhook(request, response, fallbackPlatform) {
+    if (request.method === "GET" && fallbackPlatform === "meta") {
+        const mode = cleanValue(request.query["hub.mode"] || request.query.mode);
+        const token = cleanValue(request.query["hub.verify_token"] || request.query.verify_token);
+        const challenge = cleanValue(request.query["hub.challenge"] || request.query.challenge);
+        const expected = cleanValue(process.env.META_WEBHOOK_VERIFY_TOKEN);
+        if (mode === "subscribe" && expected && token !== expected) {
+            response.status(403).send("Forbidden");
+            return;
+        }
+        if (mode === "subscribe") {
+            response.status(200).send(challenge || "ok");
+            return;
+        }
+    }
+    if (request.method !== "POST") {
+        response.status(200).json({ ok: true });
+        return;
+    }
+    try {
+        if (fallbackPlatform === "meta" && !verifyMetaSignature(request)) {
+            response.status(401).json({ ok: false, error: "Invalid Meta signature" });
+            return;
+        }
+        const rawBody = request.body || {};
+        if (fallbackPlatform === "google" && !verifyGoogleKey(rawBody)) {
+            response.status(403).json({ ok: false, error: "Invalid Google webhook key" });
+            return;
+        }
+        // NEW: Handle WhatsApp Webhook message delivery status updates or inbound customer replies
+        const value = rawBody.entry?.[0]?.changes?.[0]?.value;
+        if (value && value.messaging_product === "whatsapp") {
+            // 1. Process Message Status Updates (delivered/read/failed status updates)
+            if (Array.isArray(value.statuses) && value.statuses.length > 0) {
+                for (const statusObj of value.statuses) {
+                    const wamid = statusObj.id;
+                    const status = statusObj.status; // delivered, read, failed
+                    const queueQuery = await db.collection("message_queue")
+                        .where("metaMessageId", "==", wamid)
+                        .limit(1)
+                        .get();
+                    if (!queueQuery.empty && queueQuery.docs[0]) {
+                        const docRef = queueQuery.docs[0].ref;
+                        const updateFields = { status };
+                        if (status === "delivered")
+                            updateFields.deliveredAt = FieldValue.serverTimestamp();
+                        if (status === "read")
+                            updateFields.readAt = FieldValue.serverTimestamp();
+                        if (status === "failed") {
+                            updateFields.failedAt = FieldValue.serverTimestamp();
+                            updateFields.errorCode = statusObj.errors?.[0]?.code || "";
+                            updateFields.errorMessage = statusObj.errors?.[0]?.message || "";
+                        }
+                        await docRef.update(updateFields);
+                        // Add activity log
+                        const qData = queueQuery.docs[0].data();
+                        await db.collection("activities").add({
+                            lead_id: qData ? qData.lead_id : "",
+                            type: `message.${status}`,
+                            message: `WhatsApp message ${status}. Message ID: ${wamid}`,
+                            actor: "system",
+                            created_at: FieldValue.serverTimestamp()
+                        });
+                    }
+                }
+            }
+            // 2. Process Inbound Messages (customer replies)
+            if (Array.isArray(value.messages) && value.messages.length > 0) {
+                for (const msgObj of value.messages) {
+                    const fromPhone = msgObj.from; // Phone sender
+                    const leadQuery = await db.collection("leads")
+                        .where("normalized_phone", "==", fromPhone)
+                        .limit(1)
+                        .get();
+                    if (!leadQuery.empty && leadQuery.docs[0]) {
+                        const leadDoc = leadQuery.docs[0];
+                        await leadDoc.ref.update({
+                            lastCustomerReplyAt: FieldValue.serverTimestamp()
+                        });
+                        // Find active enrollments with stopOnReply enabled and cancel them
+                        const enrollsSnap = await db.collection("automation_enrollments")
+                            .where("leadId", "==", leadDoc.id)
+                            .where("status", "==", "scheduled")
+                            .get();
+                        if (!enrollsSnap.empty) {
+                            for (const enrollDoc of enrollsSnap.docs) {
+                                const enrollData = enrollDoc.data();
+                                const autoSnap = await db.collection("whatsapp_automations").doc(enrollData.automationId).get();
+                                if (autoSnap.exists && autoSnap.data()?.stopOnReply) {
+                                    await enrollDoc.ref.update({
+                                        status: "cancelled",
+                                        cancelReason: "Customer replied to WhatsApp message",
+                                        updatedAt: FieldValue.serverTimestamp()
+                                    });
+                                    await db.collection("activities").add({
+                                        lead_id: leadDoc.id,
+                                        type: "automation.cancelled",
+                                        message: `WhatsApp Automation enrollment cancelled due to customer reply.`,
+                                        actor: "system",
+                                        created_at: FieldValue.serverTimestamp()
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            response.status(200).json({ ok: true, message: "WhatsApp webhook processed" });
+            return;
+        }
+        const result = await processInboundLead(rawBody, fallbackPlatform);
+        response.status(200).json({ ok: true, ...result });
+    }
+    catch (error) {
+        console.error("Lead webhook failed:", error);
+        response.status(500).json({ ok: false, error: error?.message || String(error) });
+    }
+}
+export const metaLeadWebhook = onRequest(async (request, response) => {
+    await handleWebhook(request, response, "meta");
+});
+export const googleLeadWebhook = onRequest(async (request, response) => {
+    await handleWebhook(request, response, "google");
+});
+export const testLeadIngest = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const result = await processInboundLead({
+        platform: (request.data?.platform || "test"),
+        source: request.data?.source || "Test Ingest",
+        sourceType: request.data?.sourceType || "manual",
+        event_id: request.data?.event_id,
+        eventId: request.data?.eventId,
+        name: request.data?.name,
+        phone: request.data?.phone,
+        email: request.data?.email,
+        campaign: request.data?.campaign,
+        campaign_id: request.data?.campaign_id,
+        ad_id: request.data?.ad_id,
+        form_id: request.data?.form_id,
+        pipeline_id: request.data?.pipeline_id,
+        message: request.data?.message,
+        raw_payload: request.data,
+    }, (request.data?.platform || "test"));
+    return result;
+});
+export const testLeadIngestHttp = onRequest(async (request, response) => {
+    const origin = request.get("origin") || "*";
+    response.set("Access-Control-Allow-Origin", origin);
+    response.set("Vary", "Origin");
+    response.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    response.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (request.method === "OPTIONS") {
+        response.status(204).send("");
+        return;
+    }
+    if (request.method !== "POST") {
+        response.status(405).json({ ok: false, error: "Method not allowed" });
+        return;
+    }
+    try {
+        const authHeader = cleanValue(request.get("authorization") || request.get("Authorization"));
+        const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+        if (!token) {
+            response.status(401).json({ ok: false, error: "Missing Authorization token" });
+            return;
+        }
+        const decoded = await getAuth().verifyIdToken(token);
+        if (!decoded.uid) {
+            response.status(401).json({ ok: false, error: "Invalid token" });
+            return;
+        }
+        const body = typeof request.body === "string"
+            ? JSON.parse(request.body)
+            : (request.body || {});
+        const result = await processInboundLead({
+            platform: (body.platform || "test"),
+            source: body.source || "Test Ingest",
+            sourceType: body.sourceType || "manual",
+            event_id: body.event_id,
+            eventId: body.eventId,
+            name: body.name,
+            phone: body.phone,
+            email: body.email,
+            campaign: body.campaign,
+            campaign_id: body.campaign_id,
+            ad_id: body.ad_id,
+            form_id: body.form_id,
+            pipeline_id: body.pipeline_id,
+            message: body.message,
+            raw_payload: body,
+        }, (body.platform || "test"));
+        response.status(200).json({ ok: true, ...result });
+    }
+    catch (error) {
+        console.error("testLeadIngestHttp failed:", error);
+        response.status(500).json({ ok: false, error: error?.message || String(error) });
+    }
+});
+export const queueLeadTemplateMessage = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const uid = request.auth.uid;
+    const leadId = cleanValue(request.data?.leadId);
+    const templateId = cleanValue(request.data?.templateId);
+    if (!leadId)
+        throw new HttpsError("invalid-argument", "Missing leadId");
+    if (!templateId)
+        throw new HttpsError("invalid-argument", "Missing templateId");
+    const leadRef = db.collection("leads").doc(leadId);
+    const templateRef = db.collection("message_templates").doc(templateId);
+    return await db.runTransaction(async (transaction) => {
+        const leadSnap = await transaction.get(leadRef);
+        if (!leadSnap.exists)
+            throw new HttpsError("not-found", "Lead not found");
+        const templateSnap = await transaction.get(templateRef);
+        if (!templateSnap.exists)
+            throw new HttpsError("not-found", "Message template not found");
+        const leadData = leadSnap.data() || {};
+        const template = templateSnap.data() || {};
+        if (template.is_active === false) {
+            throw new HttpsError("failed-precondition", "Message template is inactive");
+        }
+        const pipelineId = cleanValue(leadData.pipeline_id || template.pipeline_id || "default") || "default";
+        const pipelineSnap = await transaction.get(db.collection("pipelines").doc(pipelineId));
+        const pipelineData = pipelineSnap.exists ? (pipelineSnap.data() || {}) : {};
+        const stageId = cleanValue(leadData.status || template.trigger_stage_id || "new");
+        const stageLabel = Array.isArray(pipelineData.stages)
+            ? (pipelineData.stages.find((stage) => String(stage?.id || "") === stageId)?.label || stageId)
+            : stageId;
+        const context = {
+            name: cleanValue(leadData.name) || "",
+            phone: cleanValue(leadData.phone) || "",
+            email: cleanValue(leadData.email) || "",
+            source: cleanValue(leadData.source) || "",
+            campaign: cleanValue(leadData.campaign) || "",
+            pipeline: cleanValue(pipelineData.name) || pipelineId,
+            stage: stageLabel,
+            reason: cleanValue(leadData.reason) || "",
+        };
+        const subject = template.subject ? renderTemplateText(String(template.subject), context) : "";
+        const body = renderTemplateText(String(template.body || ""), context);
+        const queueRef = db.collection("message_queue").doc();
+        transaction.create(queueRef, {
+            lead_id: leadId,
+            template_id: templateId,
+            pipeline_id: pipelineId,
+            channel: template.channel || "note",
+            subject,
+            body,
+            status: "queued",
+            created_by: uid,
+            created_at: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp(),
+        });
+        const activityRef = db.collection("activities").doc();
+        transaction.create(activityRef, {
+            lead_id: leadId,
+            type: "message.template.queued",
+            message: `${template.name}${subject ? ` | ${subject}` : ""}: ${body}`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp(),
+        });
+        return {
+            success: true,
+            queueId: queueRef.id,
+            activityId: activityRef.id,
+            subject,
+            body,
+            channel: template.channel || "note",
+        };
+    });
+});
+export const updateLeadDetails = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const uid = request.auth.uid;
+    const leadId = cleanValue(request.data?.leadId);
+    if (!leadId)
+        throw new HttpsError("invalid-argument", "Missing leadId");
+    const leadRef = db.collection("leads").doc(leadId);
+    return await db.runTransaction(async (transaction) => {
+        const leadSnap = await transaction.get(leadRef);
+        if (!leadSnap.exists)
+            throw new HttpsError("not-found", "Lead not found");
+        const current = leadSnap.data() || {};
+        const updates = { updated_at: FieldValue.serverTimestamp() };
+        const changedFields = [];
+        const applyStringField = (field, rawValue) => {
+            if (rawValue === undefined)
+                return;
+            const nextValue = cleanValue(rawValue);
+            if (!nextValue) {
+                if (current[field] !== undefined && current[field] !== null && current[field] !== "") {
+                    updates[field] = FieldValue.delete();
+                    changedFields.push(field);
+                }
+                return;
+            }
+            if (current[field] !== nextValue) {
+                updates[field] = nextValue;
+                changedFields.push(field);
+            }
+        };
+        applyStringField("name", request.data?.name);
+        applyStringField("phone", request.data?.phone);
+        applyStringField("email", request.data?.email);
+        applyStringField("source", request.data?.source);
+        applyStringField("campaign", request.data?.campaign);
+        applyStringField("owner_id", request.data?.owner_id);
+        applyStringField("pipeline_id", request.data?.pipeline_id);
+        applyStringField("status", request.data?.status);
+        applyStringField("reason", request.data?.reason);
+        const nextStatus = updates.status || current.status;
+        const reasonValue = typeof updates.reason !== "undefined" ? updates.reason : current.reason;
+        if (nextStatus === "lost" && !cleanValue(reasonValue)) {
+            throw new HttpsError("invalid-argument", "Reason is required when status is Lost");
+        }
+        if (request.data?.next_follow_up_date !== undefined) {
+            const rawFollowUp = cleanValue(request.data.next_follow_up_date);
+            if (!rawFollowUp) {
+                if (current.next_follow_up_date) {
+                    updates.next_follow_up_date = FieldValue.delete();
+                    changedFields.push("next_follow_up_date");
+                }
+            }
+            else {
+                const parsed = new Date(rawFollowUp);
+                if (Number.isNaN(parsed.getTime())) {
+                    throw new HttpsError("invalid-argument", "Invalid next_follow_up_date");
+                }
+                const nextFollowUpDate = Timestamp.fromDate(parsed);
+                const currentFollowUp = current.next_follow_up_date;
+                const currentFollowUpMillis = typeof currentFollowUp?.toMillis === "function" ? currentFollowUp.toMillis() : null;
+                if (currentFollowUpMillis !== nextFollowUpDate.toMillis()) {
+                    updates.next_follow_up_date = nextFollowUpDate;
+                    changedFields.push("next_follow_up_date");
+                }
+            }
+        }
+        if (changedFields.includes("status")) {
+            updates.stageEnteredAt = FieldValue.serverTimestamp();
+            if (!changedFields.includes("stageEnteredAt")) {
+                changedFields.push("stageEnteredAt");
+            }
+        }
+        if (changedFields.length === 0) {
+            return { success: true, leadId, changedFields: [] };
+        }
+        transaction.update(leadRef, updates);
+        if (changedFields.includes("status")) {
+            const nextLeadData = { ...current, ...updates };
+            const nextPipelineId = cleanValue(nextLeadData.pipeline_id || current.pipeline_id || "default") || "default";
+            const nextStatus = cleanValue(nextLeadData.status || current.status || "new");
+            await queueTemplateActivity(transaction, leadId, nextLeadData, nextPipelineId, nextStatus);
+        }
+        const activityRef = db.collection("activities").doc();
+        transaction.create(activityRef, {
+            lead_id: leadId,
+            type: "lead.updated",
+            message: `Updated lead details: ${changedFields.join(", ")}`,
+            actor: uid,
+            created_at: FieldValue.serverTimestamp(),
+        });
+        return { success: true, leadId, changedFields };
+    });
+});
+export const processMessageQueueItem = onDocumentCreated("message_queue/{itemId}", async (event) => {
+    const snapshot = event.data;
+    if (!snapshot)
+        return;
+    const data = snapshot.data();
+    if (!data || data.status !== "queued")
+        return;
+    // If this message has a future scheduledAt time, let the scheduler trigger it later
+    if (data.scheduledAt) {
+        const scheduledMillis = typeof data.scheduledAt.toMillis === "function" ? data.scheduledAt.toMillis() : new Date(data.scheduledAt).getTime();
+        if (scheduledMillis > Date.now()) {
+            // Keep status as queued, do not process yet
+            return;
+        }
+    }
+    const itemId = event.params.itemId;
+    const leadId = data.lead_id;
+    const channel = data.channel;
+    if (channel !== "whatsapp") {
+        // Other channels are marked as sent instantly since they are mock stubs
+        await snapshot.ref.update({
+            status: "sent",
+            updated_at: FieldValue.serverTimestamp()
+        });
+        return;
+    }
+    const whatsappToken = cleanValue(process.env.META_WHATSAPP_ACCESS_TOKEN);
+    const phoneNumberId = cleanValue(process.env.META_WHATSAPP_PHONE_NUMBER_ID);
+    if (!whatsappToken || !phoneNumberId) {
+        console.warn("WhatsApp API credentials missing. Simulating success fallback.");
+        await snapshot.ref.update({
+            status: "sent",
+            error: "WhatsApp API credentials not configured; simulated success.",
+            updated_at: FieldValue.serverTimestamp()
+        });
+        return;
+    }
+    // Fetch lead details for recipient target phone number
+    const leadDoc = await db.collection("leads").doc(leadId).get();
+    const leadData = leadDoc.data();
+    if (!leadData || !leadData.phone) {
+        await snapshot.ref.update({
+            status: "failed",
+            error: "Target lead has no phone number",
+            updated_at: FieldValue.serverTimestamp()
+        });
+        return;
+    }
+    // Format phone to clean digits (Meta expects code + digits without spaces/symbols)
+    const cleanPhone = leadData.phone.replace(/\D/g, "");
+    try {
+        const templateName = data.meta_template_name || data.templateId || "welcome_lead";
+        const languageCode = data.templateLanguage || "en_US";
+        // Build template components dynamically if variables mapping exists
+        const parameters = [];
+        if (data.variables && typeof data.variables === 'object') {
+            // Variables mapped sequentially by key order, or by parameter index
+            const keys = Object.keys(data.variables).sort((a, b) => Number(a) - Number(b));
+            for (const key of keys) {
+                parameters.push({ type: "text", text: String(data.variables[key] || "") });
+            }
+        }
+        else {
+            // Legacy fallback parameters
+            parameters.push({ type: "text", text: leadData.name || "Customer" });
+            parameters.push({ type: "text", text: leadData.campaign || "Ad Campaign" });
+        }
+        const response = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${whatsappToken}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                messaging_product: "whatsapp",
+                recipient_type: "individual",
+                to: cleanPhone,
+                type: "template",
+                template: {
+                    name: templateName,
+                    language: { code: languageCode },
+                    components: parameters.length > 0 ? [
+                        {
+                            type: "body",
+                            parameters: parameters
+                        }
+                    ] : []
+                }
+            })
+        });
+        const resJson = await response.json();
+        if (!response.ok) {
+            throw new Error(resJson.error?.message || "Meta API Error Response");
+        }
+        const metaMsgId = resJson.messages?.[0]?.id || null;
+        await snapshot.ref.update({
+            status: "sent",
+            metaMessageId: metaMsgId,
+            message_id: metaMsgId, // legacy support
+            sentAt: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp()
+        });
+        await db.collection("activities").add({
+            lead_id: leadId,
+            type: "message.sent",
+            message: `WhatsApp message successfully sent via Meta Cloud API. Message ID: ${metaMsgId || "unknown"}. Template: ${templateName}`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp()
+        });
+    }
+    catch (err) {
+        console.error("Meta WhatsApp Cloud API delivery failed:", err);
+        await snapshot.ref.update({
+            status: "failed",
+            error: err?.message || String(err),
+            failedAt: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp()
+        });
+        await db.collection("activities").add({
+            lead_id: leadId,
+            type: "message.failed",
+            message: `WhatsApp message delivery failed: ${err?.message || String(err)}`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp()
+        });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Welcome message auto-send helpers & Firestore triggers
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Checks whether a welcome message should be sent for the given lead document,
+ * and if so, queues it in message_queue + records an activity, then marks the
+ * lead as welcome_message_sent = true (so it is never sent twice).
+ *
+ * Must be called from OUTSIDE a transaction so that it can start its own.
+ */
+async function checkAndSendWelcomeMessage(leadId, leadData) {
+    // Guard: already sent once for this lead
+    if (leadData.welcome_message_sent === true)
+        return;
+    const pipelineId = cleanValue(leadData.pipeline_id || "default") || "default";
+    const stageId = cleanValue(leadData.status || "new") || "new";
+    // ── 1. Read global welcome config from settings/welcome_config ──────────────
+    const configSnap = await db.collection("settings").doc("welcome_config").get();
+    if (!configSnap.exists)
+        return;
+    const config = configSnap.data() || {};
+    if (!config.welcome_enabled)
+        return;
+    const templateId = cleanValue(config.welcome_template_id);
+    if (!templateId)
+        return;
+    // ── 2. Verify the lead is currently in the FIRST stage of its pipeline ──────
+    const pipelineSnap = await db.collection("pipelines").doc(pipelineId).get();
+    const pipelineData = pipelineSnap.exists ? (pipelineSnap.data() || {}) : {};
+    const stages = Array.isArray(pipelineData.stages) && pipelineData.stages.length > 0
+        ? pipelineData.stages
+        : [{ id: "new", label: "New" }]; // fallback for default pipeline
+    const firstStageId = String(stages[0]?.id || "new");
+    if (stageId !== firstStageId)
+        return; // not the first stage — skip
+    // ── 3. Fetch and validate the message template ──────────────────────────────
+    const templateSnap = await db.collection("message_templates").doc(templateId).get();
+    if (!templateSnap.exists)
+        return;
+    const template = templateSnap.data() || {};
+    if (template.is_active === false)
+        return;
+    if (template.channel !== "whatsapp")
+        return;
+    // ── 4. Idempotency key — prevents double-send even under concurrent triggers ─
+    const idempotencyKey = `${leadId}_welcome_${templateId}`;
+    const runRef = db.collection("automation_runs").doc(idempotencyKey);
+    // ── 5. Build message render context ─────────────────────────────────────────
+    const stageLabel = stages.find((s) => String(s?.id || "") === stageId)?.label || stageId;
+    const context = {
+        name: cleanValue(leadData.name) || "",
+        phone: cleanValue(leadData.phone) || "",
+        email: cleanValue(leadData.email) || "",
+        source: cleanValue(leadData.source) || "",
+        campaign: cleanValue(leadData.campaign) || "",
+        pipeline: cleanValue(pipelineData.name) || pipelineId,
+        pipeline_id: pipelineId,
+        stage: stageLabel,
+        status: stageLabel,
+        reason: cleanValue(leadData.reason) || "",
+        channel: String(template.channel || ""),
+        template_name: String(template.name || ""),
+    };
+    const subject = template.subject ? renderTemplateText(String(template.subject), context) : "";
+    const body = renderTemplateText(String(template.body || ""), context);
+    // ── 6. Run everything inside a transaction for atomicity ────────────────────
+    await db.runTransaction(async (tx) => {
+        // Double-check idempotency key inside the transaction
+        const runSnap = await tx.get(runRef);
+        if (runSnap.exists)
+            return;
+        // Double-check the lead still hasn't had a welcome sent
+        const leadRef = db.collection("leads").doc(leadId);
+        const leadSnap = await tx.get(leadRef);
+        if (!leadSnap.exists)
+            return;
+        if (leadSnap.data()?.welcome_message_sent === true)
+            return;
+        // Create automation_run record (idempotency fence)
+        tx.create(runRef, {
+            lead_id: leadId,
+            automation_id: templateId,
+            trigger_type: "welcome_first_stage",
+            stage_id: stageId,
+            pipeline_id: pipelineId,
+            status: "success",
+            run_at: FieldValue.serverTimestamp(),
+            idempotency_key: idempotencyKey,
+        });
+        // Queue the WhatsApp message → picked up by processMessageQueueItem
+        const queueRef = db.collection("message_queue").doc();
+        tx.create(queueRef, {
+            lead_id: leadId,
+            template_id: templateId,
+            pipeline_id: pipelineId,
+            channel: "whatsapp",
+            subject,
+            body,
+            status: "queued",
+            created_by: "system",
+            created_at: FieldValue.serverTimestamp(),
+            updated_at: FieldValue.serverTimestamp(),
+        });
+        // Activity record — visible in the lead's activity history
+        const activityRef = db.collection("activities").doc();
+        tx.create(activityRef, {
+            lead_id: leadId,
+            type: "message.welcome.queued",
+            message: `Auto welcome message queued via global config: "${template.name}"${subject ? ` | ${subject}` : ""}`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp(),
+        });
+        // Mark the lead — ensures this is sent only once per lead, ever
+        tx.update(leadRef, {
+            welcome_message_sent: true,
+            updated_at: FieldValue.serverTimestamp(),
+        });
+    });
+}
+// ── Trigger: new lead document created ────────────────────────────────────────
+export const onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) => {
+    const snap = event.data;
+    if (!snap)
+        return;
+    const leadData = snap.data();
+    if (!leadData)
+        return;
+    try {
+        await checkAndSendWelcomeMessage(event.params.leadId, leadData);
+    }
+    catch (err) {
+        console.error("onLeadCreated welcome check failed:", err);
+    }
+});
+// ── Trigger: lead document updated (stage change / pipeline move) ─────────────
+export const onLeadUpdated = onDocumentUpdated("leads/{leadId}", async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after)
+        return;
+    const stageChanged = before.status !== after.status;
+    const pipelineChanged = before.pipeline_id !== after.pipeline_id;
+    const optOutChanged = before.whatsappOptedOut !== after.whatsappOptedOut;
+    // Handle stop/cancellation events on lead change
+    if (stageChanged || pipelineChanged || optOutChanged || after.leadStatus === 'won' || after.leadStatus === 'lost' || (after.status === 'lost')) {
+        try {
+            const enrollsQuery = db.collection("automation_enrollments")
+                .where("leadId", "==", event.params.leadId)
+                .where("status", "==", "scheduled");
+            const enrollsSnap = await enrollsQuery.get();
+            if (!enrollsSnap.empty) {
+                for (const enrollDoc of enrollsSnap.docs) {
+                    const enrollData = enrollDoc.data();
+                    const autoSnap = await db.collection("whatsapp_automations").doc(enrollData.automationId).get();
+                    if (autoSnap.exists) {
+                        const auto = autoSnap.data() || {};
+                        let cancel = false;
+                        let reason = "";
+                        if (auto.stopOnStageChange && (stageChanged || pipelineChanged)) {
+                            cancel = true;
+                            reason = "Lead moved to a different stage";
+                        }
+                        else if (auto.skipWon && after.leadStatus === 'won') {
+                            cancel = true;
+                            reason = "Lead status marked as Won";
+                        }
+                        else if (auto.skipLost && (after.leadStatus === 'lost' || after.status === 'lost')) {
+                            cancel = true;
+                            reason = "Lead status marked as Lost";
+                        }
+                        else if (auto.skipOptedOut && after.whatsappOptedOut) {
+                            cancel = true;
+                            reason = "Customer opted out of WhatsApp";
+                        }
+                        if (cancel) {
+                            await enrollDoc.ref.update({
+                                status: "cancelled",
+                                cancelReason: reason,
+                                updatedAt: FieldValue.serverTimestamp()
+                            });
+                            await db.collection("activities").add({
+                                lead_id: event.params.leadId,
+                                type: "automation.cancelled",
+                                message: `WhatsApp Automation enrollment cancelled. Reason: ${reason}.`,
+                                actor: "system",
+                                created_at: FieldValue.serverTimestamp()
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        catch (err) {
+            console.error("Failed to process enrollments cancellation on lead update:", err);
+        }
+    }
+    // Handle stage change auto enrollments (Future leads only / Current and future)
+    if (stageChanged || pipelineChanged) {
+        try {
+            const activeAutosSnap = await db.collection("whatsapp_automations")
+                .where("pipelineId", "==", after.pipeline_id || "default")
+                .where("stageId", "==", after.status || "new")
+                .where("status", "==", "active")
+                .get();
+            if (!activeAutosSnap.empty) {
+                for (const autoDoc of activeAutosSnap.docs) {
+                    const auto = autoDoc.data();
+                    if (auto.audienceMode === "future_leads" || auto.audienceMode === "current_and_future") {
+                        // Enroll the lead
+                        const enrollId = `${autoDoc.id}:${event.params.leadId}`;
+                        const enrollRef = db.collection("automation_enrollments").doc(enrollId);
+                        const enrollSnap = await enrollRef.get();
+                        if (!enrollSnap.exists || (auto.preventDuplicate === false)) {
+                            if (leadEligibleForAutomation(after, auto)) {
+                                let scheduledAt = new Date();
+                                const now = new Date();
+                                if (auto.scheduleType === 'fixed_date' && auto.fixedScheduledAt) {
+                                    scheduledAt = auto.fixedScheduledAt.toDate();
+                                }
+                                else if (auto.scheduleType === 'days_after_stage') {
+                                    const delay = Number(auto.delayDays || 0);
+                                    const entryDate = after.stageEnteredAt ? after.stageEnteredAt.toDate() : now;
+                                    scheduledAt = new Date(entryDate.getTime() + delay * 24 * 60 * 60 * 1000);
+                                    if (auto.sendTime) {
+                                        const [h, m] = auto.sendTime.split(':').map(Number);
+                                        scheduledAt.setHours(h || 10, m || 0, 0, 0);
+                                    }
+                                }
+                                else if (auto.scheduleType === 'repeat_followup') {
+                                    const delay = Number(auto.delayDays || 0);
+                                    const entryDate = after.stageEnteredAt ? after.stageEnteredAt.toDate() : now;
+                                    scheduledAt = new Date(entryDate.getTime() + delay * 24 * 60 * 60 * 1000);
+                                    if (auto.sendTime) {
+                                        const [h, m] = auto.sendTime.split(':').map(Number);
+                                        scheduledAt.setHours(h || 10, m || 0, 0, 0);
+                                    }
+                                }
+                                // If scheduledAt is in the past, schedule for immediate processing
+                                if (scheduledAt.getTime() < now.getTime()) {
+                                    scheduledAt = now;
+                                }
+                                await enrollRef.set({
+                                    automationId: autoDoc.id,
+                                    leadId: event.params.leadId,
+                                    enrolledStageId: after.status || "new",
+                                    enrolledAt: FieldValue.serverTimestamp(),
+                                    scheduledAt: Timestamp.fromDate(scheduledAt),
+                                    currentMessageNumber: 1,
+                                    maxMessages: Number(auto.maxMessagesPerLead || 1),
+                                    status: "scheduled",
+                                    idempotencyKey: `${autoDoc.id}:${event.params.leadId}:1`,
+                                    createdAt: FieldValue.serverTimestamp(),
+                                    updatedAt: FieldValue.serverTimestamp()
+                                });
+                                await db.collection("activities").add({
+                                    lead_id: event.params.leadId,
+                                    type: "automation.enrolled",
+                                    message: `Lead enrolled in WhatsApp Automation: "${auto.name}". First message scheduled for ${scheduledAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}.`,
+                                    actor: "system",
+                                    created_at: FieldValue.serverTimestamp()
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (err) {
+            console.error("Failed stage change auto enrollments:", err);
+        }
+    }
+    // Welcome message handler
+    if (after.welcome_message_sent === true && !pipelineChanged)
+        return;
+    try {
+        await checkAndSendWelcomeMessage(event.params.leadId, after);
+    }
+    catch (err) {
+        console.error("onLeadUpdated welcome check failed:", err);
+    }
+});
+// Helper validation for automation eligibility
+function leadEligibleForAutomation(lead, auto) {
+    if (!lead.phone)
+        return false;
+    if (auto.skipOptedOut && lead.whatsappOptedOut)
+        return false;
+    if (auto.skipWon && lead.leadStatus === 'won')
+        return false;
+    if (auto.skipLost && (lead.leadStatus === 'lost' || lead.status === 'lost'))
+        return false;
+    return true;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+// WhatsApp Automation Callable Cloud Functions
+// ─────────────────────────────────────────────────────────────────────────────
+export const activateAutomation = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const { automationId } = request.data;
+    if (!automationId)
+        throw new HttpsError("invalid-argument", "Missing automationId");
+    const autoRef = db.collection("whatsapp_automations").doc(automationId);
+    const autoSnap = await autoRef.get();
+    if (!autoSnap.exists)
+        throw new HttpsError("not-found", "Automation not found");
+    const auto = autoSnap.data() || {};
+    if (auto.status === "active") {
+        return { success: true, enrolled: 0, skipped: 0, message: "Already active" };
+    }
+    // Update status to active first
+    await autoRef.update({
+        status: "active",
+        updatedAt: FieldValue.serverTimestamp()
+    });
+    // If audienceMode is future_leads only, do not enroll current leads
+    if (auto.audienceMode === "future_leads") {
+        return { success: true, enrolled: 0, skipped: 0, message: "Activated for future leads only" };
+    }
+    // Query all current leads in the pipeline stage
+    const leadsSnap = await db.collection("leads")
+        .where("pipeline_id", "==", auto.pipelineId)
+        .where("status", "==", auto.stageId)
+        .get();
+    if (leadsSnap.empty) {
+        return { success: true, enrolled: 0, skipped: 0, message: "No leads in this stage" };
+    }
+    let enrolled = 0;
+    let skipped = 0;
+    const now = new Date();
+    // Retrieve existing enrollments to prevent duplicates
+    const existingEnrollSnap = await db.collection("automation_enrollments")
+        .where("automationId", "==", automationId)
+        .get();
+    const enrolledLeadIds = new Set(existingEnrollSnap.docs.map(d => d.data().leadId));
+    for (const leadDoc of leadsSnap.docs) {
+        const lead = leadDoc.data();
+        if (auto.preventDuplicate && enrolledLeadIds.has(leadDoc.id)) {
+            skipped++;
+            continue;
+        }
+        if (!leadEligibleForAutomation(lead, auto)) {
+            skipped++;
+            continue;
+        }
+        // Calculate scheduledAt
+        let scheduledAt = new Date();
+        if (auto.scheduleType === "fixed_date" && auto.fixedScheduledAt) {
+            scheduledAt = auto.fixedScheduledAt.toDate();
+        }
+        else if (auto.scheduleType === "days_after_stage" || auto.scheduleType === "repeat_followup") {
+            const delay = Number(auto.delayDays || 0);
+            const entryDate = lead.stageEnteredAt ? lead.stageEnteredAt.toDate() : now;
+            scheduledAt = new Date(entryDate.getTime() + delay * 24 * 60 * 60 * 1000);
+            if (auto.sendTime) {
+                const [h, m] = auto.sendTime.split(':').map(Number);
+                scheduledAt.setHours(h || 10, m || 0, 0, 0);
+            }
+        }
+        if (scheduledAt.getTime() < now.getTime()) {
+            scheduledAt = now;
+        }
+        const enrollId = `${automationId}:${leadDoc.id}`;
+        await db.collection("automation_enrollments").doc(enrollId).set({
+            automationId,
+            leadId: leadDoc.id,
+            enrolledStageId: auto.stageId,
+            enrolledAt: FieldValue.serverTimestamp(),
+            scheduledAt: Timestamp.fromDate(scheduledAt),
+            currentMessageNumber: 1,
+            maxMessages: Number(auto.maxMessagesPerLead || 1),
+            status: "scheduled",
+            idempotencyKey: `${automationId}:${leadDoc.id}:1`,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp()
+        });
+        await db.collection("activities").add({
+            lead_id: leadDoc.id,
+            type: "automation.enrolled",
+            message: `Lead enrolled in WhatsApp Automation: "${auto.name}". Scheduled at: ${scheduledAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+            actor: request.auth.uid,
+            created_at: FieldValue.serverTimestamp()
+        });
+        enrolled++;
+    }
+    return { success: true, enrolled, skipped };
+});
+export const enrollLeadInAutomation = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const { automationId, leadId, isTest } = request.data;
+    if (!automationId || !leadId)
+        throw new HttpsError("invalid-argument", "Missing arguments");
+    const autoSnap = await db.collection("whatsapp_automations").doc(automationId).get();
+    if (!autoSnap.exists)
+        throw new HttpsError("not-found", "Automation not found");
+    const auto = autoSnap.data() || {};
+    const leadSnap = await db.collection("leads").doc(leadId).get();
+    if (!leadSnap.exists)
+        throw new HttpsError("not-found", "Lead not found");
+    const lead = leadSnap.data() || {};
+    if (!isTest && !leadEligibleForAutomation(lead, auto)) {
+        throw new HttpsError("failed-precondition", "Lead is not eligible for this automation");
+    }
+    const enrollId = `${automationId}:${leadId}`;
+    const now = new Date();
+    let scheduledAt = now;
+    if (!isTest) {
+        if (auto.scheduleType === "fixed_date" && auto.fixedScheduledAt) {
+            scheduledAt = auto.fixedScheduledAt.toDate();
+        }
+        else if (auto.scheduleType === "days_after_stage" || auto.scheduleType === "repeat_followup") {
+            const delay = Number(auto.delayDays || 0);
+            const entryDate = lead.stageEnteredAt ? lead.stageEnteredAt.toDate() : now;
+            scheduledAt = new Date(entryDate.getTime() + delay * 24 * 60 * 60 * 1000);
+            if (auto.sendTime) {
+                const [h, m] = auto.sendTime.split(':').map(Number);
+                scheduledAt.setHours(h || 10, m || 0, 0, 0);
+            }
+        }
+        if (scheduledAt.getTime() < now.getTime()) {
+            scheduledAt = now;
+        }
+    }
+    await db.collection("automation_enrollments").doc(enrollId).set({
+        automationId,
+        leadId,
+        enrolledStageId: lead.status || auto.stageId,
+        enrolledAt: FieldValue.serverTimestamp(),
+        scheduledAt: Timestamp.fromDate(scheduledAt),
+        currentMessageNumber: 1,
+        maxMessages: isTest ? 1 : Number(auto.maxMessagesPerLead || 1),
+        status: "scheduled",
+        idempotencyKey: `${automationId}:${leadId}:1`,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp()
+    });
+    await db.collection("activities").add({
+        lead_id: leadId,
+        type: "automation.enrolled",
+        message: `Lead enrolled in WhatsApp Automation ${isTest ? "(TEST RUN)" : ""}: "${auto.name}". Scheduled at: ${scheduledAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+        actor: request.auth.uid,
+        created_at: FieldValue.serverTimestamp()
+    });
+    return { success: true, enrollId };
+});
+export const cancelAutomationEnrollment = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const { enrollmentId, reason } = request.data;
+    if (!enrollmentId)
+        throw new HttpsError("invalid-argument", "Missing enrollmentId");
+    const enrollRef = db.collection("automation_enrollments").doc(enrollmentId);
+    const snap = await enrollRef.get();
+    if (!snap.exists)
+        throw new HttpsError("not-found", "Enrollment not found");
+    await enrollRef.update({
+        status: "cancelled",
+        cancelReason: reason || "Manually cancelled by user",
+        updatedAt: FieldValue.serverTimestamp()
+    });
+    await db.collection("activities").add({
+        lead_id: snap.data()?.leadId,
+        type: "automation.cancelled",
+        message: `WhatsApp Automation cancelled manually: ${reason || "No reason provided"}.`,
+        actor: request.auth.uid,
+        created_at: FieldValue.serverTimestamp()
+    });
+    return { success: true };
+});
+export const pauseAutomation = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    const { automationId } = request.data;
+    if (!automationId)
+        throw new HttpsError("invalid-argument", "Missing automationId");
+    await db.collection("whatsapp_automations").doc(automationId).update({
+        status: "paused",
+        updatedAt: FieldValue.serverTimestamp()
+    });
+    // Cancel all pending enrollments
+    const pendingSnap = await db.collection("automation_enrollments")
+        .where("automationId", "==", automationId)
+        .where("status", "==", "scheduled")
+        .get();
+    if (!pendingSnap.empty) {
+        for (const enrollDoc of pendingSnap.docs) {
+            await enrollDoc.ref.update({
+                status: "cancelled",
+                cancelReason: "Automation was paused by user",
+                updatedAt: FieldValue.serverTimestamp()
+            });
+            await db.collection("activities").add({
+                lead_id: enrollDoc.data().leadId,
+                type: "automation.cancelled",
+                message: `WhatsApp Automation enrollment cancelled because the sequence was paused.`,
+                actor: request.auth.uid,
+                created_at: FieldValue.serverTimestamp()
+            });
+        }
+    }
+    return { success: true };
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Scheduled Worker: runs every 5 minutes and processes due enrollments
+// ─────────────────────────────────────────────────────────────────────────────
+import { onSchedule } from "firebase-functions/v2/scheduler";
+export const processAutomationEnrollments = onSchedule({
+    schedule: "every 5 minutes",
+    timeZone: "Asia/Kolkata",
+    memory: "256MiB"
+}, async (event) => {
+    const now = new Date();
+    const dueEnrollmentsSnap = await db.collection("automation_enrollments")
+        .where("status", "==", "scheduled")
+        .where("scheduledAt", "<=", Timestamp.fromDate(now))
+        .limit(50)
+        .get();
+    if (dueEnrollmentsSnap.empty) {
+        console.log("No due automation enrollments to process.");
+        return;
+    }
+    console.log(`Processing ${dueEnrollmentsSnap.size} due automation enrollments.`);
+    for (const enrollDoc of dueEnrollmentsSnap.docs) {
+        const enrollId = enrollDoc.id;
+        const enroll = enrollDoc.data();
+        try {
+            await db.runTransaction(async (transaction) => {
+                // 1. Fetch fresh enrollment
+                const freshEnrollDoc = await transaction.get(enrollDoc.ref);
+                if (!freshEnrollDoc.exists)
+                    return;
+                const freshEnroll = freshEnrollDoc.data() || {};
+                if (freshEnroll.status !== "scheduled")
+                    return;
+                // 2. Fetch automation config
+                const autoSnap = await transaction.get(db.collection("whatsapp_automations").doc(freshEnroll.automationId));
+                if (!autoSnap.exists) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "failed",
+                        cancelReason: "Automation configuration not found",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                const auto = autoSnap.data() || {};
+                if (auto.status !== "active") {
+                    transaction.update(enrollDoc.ref, {
+                        status: "cancelled",
+                        cancelReason: "Automation is not active",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                // 3. Fetch lead details
+                const leadSnap = await transaction.get(db.collection("leads").doc(freshEnroll.leadId));
+                if (!leadSnap.exists) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "failed",
+                        cancelReason: "Target lead not found in database",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                const lead = leadSnap.data() || {};
+                // 4. Validate stop conditions / guards
+                if (!lead.phone) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "failed",
+                        cancelReason: "Lead is missing phone number",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                if (auto.skipOptedOut && lead.whatsappOptedOut) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "cancelled",
+                        cancelReason: "Customer opted out of WhatsApp messages",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                if (auto.stopOnStageChange && lead.status !== freshEnroll.enrolledStageId) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "cancelled",
+                        cancelReason: "Lead left configured stage",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                if (auto.stopOnReply && lead.lastCustomerReplyAt && freshEnroll.enrolledAt) {
+                    const replyMillis = lead.lastCustomerReplyAt.toMillis();
+                    const enrollMillis = freshEnroll.enrolledAt.toMillis();
+                    if (replyMillis > enrollMillis) {
+                        transaction.update(enrollDoc.ref, {
+                            status: "cancelled",
+                            cancelReason: "Customer replied to messages",
+                            updatedAt: FieldValue.serverTimestamp()
+                        });
+                        return;
+                    }
+                }
+                if (auto.skipWon && lead.leadStatus === "won") {
+                    transaction.update(enrollDoc.ref, {
+                        status: "cancelled",
+                        cancelReason: "Lead status became Won",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                if (auto.skipLost && (lead.leadStatus === "lost" || lead.status === "lost")) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "cancelled",
+                        cancelReason: "Lead status became Lost",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                // Check if message limit reached
+                if (freshEnroll.currentMessageNumber > freshEnroll.maxMessages) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "completed",
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                // Idempotency check: key format = automationId:leadId:messageNumber
+                const idKey = `${freshEnroll.automationId}:${freshEnroll.leadId}:${freshEnroll.currentMessageNumber}`;
+                const prevQueueSnap = await db.collection("message_queue")
+                    .where("idempotencyKey", "==", idKey)
+                    .limit(1)
+                    .get();
+                if (!prevQueueSnap.empty) {
+                    transaction.update(enrollDoc.ref, {
+                        status: "failed",
+                        cancelReason: `Duplicate execution trigger prevented for run key: ${idKey}`,
+                        updatedAt: FieldValue.serverTimestamp()
+                    });
+                    return;
+                }
+                // 5. Build variable values dynamically
+                const variables = {};
+                if (auto.variableMappings && typeof auto.variableMappings === "object") {
+                    for (const key of Object.keys(auto.variableMappings)) {
+                        const field = auto.variableMappings[key];
+                        if (field === "name")
+                            variables[key] = lead.name || "";
+                        else if (field === "phone")
+                            variables[key] = lead.phone || "";
+                        else if (field === "email")
+                            variables[key] = lead.email || "";
+                        else if (field === "source")
+                            variables[key] = lead.source || "";
+                        else if (field === "campaign")
+                            variables[key] = lead.campaign || "";
+                        else if (field === "pipeline")
+                            variables[key] = auto.pipelineId;
+                        else if (field === "stage")
+                            variables[key] = auto.stageId;
+                    }
+                }
+                // 6. Create message_queue item
+                const queueRef = db.collection("message_queue").doc();
+                transaction.create(queueRef, {
+                    lead_id: freshEnroll.leadId,
+                    template_id: auto.templateId || auto.metaTemplateName,
+                    meta_template_name: auto.metaTemplateName,
+                    templateLanguage: auto.templateLanguage || "en_US",
+                    variables: variables,
+                    pipeline_id: auto.pipelineId,
+                    channel: "whatsapp",
+                    source: "automation",
+                    automationId: freshEnroll.automationId,
+                    enrollmentId: enrollId,
+                    status: "queued",
+                    idempotencyKey: idKey,
+                    attemptCount: 1,
+                    created_by: "system",
+                    created_at: FieldValue.serverTimestamp(),
+                    updated_at: FieldValue.serverTimestamp()
+                });
+                // 7. Update enrollment state
+                const nextMsgNo = freshEnroll.currentMessageNumber + 1;
+                const reachedMax = nextMsgNo > freshEnroll.maxMessages;
+                const updateFields = {
+                    lastExecutionAt: FieldValue.serverTimestamp(),
+                    currentMessageNumber: nextMsgNo,
+                    updatedAt: FieldValue.serverTimestamp()
+                };
+                if (reachedMax || auto.scheduleType !== "repeat_followup") {
+                    updateFields.status = "completed";
+                }
+                else {
+                    // Schedule the next repeated follow-up
+                    const repeatDays = Number(auto.repeatEveryDays || 7);
+                    const nextScheduled = new Date(now.getTime() + repeatDays * 24 * 60 * 60 * 1000);
+                    if (auto.sendTime) {
+                        const [h, m] = auto.sendTime.split(':').map(Number);
+                        nextScheduled.setHours(h || 10, m || 0, 0, 0);
+                    }
+                    updateFields.scheduledAt = Timestamp.fromDate(nextScheduled);
+                    updateFields.nextExecutionAt = Timestamp.fromDate(nextScheduled);
+                    updateFields.status = "scheduled";
+                }
+                transaction.update(enrollDoc.ref, updateFields);
+                // 8. Log activity
+                const actRef = db.collection("activities").doc();
+                transaction.create(actRef, {
+                    lead_id: freshEnroll.leadId,
+                    type: "message.queued",
+                    message: `WhatsApp Automation message #${freshEnroll.currentMessageNumber} queued for delivery: "${auto.name}"`,
+                    actor: "system",
+                    created_at: FieldValue.serverTimestamp()
+                });
+            });
+        }
+        catch (err) {
+            console.error(`Transaction failed processing enrollment ${enrollId}:`, err);
+        }
     }
 });
 //# sourceMappingURL=index.js.map

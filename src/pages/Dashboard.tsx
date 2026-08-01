@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
-import { TrendingUp, Clock, AlertCircle, FileText, Loader2, IndianRupee, Plus, Calendar } from 'lucide-react';
+import { TrendingUp, Clock, AlertCircle, FileText, Loader2, IndianRupee, Plus, Calendar, Users, CheckSquare, Activity, ShieldAlert, BadgeCheck, Target } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Invoice } from '../types';
+import { useCRMPermission } from '../hooks/useCRMPermission';
 
 type DateFilter = 'today' | 'week' | 'month' | 'fy' | 'custom' | 'specific_date' | 'specific_month' | 'specific_year';
 
@@ -32,6 +33,8 @@ export default function Dashboard() {
   const [specificDate, setSpecificDate] = useState<string>('');
   const [specificMonth, setSpecificMonth] = useState<string>('');
   const [specificYear, setSpecificYear] = useState<string>(new Date().getFullYear().toString());
+  const [crmStats, setCrmStats] = useState({ total: 0, overdue: 0, qualified: 0 });
+  const canViewCRM = useCRMPermission().hasPermission('view_lead');
 
   useEffect(() => {
     if (!db) return;
@@ -160,6 +163,27 @@ export default function Dashboard() {
       unsubscribePurchases();
     };
   }, [dateFilter, customStart, customEnd, specificDate, specificMonth, specificYear]);
+
+  // CRM stats subscription (independent of date filter)
+  useEffect(() => {
+    if (!db) return;
+    const unsub = onSnapshot(collection(db, 'leads'), (snap) => {
+      const leads = snap.docs.map((d) => d.data() as any);
+      const total = leads.length;
+      const now = new Date();
+      const overdue = leads.filter((l: any) => {
+        if (!l.next_follow_up_date || l.status === 'lost') return false;
+        let d: Date;
+        if (typeof l.next_follow_up_date.toDate === 'function') d = l.next_follow_up_date.toDate();
+        else if (l.next_follow_up_date.seconds) d = new Date(l.next_follow_up_date.seconds * 1000);
+        else d = new Date(l.next_follow_up_date);
+        return !isNaN(d.getTime()) && d < now;
+      }).length;
+      const qualified = leads.filter((l: any) => l.status === 'qualified').length;
+      setCrmStats({ total, overdue, qualified });
+    });
+    return () => unsub();
+  }, []);
 
   const handleGenerateReport = () => {
     const doc = new jsPDF();
@@ -364,6 +388,33 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* CRM Quick Stats */}
+      {canViewCRM && (
+        <div className="neo-card flex flex-wrap items-center justify-between gap-4 !py-4 border-l-4 border-primary/30 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <Target size={18} className="text-primary" />
+            <span className="font-bold text-primary-dark text-sm">CRM Summary</span>
+          </div>
+          <div className="flex flex-wrap gap-6 text-sm">
+            <div className="text-center">
+              <p className="font-black text-xl text-primary-dark">{crmStats.total}</p>
+              <p className="text-xs text-secondary mt-0.5">Total Leads</p>
+            </div>
+            <div className="text-center">
+              <p className={`font-black text-xl ${crmStats.overdue > 0 ? 'text-warning' : 'text-secondary'}`}>{crmStats.overdue}</p>
+              <p className="text-xs text-secondary mt-0.5">Overdue</p>
+            </div>
+            <div className="text-center">
+              <p className="font-black text-xl text-success">{crmStats.qualified}</p>
+              <p className="text-xs text-secondary mt-0.5">Qualified</p>
+            </div>
+          </div>
+          <button onClick={() => navigate('/crm-dashboard')} className="neo-btn text-xs flex items-center gap-1.5">
+            <Activity size={13} /> Full CRM Dashboard
+          </button>
+        </div>
+      )}
 
       {/* Main interaction space */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">

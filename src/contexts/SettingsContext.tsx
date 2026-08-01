@@ -36,6 +36,19 @@ const defaultSettings: Settings = {
   weekly_report_day: 'Monday',
   monthly_report_date: 1,
   allow_backdate_days: 7,
+  metaAppId: '',
+  metaAppSecret: '',
+  metaWebhookVerifyToken: '',
+  metaWebhookCallbackUrl: '',
+  metaPageId: '',
+  instagramAccountId: '',
+  whatsappBusinessAccountId: '',
+  whatsappPhoneNumberId: '',
+  whatsappWebhookCallbackUrl: '',
+  facebookWebhookSubscribed: false,
+  instagramWebhookSubscribed: false,
+  whatsappWebhookSubscribed: false,
+  metaWhatsAppAccessToken: '',
 };
 
 const SettingsContext = createContext<SettingsContextType>({

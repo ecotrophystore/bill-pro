@@ -1,3 +1,7 @@
+export * from './metaIntegration.js';
+export * from './metaWebhookProcessor.js';
+export * from './meta/facebook.js';
+export * from './meta/instagram.js';
 /**
  * 1. Invoice Numbering & 3. Conversion Gate
  * Converts a quotation into a full, locked invoice with absolute atomicity.
@@ -96,4 +100,64 @@ export declare const extractInvoiceData: import("firebase-functions/v2/https").C
 export declare const extractExpenseReceipt: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     data: any;
 }>, unknown>;
+export declare const metaLeadWebhook: import("firebase-functions/v2/https").HttpsFunction;
+export declare const googleLeadWebhook: import("firebase-functions/v2/https").HttpsFunction;
+export declare const testLeadIngest: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    status: string;
+    eventId: string;
+    message: string;
+    leadId?: never;
+    source?: never;
+} | {
+    status: string;
+    leadId: string;
+    eventId: string;
+    source: string;
+    message?: never;
+}>, unknown>;
+export declare const testLeadIngestHttp: import("firebase-functions/v2/https").HttpsFunction;
+export declare const queueLeadTemplateMessage: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    queueId: string;
+    activityId: string;
+    subject: string;
+    body: string;
+    channel: any;
+}>, unknown>;
+export declare const updateLeadDetails: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    leadId: string;
+    changedFields: string[];
+}>, unknown>;
+export declare const processMessageQueueItem: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
+    itemId: string;
+}>>;
+export declare const onLeadCreated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
+    leadId: string;
+}>>;
+export declare const onLeadUpdated: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2").Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot> | undefined, {
+    leadId: string;
+}>>;
+export declare const activateAutomation: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    enrolled: number;
+    skipped: number;
+    message: string;
+} | {
+    success: boolean;
+    enrolled: number;
+    skipped: number;
+    message?: never;
+}>, unknown>;
+export declare const enrollLeadInAutomation: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    enrollId: string;
+}>, unknown>;
+export declare const cancelAutomationEnrollment: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
+export declare const pauseAutomation: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
+export declare const processAutomationEnrollments: import("firebase-functions/v2/scheduler").ScheduleFunction;
 //# sourceMappingURL=index.d.ts.map

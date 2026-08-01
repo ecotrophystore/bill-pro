@@ -4,6 +4,9 @@ import clsx from 'clsx';
 import { useSettings } from '../contexts/SettingsContext';
 import { db } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import React, { lazy, Suspense } from 'react';
+
+const MetaIntegrationPanel = lazy(() => import('../components/settings/MetaIntegrationPanel'));
 
 export default function Settings() {
   const { settings, updateSettings } = useSettings();
@@ -398,11 +401,14 @@ export default function Settings() {
           )}
 
           {activeTab === 'integrations' && (
-            <section className="neo-card space-y-6 p-12 text-center text-secondary min-h-[400px] flex flex-col justify-center items-center">
-               <Database size={64} className="mx-auto mb-4 opacity-20" />
-               <h3 className="text-2xl font-bold text-primary-dark">Third-Party Integrations</h3>
-               <p className="max-w-sm mt-2 text-sm">API Keys, Webhooks, and automatic sync with accounting software like Tally and QuickBooks will be available shortly.</p>
-            </section>
+            <Suspense fallback={
+              <div className="flex items-center justify-center p-12 text-secondary">
+                <Loader2 className="animate-spin mr-2" size={24} />
+                <span>Loading Meta Integration Settings...</span>
+              </div>
+            }>
+              <MetaIntegrationPanel />
+            </Suspense>
           )}
 
         </div>

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Users, Search, Plus, ExternalLink, Mail, Phone, MapPin, X, Edit, Trash2, Download, ChevronDown } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { Users, Search, Plus, ExternalLink, Mail, Phone, MapPin, X, Edit, Trash2, Download, ChevronDown, Upload } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import SpeechInput from '../components/Shared/SpeechInput';
 import FieldMicButton from '../components/Shared/FieldMicButton';
@@ -9,6 +9,7 @@ import type { Customer } from '../types';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import CustomerBulkImportModal from '../components/customers/CustomerBulkImportModal';
 
 export default function CustomerLibrary() {
   const navigate = useNavigate();
@@ -16,6 +17,7 @@ export default function CustomerLibrary() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   // Form states for adding/editing customer
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -26,21 +28,23 @@ export default function CustomerLibrary() {
   const [email, setEmail] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
 
-  useEffect(() => {
-    async function fetchCustomers() {
-      try {
-        if (!db) return;
-        const querySnapshot = await getDocs(collection(db, 'customers'));
-        const list = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
-        setCustomers(list.sort((a, b) => a.name.localeCompare(b.name)));
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+  const fetchCustomers = useCallback(async () => {
+    try {
+      if (!db) return;
+      setLoading(true);
+      const querySnapshot = await getDocs(collection(db, 'customers'));
+      const list = querySnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Customer));
+      setCustomers(list.sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-    fetchCustomers();
   }, []);
+
+  useEffect(() => {
+    fetchCustomers();
+  }, [fetchCustomers]);
 
   const handleEditCustomerClick = (customer: Customer) => {
     setEditingCustomer(customer);
@@ -198,8 +202,8 @@ export default function CustomerLibrary() {
           <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Customer Library</h1>
           <p className="text-secondary mt-1">Professional directory of all billed entities and walk-ins.</p>
         </div>
-        <div className="flex gap-4 items-center w-full sm:w-auto">
-                    <div className="relative">
+        <div className="flex flex-wrap gap-3 items-center w-full sm:w-auto">
+          <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
               className="neo-btn flex items-center gap-2"
@@ -226,6 +230,14 @@ export default function CustomerLibrary() {
               </div>
             )}
           </div>
+          {/* Bulk Import Button */}
+          <button
+            onClick={() => setShowBulkImport(true)}
+            className="neo-btn flex items-center gap-2"
+            title="Import customers from CSV or Excel"
+          >
+            <Upload size={18} /> Bulk Import
+          </button>
           <button onClick={() => setIsModalOpen(true)} className="neo-btn-primary flex items-center gap-2">
             <Plus size={20} /> Add New Customer
           </button>
@@ -426,6 +438,15 @@ export default function CustomerLibrary() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkImport && (
+        <CustomerBulkImportModal
+          existingCustomers={customers}
+          onImportComplete={fetchCustomers}
+          onClose={() => setShowBulkImport(false)}
+        />
       )}
     </div>
   );

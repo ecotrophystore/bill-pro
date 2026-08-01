@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  FileText, 
-  Receipt, 
-  ShoppingCart, 
-  Building2, 
-  BarChart3, 
+import {
+  LayoutDashboard,
+  FileText,
+  Receipt,
+  ShoppingCart,
+  Building2,
+  BarChart3,
   Settings,
   Bell,
   Search,
@@ -14,27 +14,62 @@ import {
   X,
   Banknote,
   LogOut,
-  Coins,
-  PlusCircle,
-  BookOpen,
-  Wallet
+  Wallet,
+  Inbox,
+  UserPlus,
+  Users,
+  Columns3,
+  MessageSquare,
+  Send,
+  Target,
+  ShieldAlert,
+  Bot,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
 
-const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/quotations', label: 'Quotations', icon: FileText },
-  { path: '/proforma-invoices', label: 'Proforma Invoices', icon: FileText },
-  { path: '/invoices', label: 'Invoices', icon: Receipt },
-  { path: '/cash-memos', label: 'Cash Memos', icon: Banknote },
-  { path: '/library/products', label: 'Product Library', icon: Receipt }, // Using Receipt icon as a placeholder if BookOpen not available, but let's check Package
-  { path: '/library/customers', label: 'Customer Library', icon: Building2 },
-  { path: '/purchases', label: 'Purchases', icon: ShoppingCart },
-  { path: '/expense', label: 'Expense Tracking', icon: Wallet },
-  { path: '/reconciliation', label: 'Reconciliation', icon: Building2 },
-  { path: '/reports', label: 'Reports', icon: BarChart3 },
-  { path: '/settings', label: 'Settings', icon: Settings },
+const navGroups = [
+  {
+    label: null,
+    items: [
+      { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'CRM',
+    items: [
+      { path: '/crm-dashboard', label: 'CRM Dashboard', icon: Target },
+      { path: '/leads/new', label: 'Add Lead', icon: UserPlus },
+      { path: '/leads', label: 'Leads', icon: Users },
+      { path: '/pipeline', label: 'Pipeline', icon: Columns3 },
+      { path: '/lead-intake', label: 'Intake Log', icon: Inbox },
+      { path: '/message-templates', label: 'Templates', icon: MessageSquare },
+      { path: '/whatsapp-automation', label: 'WA Automation', icon: Bot },
+      { path: '/message-queue', label: 'Queue Log', icon: Send },
+      { path: '/audit-logs', label: 'Audit Logs', icon: ShieldAlert },
+    ],
+  },
+  {
+    label: 'Billing',
+    items: [
+      { path: '/quotations', label: 'Quotations', icon: FileText },
+      { path: '/proforma-invoices', label: 'Proforma Invoices', icon: FileText },
+      { path: '/invoices', label: 'Invoices', icon: Receipt },
+      { path: '/cash-memos', label: 'Cash Memos', icon: Banknote },
+      { path: '/purchases', label: 'Purchases', icon: ShoppingCart },
+      { path: '/expense', label: 'Expense Tracking', icon: Wallet },
+      { path: '/reconciliation', label: 'Reconciliation', icon: Building2 },
+    ],
+  },
+  {
+    label: 'Library & Reports',
+    items: [
+      { path: '/library/products', label: 'Product Library', icon: Receipt },
+      { path: '/library/customers', label: 'Customer Library', icon: Building2 },
+      { path: '/reports', label: 'Reports', icon: BarChart3 },
+      { path: '/settings', label: 'Settings', icon: Settings },
+    ],
+  },
 ];
 
 export function AppLayout() {
@@ -43,11 +78,10 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex bg-surface text-secondary">
-      {/* Sidebar */}
-      <aside 
+      <aside
         className={clsx(
-          "fixed inset-y-0 left-0 z-50 bg-surface border-r border-shadow-darker/20 transition-all duration-300 transform flex flex-col",
-          sidebarOpen ? "translate-x-0 w-64" : "-translate-x-full w-64 md:translate-x-0 md:w-20"
+          'fixed inset-y-0 left-0 z-50 bg-surface border-r border-shadow-darker/20 transition-all duration-300 transform flex flex-col',
+          sidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full w-64 md:translate-x-0 md:w-20'
         )}
       >
         <div className="flex h-16 items-center justify-between px-4 border-b border-shadow-darker/20">
@@ -62,35 +96,47 @@ export function AppLayout() {
           </button>
         </div>
 
-        <nav className="p-4 space-y-3 flex-1 overflow-y-auto">
-          {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              title={!sidebarOpen ? item.label : undefined}
-              className={({ isActive }) =>
-                clsx(
-                  "neo-nav-stacked",
-                  isActive && "active",
-                  !sidebarOpen && "justify-center px-0"
-                )
-              }
-            >
-              <item.icon size={20} className={sidebarOpen ? "shrink-0" : ""} />
-              {sidebarOpen && <span>{item.label}</span>}
-            </NavLink>
+        <nav className="p-3 flex-1 overflow-y-auto space-y-1">
+          {navGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? 'pt-3' : ''}>
+              {group.label && sidebarOpen && (
+                <p className="px-3 pb-1.5 text-[10px] font-black uppercase tracking-widest text-secondary/50 select-none">
+                  {group.label}
+                </p>
+              )}
+              {group.label && !sidebarOpen && (
+                <div className="mx-auto w-8 h-px bg-shadow-darker/20 mb-2" />
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    title={!sidebarOpen ? item.label : undefined}
+                    className={({ isActive }) =>
+                      clsx(
+                        'neo-nav-stacked',
+                        isActive && 'active',
+                        !sidebarOpen && 'justify-center px-0'
+                      )
+                    }
+                  >
+                    <item.icon size={20} className={sidebarOpen ? 'shrink-0' : ''} />
+                    {sidebarOpen && <span>{item.label}</span>}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
       </aside>
 
-      {/* Main Content Area */}
-      <main 
+      <main
         className={clsx(
-          "flex-1 flex flex-col min-h-screen transition-all duration-300",
-          sidebarOpen ? "md:ml-64" : "md:ml-20"
+          'flex-1 flex flex-col min-h-screen transition-all duration-300',
+          sidebarOpen ? 'md:ml-64' : 'md:ml-20'
         )}
       >
-        {/* Top Navbar */}
         <header className="h-16 flex items-center justify-between px-6 bg-surface border-b border-shadow-darker/20 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-primary-dark neo-btn !px-3 !py-2 hidden md:block">
@@ -99,21 +145,21 @@ export function AppLayout() {
             <button onClick={() => setSidebarOpen(true)} className="p-2 text-primary-dark block md:hidden">
               <Menu size={24} />
             </button>
-            
+
             <div className="hidden sm:flex items-center neo-input !py-2 w-64 lg:w-96 gap-2">
               <Search size={18} className="text-secondary" />
-              <input 
-                type="text" 
-                placeholder="Global Search (Coming Soon)" 
+              <input
+                type="text"
+                placeholder="Global Search (Coming Soon)"
                 className="bg-transparent border-none outline-none w-full text-sm"
-                onKeyDown={(e) => e.key === 'Enter' && alert("Global Search: Indexing is in progress for the current fiscal year. Detailed search will be enabled shortly.")}
+                onKeyDown={(e) => e.key === 'Enter' && alert('Global Search: Indexing is in progress for the current fiscal year. Detailed search will be enabled shortly.')}
               />
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => alert("Notifications: You have 3 system alerts pending. Full notification management is being integrated.")}
+            <button
+              onClick={() => alert('Notifications: You have 3 system alerts pending. Full notification management is being integrated.')}
               className="p-2 neo-btn !rounded-full !px-3"
             >
               <div className="relative">
@@ -132,12 +178,10 @@ export function AppLayout() {
           </div>
         </header>
 
-        {/* Page Content */}
         <div className="p-6 md:p-8 flex-1 w-full max-w-[1440px] mx-auto">
           <Outlet />
         </div>
       </main>
-
-      {/* Global AI Assistant */}    </div>
+    </div>
   );
 }
