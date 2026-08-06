@@ -1,8 +1,8 @@
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import * as crypto from "node:crypto";
 import { defineSecret } from "firebase-functions/params";
-const db = getFirestore();
+import { db } from "./config.js";
 // We define Firebase Secrets that need to be set via CLI
 const metaAppSecret = defineSecret("META_APP_SECRET");
 const metaVerifyToken = defineSecret("META_WEBHOOK_VERIFY_TOKEN");

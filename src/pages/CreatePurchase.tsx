@@ -118,6 +118,7 @@ export default function CreatePurchase() {
       setPurchaseId(pId);
       
       const fileToProcess = await compressImage(selectedFile);
+      setFileUrl(URL.createObjectURL(fileToProcess)); // ADDED: Show preview in UI
       
       const reader = new FileReader();
       reader.readAsDataURL(fileToProcess);

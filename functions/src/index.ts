@@ -1,16 +1,12 @@
 import { onCall, onRequest, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { setGlobalOptions } from "firebase-functions/v2";
-import { initializeApp } from "firebase-admin/app";
-import { getFirestore, FieldValue, Query, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { getAuth } from "firebase-admin/auth";
+import { getFirestore, FieldValue, Query, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-
-
-initializeApp();
-const db = getFirestore();
+import { db } from "./config.js";
 
 export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
@@ -68,7 +64,7 @@ async function syncToLibrary(uid: string, items: any[], customerId?: string, cus
         
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: prompt,
         });
         const aiText = aiResult.text || "";
@@ -1052,7 +1048,7 @@ export const aiAuditor = onCall(async (request) => {
 
     const ai = getAI();
     const chat = ai.chats.create({ 
-        model: "gemini-2.5-flash",
+        model: "gemini-flash-latest",
         config: {
             tools,
             systemInstruction: `You are the EcoBill AI Auditor, an expert financial assistant at Ecotrophy Innovations. 
@@ -1157,7 +1153,7 @@ export const parseVoiceCommand = onCall(async (request) => {
         console.log("[API] parseVoiceCommand Request with input:", audio ? "Audio Base64 Input" : transcript);
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: contents,
         });
         const aiText = aiResult.text || "";
@@ -1230,7 +1226,7 @@ export const parsePurchaseVoice = onCall(async (request) => {
         console.log("[API] parsePurchaseVoice Request with input:", audio ? "Audio Base64 Input" : transcript);
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: contents,
         });
         const aiText = aiResult.text || "";
@@ -1297,7 +1293,7 @@ export const analyzePendingTransactions = onCall(async (request) => {
         try {
             const ai = getAI();
             const aiResult = await ai.models.generateContent({
-                model: "gemini-2.5-flash",
+                model: "gemini-flash-latest",
                 contents: prompt,
             });
             const aiText = aiResult.text || "";
@@ -1363,7 +1359,7 @@ export const parsePDFStatement = onCall(async (request) => {
 
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: requestPayload.contents,
         });
         const aiText = aiResult.text || "[]";
@@ -1453,7 +1449,7 @@ Classification Rules:
 
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: requestPayload.contents,
             config: {
                 responseMimeType: "application/json"
@@ -1546,7 +1542,7 @@ Important: Ensure amount is a number.`;
 
         const ai = getAI();
         const aiResult = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-flash-latest",
             contents: requestPayload.contents,
             config: {
                 responseMimeType: "application/json"

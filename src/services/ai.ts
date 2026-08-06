@@ -14,7 +14,7 @@ export async function extractDataFromDocument(
 
   // Use the flash model which is cost-effective and fast
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: 'gemini-flash-latest',
     generationConfig: {
       responseMimeType: 'application/json',
     },
@@ -62,9 +62,9 @@ function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
         },
         "items": [
           {
-            "description": "Item Name",
+            "itemName": "Item Name",
             "quantity": 1,
-            "rate": 10.50,
+            "unitPrice": 10.50,
             "amount": 10.50
           }
         ],

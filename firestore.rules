@@ -123,6 +123,13 @@ service cloud.firestore {
       allow write: if isAdmin() || isAccounts();
     }
     
+    // STATEMENT LOGS (Bank Recon)
+    match /statement_logs/{logId} {
+      allow read: if isAdmin() || isAccounts();
+      allow create: if isAdmin() || isAccounts();
+      allow update: if isAdmin() || isAccounts();
+    }
+    
     // REPORTS & NOTIFICATIONS
     match /reports/{reportId} { allow read: if isAuthenticated(); }
     match /notifications/{notifId} { 

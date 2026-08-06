@@ -1,11 +1,10 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { graphGet, graphPost, graphDelete } from './graphApi.js';
 import { extractSafeError } from './errors.js';
 import type { FacebookPage, FacebookLeadForm } from './types.js';
-
-const db = getFirestore();
+import { db } from '../config.js';
 const fbToken = defineSecret('META_FACEBOOK_SYSTEM_USER_TOKEN');
 
 async function requireAdmin(uid: string) {

@@ -1,9 +1,8 @@
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { graphGet } from "./meta/graphApi.js";
-
-const db = getFirestore();
+import { db } from "./config.js";
 const fbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
 
 /**
