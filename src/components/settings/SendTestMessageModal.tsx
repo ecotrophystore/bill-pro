@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Send, Loader2 } from 'lucide-react';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../lib/firebase';
 
 interface SendTestMessageModalProps {
   onClose: () => void;
@@ -24,7 +25,6 @@ export function SendTestMessageModal({ onClose, onSuccess }: SendTestMessageModa
     setLoading(true);
     setResult(null);
     try {
-      const functions = getFunctions();
       const sendWhatsAppTestMessage = httpsCallable(functions, 'sendWhatsAppTestMessage');
       
       const fullNumber = `${countryCode.replace('+', '')}${phoneNumber}`;

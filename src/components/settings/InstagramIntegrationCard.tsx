@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, Loader2, CheckCircle, AlertCircle, Unplug, Camera } from 'lucide-react';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../lib/firebase';
 import clsx from 'clsx';
 import type { FbStatus } from './FacebookIntegrationCard';
 
@@ -39,7 +40,7 @@ export function InstagramIntegrationCard({ isAdmin, facebookTokenConfigured, fac
   async function call(name: string, data?: unknown): Promise<any> {
     setBusy(name);
     try {
-      const fn = httpsCallable(getFunctions(), name);
+      const fn = httpsCallable(functions, name);
       const res = await fn(data || {});
       return res.data as any;
     } catch (e: any) {

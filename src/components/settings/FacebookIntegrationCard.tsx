@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { RefreshCw, Save, Loader2, CheckCircle, AlertCircle, ChevronDown, ExternalLink, Unplug, MessageSquare } from 'lucide-react';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../lib/firebase';
 import clsx from 'clsx';
 
 export type FbStatus =
@@ -71,7 +72,7 @@ export function FacebookIntegrationCard({ isAdmin, facebookTokenConfigured, init
   const [status, setStatus] = useState(initialStatus);
   const [cfg, setCfg] = useState(initialConfig);
 
-  const fn = (name: string) => httpsCallable(getFunctions(), name);
+  const fn = (name: string) => httpsCallable(functions, name);
 
   function showToast(type: 'ok' | 'err', msg: string) {
     setToast({ type, msg });

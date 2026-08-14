@@ -4,7 +4,8 @@ import { MetaStatusCard, type ConnectionStatus } from './MetaStatusCard';
 import { MetaSecretSetupModal } from './MetaSecretSetupModal';
 import { SendTestMessageModal } from './SendTestMessageModal';
 import { useAuth } from '../../contexts/AuthContext';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+import { httpsCallable } from 'firebase/functions';
+import { functions } from '../../lib/firebase';
 
 const FacebookIntegrationCard = lazy(() => import('./FacebookIntegrationCard').then(m => ({ default: m.FacebookIntegrationCard })));
 const InstagramIntegrationCard = lazy(() => import('./InstagramIntegrationCard').then(m => ({ default: m.InstagramIntegrationCard })));
@@ -157,7 +158,6 @@ export default function MetaIntegrationPanel() {
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const functions = getFunctions();
       const getMetaSecretStatus = httpsCallable(functions, 'getMetaSecretStatus');
       const response = await getMetaSecretStatus();
       const data = response.data as any;
@@ -185,7 +185,6 @@ export default function MetaIntegrationPanel() {
     setSaving(true);
     setSaveSuccess(false);
     try {
-      const functions = getFunctions();
       const saveMetaIntegrationConfig = httpsCallable(functions, 'saveMetaIntegrationConfig');
       await saveMetaIntegrationConfig({ config });
       setSaveSuccess(true);
@@ -202,7 +201,7 @@ export default function MetaIntegrationPanel() {
     if (!isAdmin) return;
     setLoading(true);
     try {
-      const fn = httpsCallable(getFunctions(), 'testWhatsAppConnection');
+      const fn = httpsCallable(functions, 'testWhatsAppConnection');
       await fn();
       await fetchStatus();
     } catch (e: any) { alert(`Test failed: ${e.message}`); }
@@ -213,7 +212,7 @@ export default function MetaIntegrationPanel() {
     if (!isAdmin) return;
     setLoading(true);
     try {
-      await httpsCallable(getFunctions(), 'subscribeWhatsAppWebhook')();
+      await httpsCallable(functions, 'subscribeWhatsAppWebhook')();
       await fetchStatus();
     } catch (e: any) { alert(`Subscribe failed: ${e.message}`); }
     finally { setLoading(false); }
@@ -224,7 +223,7 @@ export default function MetaIntegrationPanel() {
     if (!window.confirm('Unsubscribe webhook? Incoming messages will stop.')) return;
     setLoading(true);
     try {
-      await httpsCallable(getFunctions(), 'unsubscribeWhatsAppWebhook')();
+      await httpsCallable(functions, 'unsubscribeWhatsAppWebhook')();
       await fetchStatus();
     } catch (e: any) { alert(`Unsubscribe failed: ${e.message}`); }
     finally { setLoading(false); }
