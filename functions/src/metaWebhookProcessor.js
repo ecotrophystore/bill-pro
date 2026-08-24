@@ -53,14 +53,26 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 // Create Lead
                 const newLeadRef = db.collection("leads").doc();
                 leadId = newLeadRef.id;
+                const leadName = contact?.profile?.name || senderPhone;
                 await newLeadRef.set({
                     id: leadId,
-                    name: contact?.profile?.name || senderPhone,
+                    name: leadName,
                     phone: senderPhone,
                     source: "whatsapp_inbound",
                     status: "new",
                     createdAt: FieldValue.serverTimestamp(),
                     updatedAt: FieldValue.serverTimestamp()
+                });
+                // Create corresponding Customer record
+                const newCustomerRef = db.collection("customers").doc();
+                await newCustomerRef.set({
+                    id: newCustomerRef.id,
+                    name: leadName,
+                    phone: senderPhone,
+                    email: "",
+                    type: "individual",
+                    notes: "Created automatically from WhatsApp inbound message",
+                    created_at: FieldValue.serverTimestamp()
                 });
             }
             else {
@@ -200,15 +212,25 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             const version = config.graphApiVersion || "v18.0";
             // Fetch lead details from Meta
             const leadData = await graphGet(`/${version}/${leadgenId}`, token);
-            // Map fields
+            // Map fields - handle all phone field variations
             const fields = {};
-            leadData.field_data?.forEach((f) => { fields[f.name] = f.values?.[0] || ""; });
+            leadData.field_data?.forEach((f) => {
+                const key = (f.name || "").toLowerCase().trim();
+                fields[key] = f.values?.[0] || "";
+                fields[f.name] = f.values?.[0] || ""; // also keep original key
+            });
             const email = fields.email || "";
-            const phone = fields.phone_number || fields.phone || "";
-            const name = fields.full_name || fields.first_name || "Facebook Lead";
+            // Normalize phone: handle phone_number, phone, mobile_number, mobile, whatsapp_number
+            const rawPhone = fields.phone_number || fields.phone || fields.mobile_number || fields.mobile || fields.whatsapp_number || "";
+            const phone = rawPhone.replace(/\D/g, "").slice(-10);
+            const name = fields.full_name || fields["full name"] || fields.first_name || "Facebook Lead";
+            const location = fields.location || fields.city || fields.address || "";
+            const required_quantity = fields.required_quantity || fields["require quantity"] || fields.quantity || "";
+            const event_date = fields.event_date || fields["event date"] || "";
+            const delivery_date = fields.delivery_date || fields["delivery date"] || fields["when the delivery want"] || fields.when_the_delivery_want || "";
             const newLeadRef = db.collection("leads").doc();
             const leadId = newLeadRef.id;
-            await newLeadRef.set({
+            const newLeadData = {
                 id: leadId,
                 name,
                 email,
@@ -228,6 +250,27 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 createdAt: FieldValue.serverTimestamp(),
                 updatedAt: FieldValue.serverTimestamp(),
                 stageEnteredAt: FieldValue.serverTimestamp()
+            };
+            if (location)
+                newLeadData.location = location;
+            if (required_quantity)
+                newLeadData.required_quantity = required_quantity;
+            if (event_date)
+                newLeadData.event_date = event_date;
+            if (delivery_date)
+                newLeadData.delivery_date = delivery_date;
+            await newLeadRef.set(newLeadData);
+            // Create corresponding Customer record
+            const newCustomerRef = db.collection("customers").doc();
+            await newCustomerRef.set({
+                id: newCustomerRef.id,
+                name,
+                phone,
+                email,
+                location,
+                type: "individual",
+                notes: `Created automatically from Facebook Lead Ads (Form: ${formId})`,
+                created_at: FieldValue.serverTimestamp()
             });
             await db.collection("lead_intake_events").add({
                 leadId,
@@ -274,15 +317,27 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             if (leadsQuery.empty) {
                 const newLeadRef = db.collection("leads").doc();
                 leadId = newLeadRef.id;
+                const leadName = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} User (${senderId})`;
                 await newLeadRef.set({
                     id: leadId,
-                    name: `${platform === 'instagram' ? 'Instagram' : 'Facebook'} User (${senderId})`,
+                    name: leadName,
                     metaSenderId: senderId,
                     platform,
                     source: `${platform}_inbound`,
                     status: "new",
                     createdAt: FieldValue.serverTimestamp(),
                     updatedAt: FieldValue.serverTimestamp()
+                });
+                // Create corresponding Customer record
+                const newCustomerRef = db.collection("customers").doc();
+                await newCustomerRef.set({
+                    id: newCustomerRef.id,
+                    name: leadName,
+                    phone: "",
+                    email: "",
+                    type: "individual",
+                    notes: `Created automatically from ${platform === 'instagram' ? 'Instagram' : 'Facebook'} DM message`,
+                    created_at: FieldValue.serverTimestamp()
                 });
             }
             else {

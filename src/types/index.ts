@@ -1,4 +1,4 @@
-﻿import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from 'firebase/firestore';
 
 export interface PaymentRecord {
   id: string;
@@ -295,6 +295,10 @@ export interface Lead {
   name: string;
   phone?: string;
   email?: string;
+  location?: string;
+  required_quantity?: string | number;
+  event_date?: string;
+  delivery_date?: string;
   source: string;
   platform: LeadPlatform;
   campaign?: string;
@@ -305,6 +309,7 @@ export interface Lead {
   pipeline_id?: string;
   status: string;
   reason?: string;
+  followup_reason?: string;
   normalized_phone?: string;
   normalized_email?: string;
   last_event_id?: string;

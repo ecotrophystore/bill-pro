@@ -6,7 +6,10 @@ import { getFirestore, FieldValue, Query, Timestamp, type Transaction } from "fi
 import { getStorage } from "firebase-admin/storage";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
+
+const whatsappAccessToken = defineSecret("META_WHATSAPP_ACCESS_TOKEN");
 
 export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
@@ -1572,6 +1575,10 @@ type InboundLead = {
   name?: string;
   phone?: string;
   email?: string;
+  location?: string;
+  required_quantity?: string | number;
+  event_date?: string;
+  delivery_date?: string;
   campaign?: string;
   campaign_id?: string;
   ad_id?: string;
@@ -1714,6 +1721,10 @@ function normalizeInboundLead(input: InboundLead, fallbackPlatform: LeadPlatform
   let name = cleanValue(input?.name);
   let phone = normalizePhone(input?.phone);
   let email = cleanValue(input?.email).toLowerCase();
+  let location = cleanValue(input?.location);
+  let required_quantity = cleanValue(input?.required_quantity);
+  let event_date = cleanValue(input?.event_date);
+  let delivery_date = cleanValue(input?.delivery_date);
   let campaign = cleanValue(input?.campaign);
   let campaign_id = cleanValue(input?.campaign_id);
   let ad_id = cleanValue(input?.ad_id);
@@ -1731,8 +1742,12 @@ function normalizeInboundLead(input: InboundLead, fallbackPlatform: LeadPlatform
       sourceType = "lead_ads";
       const { fieldMap } = extractMetaLeadFields(raw);
       name = name || fieldMap.full_name || fieldMap.name || [fieldMap.first_name, fieldMap.last_name].filter(Boolean).join(" ").trim();
-      phone = phone || normalizePhone(fieldMap.phone_number || fieldMap.phone || fieldMap.whatsapp_number);
+      phone = phone || normalizePhone(fieldMap.phone_number || fieldMap.phone || fieldMap.mobile_number || fieldMap.whatsapp_number || fieldMap.mobile);
       email = email || cleanValue(fieldMap.email).toLowerCase();
+      location = location || cleanValue(fieldMap.location || fieldMap.city || fieldMap.address);
+      required_quantity = required_quantity || cleanValue(fieldMap.required_quantity || fieldMap.quantity || fieldMap['require quantity'] || fieldMap.require_quantity);
+      event_date = event_date || cleanValue(fieldMap.event_date || fieldMap['event date']);
+      delivery_date = delivery_date || cleanValue(fieldMap.delivery_date || fieldMap['delivery date'] || fieldMap['when the delivery want'] || fieldMap.when_the_delivery_want);
       campaign = campaign || cleanValue(value.campaign_name || value.campaign || raw.campaign_name);
       campaign_id = campaign_id || cleanValue(value.campaign_id || raw.campaign_id);
       ad_id = ad_id || cleanValue(value.ad_id || raw.ad_id);
@@ -1780,6 +1795,10 @@ function normalizeInboundLead(input: InboundLead, fallbackPlatform: LeadPlatform
     name,
     phone,
     email,
+    location,
+    required_quantity,
+    event_date,
+    delivery_date,
     campaign,
     campaign_id,
     ad_id,
@@ -1943,6 +1962,10 @@ async function processInboundLead(input: InboundLead, fallbackPlatform: LeadPlat
       if (normalized.campaign_id) leadUpdate.campaign_id = normalized.campaign_id;
       if (normalized.ad_id) leadUpdate.ad_id = normalized.ad_id;
       if (normalized.form_id) leadUpdate.form_id = normalized.form_id;
+      if (normalized.location) leadUpdate.location = normalized.location;
+      if (normalized.required_quantity) leadUpdate.required_quantity = normalized.required_quantity;
+      if (normalized.event_date) leadUpdate.event_date = normalized.event_date;
+      if (normalized.delivery_date) leadUpdate.delivery_date = normalized.delivery_date;
       leadUpdate.pipeline_id = pipelineId;
 
       transaction.update(matchedLead.ref, leadUpdate);
@@ -1996,8 +2019,23 @@ async function processInboundLead(input: InboundLead, fallbackPlatform: LeadPlat
     if (normalized.campaign_id) leadData.campaign_id = normalized.campaign_id;
     if (normalized.ad_id) leadData.ad_id = normalized.ad_id;
     if (normalized.form_id) leadData.form_id = normalized.form_id;
+    if (normalized.location) leadData.location = normalized.location;
+    if (normalized.required_quantity) leadData.required_quantity = normalized.required_quantity;
+    if (normalized.event_date) leadData.event_date = normalized.event_date;
+    if (normalized.delivery_date) leadData.delivery_date = normalized.delivery_date;
 
     transaction.create(leadRef, leadData);
+
+    const customerRef = db.collection("customers").doc();
+    transaction.create(customerRef, {
+      id: customerRef.id,
+      name: leadData.name || "Unknown",
+      phone: leadData.phone || "",
+      email: leadData.email || "",
+      type: "individual",
+      notes: `Created automatically from Lead source: ${normalized.source}`,
+      created_at: FieldValue.serverTimestamp()
+    });
 
     transaction.create(eventRef, {
       event_id: normalized.eventId,
@@ -2437,7 +2475,10 @@ export const updateLeadDetails = onCall(async (request) => {
   });
 });
 
-export const processMessageQueueItem = onDocumentCreated("message_queue/{itemId}", async (event) => {
+export const processMessageQueueItem = onDocumentCreated({
+  document: "message_queue/{itemId}",
+  secrets: [whatsappAccessToken]
+}, async (event) => {
   const snapshot = event.data;
   if (!snapshot) return;
   const data = snapshot.data();
@@ -2466,10 +2507,28 @@ export const processMessageQueueItem = onDocumentCreated("message_queue/{itemId}
   }
 
   const whatsappToken = cleanValue(process.env.META_WHATSAPP_ACCESS_TOKEN);
-  const phoneNumberId = cleanValue(process.env.META_WHATSAPP_PHONE_NUMBER_ID);
+  let phoneNumberId = cleanValue(process.env.META_WHATSAPP_PHONE_NUMBER_ID);
+  let graphApiVersion = "v20.0";
+
+  try {
+    const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+    if (metaConfigDoc.exists) {
+      const metaConfig = metaConfigDoc.data();
+      if (metaConfig) {
+        if (!phoneNumberId && metaConfig.whatsappPhoneNumberId) {
+          phoneNumberId = cleanValue(metaConfig.whatsappPhoneNumberId);
+        }
+        if (metaConfig.graphApiVersion) {
+          graphApiVersion = cleanValue(metaConfig.graphApiVersion);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error loading Meta config from Firestore:", err);
+  }
 
   if (!whatsappToken || !phoneNumberId) {
-    console.warn("WhatsApp API credentials missing. Simulating success fallback.");
+    console.warn(`WhatsApp API credentials missing. token present: ${!!whatsappToken}, phoneId present: ${!!phoneNumberId}. Simulating success fallback.`);
     await snapshot.ref.update({
       status: "sent",
       error: "WhatsApp API credentials not configured; simulated success.",
@@ -2511,7 +2570,7 @@ export const processMessageQueueItem = onDocumentCreated("message_queue/{itemId}
       parameters.push({ type: "text", text: leadData.campaign || "Ad Campaign" });
     }
 
-    const response = await fetch(`https://graph.facebook.com/v20.0/${phoneNumberId}/messages`, {
+    const response = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${whatsappToken}`,

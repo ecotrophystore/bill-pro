@@ -239,12 +239,7 @@ export default function LeadDetail() {
       return;
     }
     if (reqs.includes('reason') && !form.reason.trim()) {
-      setFeedback(`Lost reason is required for stage "${nextStage.label}".`);
-      return;
-    }
-
-    if (form.status === 'lost' && !form.reason.trim()) {
-      setFeedback('Add a lost reason before saving this status.');
+      setFeedback(`Reason is required for stage "${nextStage.label}".`);
       return;
     }
 

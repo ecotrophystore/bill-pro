@@ -3,8 +3,15 @@ import { Link } from 'react-router-dom';
 import { collection, doc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
 import { ArrowRight, Filter, Search, UserPlus, Trash2 } from 'lucide-react';
 import { db } from '../lib/firebase';
-import type { Lead } from '../types';
+import type { Lead, Pipeline } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
+
+const DEFAULT_STAGES = [
+  { id: 'new', label: 'New' },
+  { id: 'contacted', label: 'Contacted' },
+  { id: 'qualified', label: 'Qualified' },
+  { id: 'lost', label: 'Lost' },
+];
 
 function formatDate(value: any) {
   if (!value) return '-';
@@ -20,6 +27,7 @@ export default function Leads() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [platform, setPlatform] = useState('all');
+  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const { hasPermission } = useCRMPermission();
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -50,7 +58,14 @@ export default function Leads() {
       setLoading(false);
     });
 
-    return () => unsub();
+    const unsubPipelines = onSnapshot(query(collection(db, 'pipelines')), (snapshot) => {
+      setPipelines(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as Pipeline)));
+    });
+
+    return () => {
+      unsub();
+      unsubPipelines();
+    };
   }, []);
 
   const filtered = useMemo(() => {
@@ -142,11 +157,26 @@ export default function Leads() {
                     <td className="py-4 pr-4 text-secondary">{lead.source}</td>
                     <td className="py-4 pr-4 capitalize">{lead.platform}</td>
                     <td className="py-4 pr-4">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-widest ${
-                        lead.status === 'new' ? 'bg-secondary/10 text-secondary' : lead.status === 'contacted' ? 'bg-warning/10 text-warning' : lead.status === 'qualified' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'
-                      }`}>
-                        {lead.status}
-                      </span>
+                      {(() => {
+                        const pipelineId = lead.pipeline_id || 'default';
+                        const pipeline = pipelines.find(p => p.id === pipelineId);
+                        const stages = pipeline?.stages?.length ? pipeline.stages : DEFAULT_STAGES;
+                        const stage = stages.find(s => s.id === lead.status);
+                        const label = stage ? stage.label : lead.status;
+                        const isDefault = ['new', 'contacted', 'qualified', 'lost'].includes(lead.status);
+                        
+                        return (
+                          <span className={`inline-flex px-2 py-1 rounded-full text-[11px] font-bold uppercase tracking-widest ${
+                            lead.status === 'new' ? 'bg-secondary/10 text-secondary' : 
+                            lead.status === 'contacted' ? 'bg-warning/10 text-warning' : 
+                            lead.status === 'qualified' ? 'bg-success/10 text-success' : 
+                            lead.status === 'lost' ? 'bg-error/10 text-error' : 
+                            'bg-primary/10 text-primary-dark'
+                          }`}>
+                            {label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-4 pr-4 text-secondary whitespace-nowrap">{formatDate(lead.created_at)}</td>
                     <td className="py-4 pr-4 text-right">

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download } from 'lucide-react';
 import { auth, db, functions } from '../lib/firebase';
+import * as XLSX from 'xlsx';
 import type { Lead, Pipeline, PipelineStage } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 
@@ -106,9 +107,6 @@ function validateMove(lead: Lead, nextStage: PipelineStage) {
   if (nextStage.id === 'qualified' && !(lead.phone || lead.email)) {
     return 'Need at least a phone number or email before qualifying.';
   }
-  if (nextStage.id === 'lost' && !(lead.reason || '').trim()) {
-    return 'Add a lost reason before closing the lead as lost.';
-  }
   return '';
 }
 
@@ -142,6 +140,7 @@ export default function PipelineBoard() {
   const [followUpLead, setFollowUpLead] = useState<Lead | null>(null);
   const [followUpNextStageId, setFollowUpNextStageId] = useState('');
   const [followUpTitle, setFollowUpTitle] = useState('');
+  const [followUpReason, setFollowUpReason] = useState('Asked to call back');
   const [followUpDescription, setFollowUpDescription] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
   const [followUpTime, setFollowUpTime] = useState('');
@@ -387,6 +386,7 @@ export default function PipelineBoard() {
       await updateDoc(doc(db, 'leads', followUpLead.id), {
         pipeline_id: activePipeline.id,
         status: followUpNextStageId,
+        followup_reason: followUpReason,
         next_follow_up_date: combinedDateTime.toISOString(),
         stageEnteredAt: serverTimestamp(),
         updated_at: serverTimestamp()
@@ -399,7 +399,7 @@ export default function PipelineBoard() {
       await addDoc(collection(db, 'activities'), {
         lead_id: followUpLead.id,
         type: 'lead.updated',
-        message: `Scheduled Follow-up: "${followUpTitle.trim()}" - ${followUpDescription.trim() || 'No description'} on ${followUpDate} at ${followUpTime}`,
+        message: `Scheduled Follow-up: "${followUpTitle.trim()}" (Reason: ${followUpReason}) - ${followUpDescription.trim() || 'No description'} on ${followUpDate} at ${followUpTime}`,
         actor: currentUserId,
         created_at: serverTimestamp(),
       });
@@ -410,7 +410,7 @@ export default function PipelineBoard() {
         pipeline_id: activePipeline.id,
         channel: 'note',
         subject: `Follow-up Scheduled: ${followUpTitle.trim()}`,
-        body: `Follow-up Scheduled:\nTitle: ${followUpTitle.trim()}\nDescription: ${followUpDescription.trim() || 'No description'}\nTime: ${followUpDate} ${followUpTime}`,
+        body: `Follow-up Scheduled:\nTitle: ${followUpTitle.trim()}\nReason: ${followUpReason}\nDescription: ${followUpDescription.trim() || 'No description'}\nTime: ${followUpDate} ${followUpTime}`,
         status: 'queued',
         created_by: currentUserId,
         created_at: serverTimestamp(),
@@ -458,8 +458,8 @@ export default function PipelineBoard() {
     const nextStage = activeStages.find((s) => s.id === nextStageId) || { id: nextStageId, label: nextStageId };
     
     // If reason is needed and we don't have customReason, open modal
-    const isLostStage = nextStageId === 'lost' || (nextStage.required_fields || []).includes('reason');
-    if (isLostStage && customReason === undefined) {
+    const requiresReason = (nextStage.required_fields || []).includes('reason');
+    if (requiresReason && customReason === undefined) {
       setLostLead(lead);
       setLostNextStageId(nextStageId);
       setLostReason(lead.reason || '');
@@ -490,13 +490,13 @@ export default function PipelineBoard() {
       return;
     }
 
-    const nextReason = isLostStage ? customReason?.trim() : lead.reason;
+    const nextReason = requiresReason ? customReason?.trim() : lead.reason;
 
     try {
       await updateDoc(doc(db, 'leads', lead.id), {
         pipeline_id: activePipeline.id,
         status: nextStageId,
-        reason: isLostStage ? nextReason : '',
+        reason: requiresReason ? nextReason : '',
         stageEnteredAt: serverTimestamp(),
         updated_at: serverTimestamp()
       });
@@ -508,6 +508,69 @@ export default function PipelineBoard() {
   };
 
   const nextStageIdFor = (index: number) => activeStages[(index + 1) % activeStages.length]?.id || activeStages[0]?.id || 'new';
+
+  const handleExportPipeline = () => {
+    try {
+      const exportData: any[] = [];
+      activeStages.forEach(stage => {
+        const stageLeads = grouped[stage.id] || [];
+        stageLeads.forEach(lead => {
+          exportData.push({
+            'Lead Name': lead.name,
+            'Phone': lead.phone || '',
+            'Email': lead.email || '',
+            'Stage': stage.label,
+            'Source': lead.source || '',
+            'Campaign': lead.campaign || '',
+            'Value': lead.value || 0,
+            'Follow-up Reason': lead.followup_reason || '',
+            'Created At': formatDate(lead.created_at)
+          });
+        });
+      });
+
+      if (grouped.other && grouped.other.length > 0) {
+        grouped.other.forEach(lead => {
+          exportData.push({
+            'Lead Name': lead.name,
+            'Phone': lead.phone || '',
+            'Email': lead.email || '',
+            'Stage': 'Other',
+            'Source': lead.source || '',
+            'Campaign': lead.campaign || '',
+            'Value': lead.value || 0,
+            'Follow-up Reason': lead.followup_reason || '',
+            'Created At': formatDate(lead.created_at)
+          });
+        });
+      }
+
+      if (exportData.length === 0) {
+        setMessage('No leads to export in this pipeline.');
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      const objectMaxLength: number[] = [];
+      exportData.forEach(row => {
+        Object.keys(row).forEach((key, i) => {
+          const value = row[key] ? row[key].toString() : '';
+          const length = Math.max(value.length, key.length);
+          objectMaxLength[i] = Math.max(objectMaxLength[i] || 0, length);
+        });
+      });
+      ws['!cols'] = objectMaxLength.map(w => ({ width: w + 2 }));
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Pipeline Leads");
+      XLSX.writeFile(wb, `${activePipeline.name.replace(/\s+/g, '_')}_Leads.xlsx`);
+      setMessage(`Exported ${exportData.length} leads successfully.`);
+    } catch (error) {
+      console.error('Export failed', error);
+      setMessage('Failed to export pipeline leads.');
+    }
+  };
 
   const handleDrop = async (stageId: string) => {
     const lead = leads.find((item) => item.id === dragId);
@@ -553,6 +616,7 @@ export default function PipelineBoard() {
           {hasPermission('create_lead') && (
             <Link to="/leads/new" className="neo-btn-primary inline-flex items-center gap-2"><UserPlus size={16} /> Add Lead</Link>
           )}
+          <button onClick={handleExportPipeline} className="neo-btn inline-flex items-center gap-2"><Download size={16} /> Export</button>
         </div>
       </div>
 
@@ -716,6 +780,22 @@ export default function PipelineBoard() {
               </div>
 
               <div>
+                <label className="block text-sm font-semibold text-primary-dark mb-1.5">Customer Response / Reason</label>
+                <select
+                  className="neo-input w-full"
+                  value={followUpReason}
+                  onChange={(e) => setFollowUpReason(e.target.value)}
+                >
+                  <option value="Asked to call back">Asked to call back</option>
+                  <option value="Needs more time">Needs more time</option>
+                  <option value="Send quotation/info">Send quotation/info</option>
+                  <option value="Not picking up">Not picking up</option>
+                  <option value="Busy/In a meeting">Busy/In a meeting</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1.5">Description / Notes</label>
                 <textarea
                   className="neo-input w-full min-h-24 resize-y"
@@ -778,8 +858,8 @@ export default function PipelineBoard() {
           <div className="neo-card max-w-lg w-full space-y-4 animate-scale-up bg-surface">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-xl font-bold text-primary-dark">Enter Lost Reason</h2>
-                <p className="text-sm text-secondary">Please provide a reason for moving {lostLead.name} to the Lost stage</p>
+                <h2 className="text-xl font-bold text-primary-dark">Enter Reason</h2>
+                <p className="text-sm text-secondary">Please provide a reason for moving {lostLead.name} to the {activeStages.find(s => s.id === lostNextStageId)?.label || 'selected'} stage</p>
               </div>
               <button
                 onClick={() => {

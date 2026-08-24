@@ -23,6 +23,7 @@ import {
   Send,
   Target,
   ShieldAlert,
+  Shield,
   Bot,
   ChevronDown,
 } from 'lucide-react';
@@ -63,6 +64,7 @@ const navCategories: NavCategory[] = [
       { path: '/whatsapp-automation', label: 'WA Automation', icon: Bot },
       { path: '/message-queue', label: 'Queue Log', icon: Send },
       { path: '/audit-logs', label: 'Audit Logs', icon: ShieldAlert },
+      { path: '/auditor', label: 'AI Audit Trail', icon: Shield },
     ],
   },
   {

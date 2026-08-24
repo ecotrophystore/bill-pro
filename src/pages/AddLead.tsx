@@ -10,6 +10,10 @@ export default function AddLead() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
+  const [location, setLocation] = useState('');
+  const [requiredQuantity, setRequiredQuantity] = useState('');
+  const [eventDate, setEventDate] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState('');
   const [campaign, setCampaign] = useState('');
   const [formId, setFormId] = useState('');
   const [adId, setAdId] = useState('');
@@ -17,6 +21,7 @@ export default function AddLead() {
   const [platform, setPlatform] = useState<LeadPlatform>('manual');
   const [pipelineId, setPipelineId] = useState('default');
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
+  const [cost, setCost] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -64,11 +69,16 @@ export default function AddLead() {
         name,
         phone,
         email,
+        location,
+        required_quantity: requiredQuantity,
+        event_date: eventDate,
+        delivery_date: deliveryDate,
         campaign,
         form_id: formId,
         ad_id: adId,
         pipeline_id: pipelineId,
         event_id: `manual_${Date.now()}`,
+        cost: cost ? Number(cost) : null,
         message,
       });
       const data = result as { status?: string; leadId?: string; eventId?: string };
@@ -76,9 +86,14 @@ export default function AddLead() {
       setName('');
       setPhone('');
       setEmail('');
+      setLocation('');
+      setRequiredQuantity('');
+      setEventDate('');
+      setDeliveryDate('');
       setCampaign('');
       setFormId('');
       setAdId('');
+      setCost('');
       setMessage('');
       setSource('Manual');
       setPlatform('manual');
@@ -116,6 +131,26 @@ export default function AddLead() {
           <div>
             <label className="block text-sm font-semibold text-primary-dark mb-2">Source</label>
             <input className="neo-input w-full" value={source} onChange={(e) => setSource(e.target.value)} placeholder="Manual / Referral / Walk-in" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-primary-dark mb-2">Location</label>
+            <input className="neo-input w-full" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City / Address" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-primary-dark mb-2">Required Quantity</label>
+            <input className="neo-input w-full" type="number" value={requiredQuantity} onChange={(e) => setRequiredQuantity(e.target.value)} placeholder="Quantity" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-primary-dark mb-2">Cost</label>
+            <input className="neo-input w-full" type="number" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="Cost (optional)" />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-primary-dark mb-2">Event Date</label>
+            <input className="neo-input w-full" type="date" value={eventDate} onChange={(e) => setEventDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-semibold text-primary-dark mb-2">Delivery Date</label>
+            <input className="neo-input w-full" type="date" value={deliveryDate} onChange={(e) => setDeliveryDate(e.target.value)} />
           </div>
           <div>
             <label className="block text-sm font-semibold text-primary-dark mb-2">Platform</label>

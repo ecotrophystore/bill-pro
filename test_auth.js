@@ -3,12 +3,12 @@ import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } f
 import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyDR455QnKVYPiqS9rXOGm5uHgZqIsd8ess",
+  apiKey: "AIzaSyDElldlJ1KxwDZ7swAcTZyWemYR8CspIVI",
   authDomain: "ecotrophy-inventory.firebaseapp.com",
   projectId: "ecotrophy-inventory",
   storageBucket: "ecotrophy-inventory.firebasestorage.app",
   messagingSenderId: "62541510816",
-  appId: "1:62541510816:web:6a3fc26aa11799f4b831c5"
+  appId: "1:62541510816:web:6c0f88f7888cc74eb831c5"
 };
 
 const app = initializeApp(firebaseConfig);
