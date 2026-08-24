@@ -316,6 +316,8 @@ export interface Lead {
   next_follow_up_date?: Timestamp;
   created_at: Timestamp;
   updated_at?: Timestamp;
+  value?: number;
+  cost?: number;
   // WhatsApp automation fields
   stageEnteredAt?: Timestamp;
   lastCustomerReplyAt?: Timestamp;
