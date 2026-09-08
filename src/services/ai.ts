@@ -1,16 +1,24 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+function getApiKey(): string {
+  if (typeof window !== 'undefined') {
+    const customKey = localStorage.getItem('VITE_GEMINI_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
+    if (customKey) return customKey;
+  }
+  return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+}
 
 export async function extractDataFromDocument(
   base64Data: string,
   mimeType: string,
   type: 'purchase' | 'expense' | 'statement'
 ): Promise<any> {
-  if (!genAI) {
-    throw new Error('Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your .env file.');
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini API key is not configured. Please configure your Gemini API Key or environment.');
   }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
 
   // Use the flash model which is cost-effective and fast
   const model = genAI.getGenerativeModel({
