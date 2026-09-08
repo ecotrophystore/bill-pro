@@ -73,11 +73,23 @@ export default function WhatsAppAutomation() {
   };
 
   const handleSaveCompiled = async (compiledData: Partial<WhatsAppAutomation>) => {
-    if (!db) return;
+    if (!db) {
+      throw new Error('Database is not initialized.');
+    }
     const uid = auth?.currentUser?.uid ?? 'system';
     setSaving(true); setIsError(false); setMessage('');
     try {
-      const payload = { ...compiledData, updatedAt: serverTimestamp() };
+      // Clean and sanitize nodes/edges to remove undefined or non-serializable fields for Firestore
+      const cleanNodes = JSON.parse(JSON.stringify(compiledData.workflowNodes || []));
+      const cleanEdges = JSON.parse(JSON.stringify(compiledData.workflowEdges || []));
+
+      const payload = {
+        ...compiledData,
+        workflowNodes: cleanNodes,
+        workflowEdges: cleanEdges,
+        updatedAt: serverTimestamp(),
+      };
+
       if (draft?.id) {
         await setDoc(doc(db, 'whatsapp_automations', draft.id), payload, { merge: true });
         setMessage(`✓ Updated automation "${payload.name}".`);
@@ -87,7 +99,10 @@ export default function WhatsAppAutomation() {
       }
       setView('list');
     } catch (err: any) {
-      setIsError(true); setMessage(err?.message ?? 'Failed to save.');
+      console.error('Error saving automation:', err);
+      setIsError(true);
+      setMessage(err?.message ?? 'Failed to save.');
+      throw err;
     } finally {
       setSaving(false);
     }

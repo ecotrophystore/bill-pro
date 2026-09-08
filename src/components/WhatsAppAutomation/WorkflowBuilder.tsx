@@ -139,7 +139,7 @@ function BuilderContext({ initialData, allPipelines, onSave, onCancel, saving }:
     );
   }, [setNodes]);
 
-  const handleCompileAndSave = () => {
+  const handleCompileAndSave = async () => {
     setErrorMsg('');
     if (!name.trim()) {
       setErrorMsg('Automation name is required.');
@@ -232,7 +232,11 @@ function BuilderContext({ initialData, allPipelines, onSave, onCancel, saving }:
       workflowEdges: edges as unknown as WorkflowEdgeConfig[],
     };
 
-    onSave(compiledPayload);
+    try {
+      await onSave(compiledPayload);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to save automation.');
+    }
   };
 
   const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
