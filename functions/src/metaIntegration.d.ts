@@ -84,4 +84,9 @@ export declare const sendWhatsAppTestMessage: import("firebase-functions/v2/http
  * Webhook Handler (GET & POST)
  */
 export declare const metaWebhook: import("firebase-functions/v2/https").HttpsFunction;
+export declare const diagnoseMetaAccess: import("firebase-functions/v2/https").CallableFunction<any, Promise<any>, unknown>;
+export declare const syncMetaTemplates: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    count: any;
+}>, unknown>;
 //# sourceMappingURL=metaIntegration.d.ts.map

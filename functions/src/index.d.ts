@@ -14,17 +14,17 @@ export declare const convertQuotationToInvoice: import("firebase-functions/v2/ht
 export declare const convertQuotationToCashMemo: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     memoId: string;
-    memoNumber: string;
+    memoNumber: any;
 }>, unknown>;
 export declare const convertQuotationToProforma: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     proformaId: string;
-    proformaNumber: string;
+    proformaNumber: any;
 }>, unknown>;
 export declare const convertProformaToInvoice: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
     invoiceId: string;
-    invoiceNumber: string;
+    invoiceNumber: any;
 }>, unknown>;
 /**
  * 1. Invoice Numbering & 2. Immutability
@@ -100,7 +100,6 @@ export declare const extractInvoiceData: import("firebase-functions/v2/https").C
 export declare const extractExpenseReceipt: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     data: any;
 }>, unknown>;
-export declare const metaLeadWebhook: import("firebase-functions/v2/https").HttpsFunction;
 export declare const googleLeadWebhook: import("firebase-functions/v2/https").HttpsFunction;
 export declare const testLeadIngest: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     status: string;

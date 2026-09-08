@@ -8,6 +8,7 @@ import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
+import { getNextProposedNumber } from '../utils/numberGenerator';
 
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
@@ -15,6 +16,7 @@ const exactRound = (num: number) => Math.round(num * 100) / 100;
 export default function CreateCashMemo() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { settings: companySettings } = useSettings();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -31,6 +33,7 @@ export default function CreateCashMemo() {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
   const [paymentStatus, setPaymentStatus] = useState<'unpaid' | 'paid'>('unpaid');
+  const [documentNumber, setDocumentNumber] = useState('');
 
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
@@ -64,6 +67,14 @@ export default function CreateCashMemo() {
             setDiscountPercent(data.discount_percent || 0);
             setChargeAmount(data.charge_amount || 0);
             setPaymentStatus(data.payment_status || 'unpaid');
+            setDocumentNumber(data.number || '');
+          }
+        } else {
+          try {
+            const proposed = await getNextProposedNumber('cash_memos', 'memo', companySettings);
+            setDocumentNumber(proposed);
+          } catch (numErr) {
+            console.warn("Could not generate proposed cash memo number:", numErr);
           }
         }
       } catch (error) {
@@ -73,7 +84,7 @@ export default function CreateCashMemo() {
       }
     }
     fetchData();
-  }, [id]);
+  }, [id, companySettings?.memo_prefix, companySettings?.memo_format, companySettings?.memo_year, companySettings?.memo_next_number]);
 
   useEffect(() => {
     if (location.state?.voiceData && !loadingData && !id && customers.length > 0) {
@@ -165,6 +176,7 @@ export default function CreateCashMemo() {
       setIsSaving(true);
       try {
         await updateDoc(doc(db, 'cash_memos', id), {
+          number: documentNumber || undefined,
           customer_id: isWalkIn ? null : selectedCustomerId,
           customer_name: selectedCustomerName,
           items: items,
@@ -200,6 +212,7 @@ export default function CreateCashMemo() {
     try {
       const createCashMemoFn = httpsCallable(functions, 'createCashMemo');
       const memoData = {
+        number: documentNumber || undefined,
         customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
         customer_name: isWalkIn ? walkInName : selectedCustomerName,
         walk_in_customer: isWalkIn,
@@ -222,6 +235,7 @@ export default function CreateCashMemo() {
       console.warn("Cloud function failed, attempting client-side save fallback:", error);
       try {
         const memoData = {
+          number: documentNumber || undefined,
           customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
           customer_name: isWalkIn ? walkInName : selectedCustomerName,
           walk_in_customer: isWalkIn,
@@ -320,6 +334,19 @@ export default function CreateCashMemo() {
                   placeholder="Search customers..."
                 />
               )}
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-primary-dark px-1 flex items-center justify-between">
+                  <span>Memo No</span>
+                  <span className="text-xs text-primary font-normal">Editable</span>
+                </label>
+                <SpeechInput 
+                  type="text" 
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-surface" 
+                  placeholder="e.g. MEMO/25/26/0001" 
+                  value={documentNumber} 
+                  onChange={(e: any) => setDocumentNumber(e.target.value)} 
+                />
+              </div>
               <div className="space-y-1">
                 <label className="text-sm font-semibold text-primary-dark px-1">Date</label>
                 <input type="date" className="neo-input w-full" defaultValue={new Date().toISOString().split('T')[0]} readOnly />

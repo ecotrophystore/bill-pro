@@ -40,57 +40,63 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
-function buildPaymentDetailsHtml(docData: DocumentData, settings: any) {
-  let paymentHtml = '';
-  let pMethod = (docData as any).payment_method_to_show || 'Bank Details';
+function buildPaymentDetailsHtml(docData: DocumentData, settings: any, isGstBill: boolean) {
+  if (isGstBill) {
+    const bankName = settings?.bankName || 'HDFC BANK';
+    const acNo = settings?.accountNumber || '50200101733061';
+    const ifsc = settings?.ifscCode || 'HDFC0002639';
+    const branch = settings?.branchName || 'Tiruchengode';
+    const acName = settings?.accountHolderName || 'ECOTROPHY INNOVATIONS (OPC) PVT LTD';
 
-  if (pMethod === 'UPI Details' && (docData as any).advance_payment_method === 'GPay') {
-    pMethod = 'GPay Details';
+    return `
+      <div class="footer-col">
+          <h4>PAYMENT DETAILS</h4>
+          <ul class="footer-list">
+              <li><strong>Bank / Method:</strong> ${escapeHtml(bankName)}</li>
+              <li><strong>A/c No / UPI:</strong> ${escapeHtml(acNo)}</li>
+              <li><strong>IFSC:</strong> ${escapeHtml(ifsc)}</li>
+              <li><strong>Branch:</strong> ${escapeHtml(branch)}</li>
+              <li><strong>A/c Name:</strong> ${escapeHtml(acName)}</li>
+          </ul>
+      </div>`;
   }
 
-  if (!settings || pMethod === 'None') return '';
+  // Non-GST bills (e.g. Cash Memo)
+  const gpayNumber = settings?.gpayNumber || '+91 88707 44306';
+  const gpayHolderName = settings?.gpayHolderName || 'Chakravarthi MM';
 
   let detailsList = '';
-
-  if (pMethod === 'Bank Details' || pMethod === 'All Payment Details') {
-    if (settings.bankName) detailsList += `<li><strong>Bank:</strong> ${escapeHtml(settings.bankName)}</li>`;
-    if (settings.accountHolderName) detailsList += `<li><strong>A/c Name:</strong> ${escapeHtml(settings.accountHolderName)}</li>`;
-    if (settings.accountNumber) detailsList += `<li><strong>A/c No:</strong> ${escapeHtml(settings.accountNumber)}</li>`;
-    if (settings.ifscCode) detailsList += `<li><strong>IFSC:</strong> ${escapeHtml(settings.ifscCode)}</li>`;
-    if (settings.branchName) detailsList += `<li><strong>Branch:</strong> ${escapeHtml(settings.branchName)}</li>`;
+  if (gpayNumber) {
+    detailsList += `<li><strong>GPay No:</strong> ${escapeHtml(gpayNumber)}</li>`;
   }
-
-  if (pMethod === 'UPI Details' || pMethod === 'All Payment Details') {
-    if (settings.upiId) detailsList += `<li><strong>UPI ID:</strong> ${escapeHtml(settings.upiId)}</li>`;
-    if (pMethod === 'UPI Details' && settings.accountHolderName) {
-      detailsList += `<li><strong>Name:</strong> ${escapeHtml(settings.accountHolderName)}</li>`;
-    }
+  if (gpayHolderName) {
+    detailsList += `<li><strong>Name:</strong> ${escapeHtml(gpayHolderName)}</li>`;
   }
-
-  if (pMethod === 'GPay Details' || pMethod === 'All Payment Details') {
-    if (settings.gpayNumber) detailsList += `<li><strong>GPay No:</strong> ${escapeHtml(settings.gpayNumber)}</li>`;
-    if (pMethod === 'GPay Details' && settings.gpayHolderName) {
-      detailsList += `<li><strong>Name:</strong> ${escapeHtml(settings.gpayHolderName)}</li>`;
-    }
+  if (settings?.upiId) {
+    detailsList += `<li><strong>UPI ID:</strong> ${escapeHtml(settings.upiId)}</li>`;
+  }
+  if ((docData as any).payment_status) {
+    detailsList += `<li><strong>Payment Status:</strong> ${escapeHtml(String((docData as any).payment_status).toUpperCase())}</li>`;
   }
 
   if (detailsList) {
-    paymentHtml = `
+    return `
       <div class="footer-col">
-          <h4>Payment Details</h4>
+          <h4>PAYMENT DETAILS</h4>
           <ul class="footer-list">
               ${detailsList}
           </ul>
       </div>`;
   }
 
-  return paymentHtml;
+  return '';
 }
 
 function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
   const { docData, customer, docType, settings } = ctx;
   const { buyerName, buyerAddr, docNumber, dateStr } = getDocumentMode(ctx);
   const showHSN = (settings as any)?.gst_enabled;
+  const isGstBill = docType !== 'Cash Memo' && (docData as any).customer_type !== 'non_gst';
 
   const calc = calculateBillingTotals({
     items: docData.items,
@@ -119,7 +125,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
     `;
   }).join('');
 
-  const paymentHtml = buildPaymentDetailsHtml(docData, settings);
+  const paymentHtml = buildPaymentDetailsHtml(docData, settings, isGstBill);
   const grandTotal = calc.grandTotal;
   const taxTotal = calc.taxTotal;
   const discountAmt = calc.discountAmount;
@@ -129,7 +135,20 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
   const igst = calc.igst;
   const isIgst = calc.igst > 0;
 
-  const termsHtml = settings?.termsAndConditions ? settings.termsAndConditions.split('\n').map((t: string) => `<li>${escapeHtml(t)}</li>`).join('') : '';
+  let termsContent = '';
+  if (isGstBill) {
+    termsContent = settings?.gstTermsAndConditions || settings?.termsAndConditions || `1. 50% Advance payment required to confirm order.\n2. Balance payment to be made before dispatch.\n3. Goods once sold cannot be returned.\n4. Delivery timeline subject to artwork approval.`;
+  } else {
+    termsContent = settings?.nonGstTermsAndConditions || `1. Goods once sold cannot be returned.\n2. Payment received in full.`;
+  }
+
+  const termsHtml = termsContent
+    .split('\n')
+    .map((t: string) => t.trim())
+    .filter((t: string) => t.length > 0)
+    .map((t: string) => `<li>${escapeHtml(t)}</li>`)
+    .join('');
+
   const companyDetails = [
     settings?.companyAddress ? escapeHtml(settings.companyAddress).replace(/\n/g, '<br>') : '',
     settings?.companyGstin ? `<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}<br>` : '',
@@ -180,10 +199,11 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
         .grand-total-row td { padding: 8px; font-size: 13px; font-weight: bold; }
         .amount-words { border-top: 1px solid #ddd; padding-top: 8px; font-size: 12px; margin-bottom: 20px; font-style: italic; color: #555; }
         .amount-words span { font-weight: 700; color: #333; font-style: normal; }
-        .footer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: auto; border-top: 2px solid ${theme.primary}; padding-top: 15px; }
-        .footer-col h4 { color: ${theme.primary}; font-size: 12px; margin: 0 0 8px 0; text-transform: uppercase; }
-        .footer-list { list-style: none; padding: 0; margin: 0; font-size: 11px; line-height: 1.4; color: #444; }
-        .footer-list li { margin-bottom: 2px; }
+        .footer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: auto; border-top: 2px solid ${theme.primary}; padding-top: 15px; }
+        .footer-col h4 { color: ${theme.primary}; font-size: 12px; margin: 0 0 8px 0; text-transform: uppercase; font-weight: 800; letter-spacing: 0.5px; }
+        .footer-list { list-style: none; padding: 0; margin: 0; font-size: 11px; line-height: 1.5; color: #333; }
+        .footer-list li { margin-bottom: 3px; }
+        .footer-list li strong { color: #111; font-weight: 700; }
         .signature-box { text-align: right; padding-top: 5px; }
         .signature-wrapper { display: inline-block; width: 180px; text-align: center; }
         .sign-area { height: 65px; display: flex; align-items: center; justify-content: center; padding-bottom: 5px; }
@@ -283,7 +303,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
           <div class="footer-grid">
               ${paymentHtml}
               <div class="footer-col">
-                  <h4>Terms & Conditions</h4>
+                  <h4>TERMS & CONDITIONS</h4>
                   <ul class="footer-list">
                       ${termsHtml}
                   </ul>

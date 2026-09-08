@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 import { auth, db, functions } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { Lead, Pipeline, PipelineStage } from '../types';
@@ -135,6 +135,49 @@ export default function PipelineBoard() {
   const [message, setMessage] = useState('');
   const { hasPermission } = useCRMPermission();
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = () => {
+    if (scrollContainerRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
+      setCanScrollLeft(scrollLeft > 2);
+      setCanScrollRight(Math.ceil(scrollLeft + clientWidth) < scrollWidth - 5);
+    }
+  };
+
+
+
+  const scrollPipeline = (direction: 'left' | 'right') => {
+    if (scrollContainerRef.current) {
+      const container = scrollContainerRef.current;
+      const firstChild = container.firstElementChild as HTMLElement;
+      if (firstChild) {
+        // Scroll by one stage column width + 16px gap
+        const scrollAmount = firstChild.offsetWidth + 16;
+        container.scrollBy({
+          left: direction === 'left' ? -scrollAmount : scrollAmount,
+          behavior: 'smooth',
+        });
+      }
+    }
+  };
+
+  const handleContainerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    if (!scrollContainerRef.current || !dragId) return;
+    const container = scrollContainerRef.current;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const edgeThreshold = 80;
+    if (x < edgeThreshold) {
+      container.scrollLeft -= 15;
+    } else if (x > rect.width - edgeThreshold) {
+      container.scrollLeft += 15;
+    }
+  };
+
   // Follow-up scheduling modal states
   const [followUpModalOpen, setFollowUpModalOpen] = useState(false);
   const [followUpLead, setFollowUpLead] = useState<Lead | null>(null);
@@ -220,6 +263,18 @@ export default function PipelineBoard() {
     if (other.length > 0) rows.other = other;
     return rows;
   }, [leads, activePipeline.id, activeStages]);
+
+  useEffect(() => {
+    // Initial check and on update
+    const timer = setTimeout(() => {
+      checkScroll();
+    }, 100);
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, [leads, activePipeline, activeStages]);
 
   const openCreate = () => {
     setEditingPipelineId('');
@@ -923,85 +978,121 @@ export default function PipelineBoard() {
           Loading pipelines...
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-          {activeStages.map((stage, index) => (
-            <div
-              key={stage.id}
-              className={`neo-card space-y-4 border ${stageTone(index)}`}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={() => handleDrop(stage.id)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-primary-dark">{stage.label}</h2>
+        <div className="relative group/pipeline">
+          {/* Left Navigation Arrow */}
+          <button
+            type="button"
+            onClick={() => scrollPipeline('left')}
+            disabled={!canScrollLeft}
+            aria-label="Previous stages"
+            className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 z-20 p-2.5 rounded-full bg-surface/95 backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
+              !canScrollLeft ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
+            }`}
+          >
+            <ChevronLeft size={22} className="stroke-[2.5]" />
+          </button>
 
+          {/* Right Navigation Arrow */}
+          <button
+            type="button"
+            onClick={() => scrollPipeline('right')}
+            disabled={!canScrollRight}
+            aria-label="Next stages"
+            className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 z-20 p-2.5 rounded-full bg-surface/95 backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
+              !canScrollRight ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
+            }`}
+          >
+            <ChevronRight size={22} className="stroke-[2.5]" />
+          </button>
 
-                </div>
-                <div className="text-sm font-black text-primary-dark">{grouped[stage.id]?.length || 0}</div>
-              </div>
-
-              <div className="space-y-3 min-h-[120px]">
-                {(grouped[stage.id] || []).length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-shadow-darker/20 p-4 text-sm text-secondary text-center">Drop leads here</div>
-                ) : (
-                  (grouped[stage.id] || []).map((lead) => (
-                    <div 
-                      key={lead.id} 
-                      draggable 
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = 'move';
-                        e.dataTransfer.setData('text/plain', lead.id);
-                        setDragId(lead.id);
-                      }} 
-                      onDragEnd={() => setDragId('')} 
-                      className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm cursor-grab active:cursor-grabbing"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="font-semibold text-primary-dark">{lead.name}</div>
-                          <div className="text-xs text-secondary mt-1">{lead.phone || lead.email || 'No contact yet'}</div>
-                        </div>
-                        <GripVertical size={16} className="text-secondary shrink-0" />
-                      </div>
-
-                      <div className="mt-3 space-y-1 text-xs text-secondary">
-                        <div>{lead.source}</div>
-                        <div>{lead.campaign || 'No campaign'}</div>
-                        <div>{formatDate(lead.created_at)}</div>
-                      </div>
-
-                      <div className="mt-4 flex items-center justify-between gap-2">
-                        <Link to={`/leads/${lead.id}`} className="inline-flex items-center gap-1 text-primary-dark font-semibold text-sm hover:underline">
-                          Open <ArrowRight size={13} />
-                        </Link>
-                        <button onClick={() => moveLead(lead, nextStageIdFor(index))} className="text-xs font-semibold text-secondary hover:text-primary-dark">Next stage</button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          ))}
-
-          {hasUnmapped && (
-            <div className="neo-card space-y-4 border bg-shadow-darker/5 border-shadow-darker/20">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-primary-dark">Other</h2>
-                  <p className="text-xs text-secondary mt-1">Leads whose status is not mapped to this pipeline.</p>
-                </div>
-                <div className="text-sm font-black text-primary-dark">{grouped.other?.length || 0}</div>
-              </div>
-              <div className="space-y-3 min-h-[120px]">
-                {(grouped.other || []).map((lead) => (
-                  <div key={lead.id} className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm">
-                    <div className="font-semibold text-primary-dark">{lead.name}</div>
-                    <div className="text-xs text-secondary mt-1">{lead.status}</div>
+          {/* Horizontal Scrollable Stages Container */}
+          <div
+            ref={scrollContainerRef}
+            onScroll={checkScroll}
+            onDragOver={handleContainerDragOver}
+            className="flex flex-nowrap items-start gap-4 overflow-x-auto snap-x snap-mandatory pb-4 pt-1 px-1 pipeline-scrollbar scroll-smooth"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            {activeStages.map((stage, index) => (
+              <div
+                key={stage.id}
+                className={`flex-shrink-0 flex-grow-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] xl:w-[calc((100%-3rem)/4)] snap-start neo-card space-y-4 border ${stageTone(index)}`}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={() => handleDrop(stage.id)}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-primary-dark">{stage.label}</h2>
                   </div>
-                ))}
+                  <div className="text-sm font-black text-primary-dark">{grouped[stage.id]?.length || 0}</div>
+                </div>
+
+                <div className="space-y-3 min-h-[120px]">
+                  {(grouped[stage.id] || []).length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-shadow-darker/20 p-4 text-sm text-secondary text-center">Drop leads here</div>
+                  ) : (
+                    (grouped[stage.id] || []).map((lead) => (
+                      <div 
+                        key={lead.id} 
+                        draggable 
+                        onDragStart={(e) => {
+                          e.dataTransfer.effectAllowed = 'move';
+                          e.dataTransfer.setData('text/plain', lead.id);
+                          setDragId(lead.id);
+                        }} 
+                        onDragEnd={() => setDragId('')} 
+                        className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-primary-dark">{lead.name}</div>
+                            <div className="text-xs text-secondary mt-1">{lead.phone || lead.email || 'No contact yet'}</div>
+                          </div>
+                          <GripVertical size={16} className="text-secondary shrink-0" />
+                        </div>
+
+                        <div className="mt-3 space-y-1 text-xs text-secondary">
+                          <div>{lead.source}</div>
+                          <div>{lead.campaign || 'No campaign'}</div>
+                          <div>{formatDate(lead.created_at)}</div>
+                        </div>
+
+                        <div className="mt-4 flex items-center justify-between gap-2">
+                          <Link to={`/leads/${lead.id}`} className="inline-flex items-center gap-1 text-primary-dark font-semibold text-sm hover:underline">
+                            Open <ArrowRight size={13} />
+                          </Link>
+                          <button onClick={() => moveLead(lead, nextStageIdFor(index))} className="text-xs font-semibold text-secondary hover:text-primary-dark">Next stage</button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            ))}
+
+            {hasUnmapped && (
+              <div className="flex-shrink-0 flex-grow-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] xl:w-[calc((100%-3rem)/4)] snap-start neo-card space-y-4 border bg-shadow-darker/5 border-shadow-darker/20">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-bold text-primary-dark">Other</h2>
+                    <p className="text-xs text-secondary mt-1">Leads whose status is not mapped to this pipeline.</p>
+                  </div>
+                  <div className="text-sm font-black text-primary-dark">{grouped.other?.length || 0}</div>
+                </div>
+                <div className="space-y-3 min-h-[120px]">
+                  {(grouped.other || []).map((lead) => (
+                    <div key={lead.id} className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm">
+                      <div className="font-semibold text-primary-dark">{lead.name}</div>
+                      <div className="text-xs text-secondary mt-1">{lead.status}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

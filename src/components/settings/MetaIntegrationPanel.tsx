@@ -1,11 +1,11 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { Database, Save, Loader2, Copy, Check, ExternalLink, AlertCircle, CheckCircle } from 'lucide-react';
+import { Database, Save, Loader2, Copy, Check, ExternalLink, AlertCircle, CheckCircle, Activity, X } from 'lucide-react';
 import { MetaStatusCard, type ConnectionStatus } from './MetaStatusCard';
 import { MetaSecretSetupModal } from './MetaSecretSetupModal';
 import { SendTestMessageModal } from './SendTestMessageModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { httpsCallable } from 'firebase/functions';
-import { functions } from '../../lib/firebase';
+import { db, functions } from '../../lib/firebase';
 
 const FacebookIntegrationCard = lazy(() => import('./FacebookIntegrationCard').then(m => ({ default: m.FacebookIntegrationCard })));
 const InstagramIntegrationCard = lazy(() => import('./InstagramIntegrationCard').then(m => ({ default: m.InstagramIntegrationCard })));
@@ -110,6 +110,11 @@ export default function MetaIntegrationPanel() {
   const [validated, setValidated] = useState(false);          // only show errors after first save attempt
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  const [showDiagnosticModal, setShowDiagnosticModal] = useState(false);
+  const [diagnosticReport, setDiagnosticReport] = useState<any>(null);
+  const [runningDiagnostics, setRunningDiagnostics] = useState(false);
+  const [syncingTemplates, setSyncingTemplates] = useState(false);
+
   const [config, setConfig] = useState<typeof defaultConfig>(defaultConfig);
 
   const [status, setStatus] = useState({
@@ -143,9 +148,8 @@ export default function MetaIntegrationPanel() {
     instagramLastErrorMessage: '',
   });
 
-  const webhookUrl = window.location.hostname === 'localhost'
-    ? 'Meta cannot verify a localhost webhook. Deploy functions first.'
-    : `https://asia-south1-${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'ecotrophy-inventory'}.cloudfunctions.net/metaWebhook`;
+  const webhookUrl = `https://asia-south1-${import.meta.env.VITE_FIREBASE_PROJECT_ID || 'ecotrophy-inventory'}.cloudfunctions.net/metaWebhook`;
+
 
   // ── Live validate on change after first attempt ────────────────────────────
   const handleChange = (key: ConfigKey, value: string) => {
@@ -163,8 +167,23 @@ export default function MetaIntegrationPanel() {
       const data = response.data as any;
       setConfig(prev => ({ ...prev, ...data.config }));
       setStatus(prev => ({ ...prev, ...data.status }));
-    } catch {
+    } catch (error) {
+      console.warn("Callable function failed, attempting direct Firestore fetch fallback:", error);
       setFetchError(true);
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const docSnap = await getDoc(doc(db, 'meta_integrations', 'default'));
+        if (docSnap.exists()) {
+          const fbData = docSnap.data();
+          setConfig(prev => ({
+            ...prev,
+            ...fbData,
+            metaBusinessPortfolioId: fbData.businessPortfolioId || fbData.metaBusinessPortfolioId || '',
+          }));
+        }
+      } catch (fallbackErr) {
+        console.error("Fallback fetch also failed:", fallbackErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -190,7 +209,18 @@ export default function MetaIntegrationPanel() {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 4000);
     } catch (error: any) {
-      alert(`Failed to save configuration: ${error.message}`);
+      console.warn("Callable function failed, attempting direct Firestore save fallback:", error);
+      try {
+        const { doc, setDoc } = await import('firebase/firestore');
+        await setDoc(doc(db, 'meta_integrations', 'default'), {
+          ...config,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 4000);
+      } catch (fallbackErr: any) {
+        alert(`Failed to save configuration: ${fallbackErr.message || error.message}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -233,6 +263,36 @@ export default function MetaIntegrationPanel() {
     if (!isAdmin) return;
     if (!window.confirm('Disconnect WhatsApp? This will clear credentials.')) return;
     alert('Placeholder: disconnect logic to be implemented');
+  };
+
+  const handleRunDiagnostics = async () => {
+    if (!isAdmin) return;
+    setRunningDiagnostics(true);
+    setShowDiagnosticModal(true);
+    setDiagnosticReport(null);
+    try {
+      const diagnose = httpsCallable(functions, 'diagnoseMetaAccess');
+      const response = await diagnose();
+      setDiagnosticReport(response.data);
+    } catch (err: any) {
+      setDiagnosticReport({ status: 'error', checks: [{ name: 'Failed to run diagnostics', passed: false, details: err.message }]});
+    } finally {
+      setRunningDiagnostics(false);
+    }
+  };
+
+  const handleSyncTemplates = async () => {
+    if (!isAdmin) return;
+    setSyncingTemplates(true);
+    try {
+      const sync = httpsCallable(functions, 'syncMetaTemplates');
+      const res = await sync();
+      alert(`Successfully synced ${(res.data as any).count} templates.`);
+    } catch (err: any) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setSyncingTemplates(false);
+    }
   };
 
   const copyUrl = () => {
@@ -400,6 +460,12 @@ export default function MetaIntegrationPanel() {
                   </p>
                 )}
               </div>
+              {isAdmin && (
+                <button onClick={handleSyncTemplates} disabled={syncingTemplates} className="neo-btn text-xs py-1.5 px-4 flex items-center gap-2">
+                  {syncingTemplates ? <Loader2 size={14} className="animate-spin" /> : <Database size={14} />}
+                  Sync Templates
+                </button>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -567,12 +633,51 @@ export default function MetaIntegrationPanel() {
                 <ExternalLink size={14} /> View Setup Commands
               </button>
             )}
+            <button onClick={handleRunDiagnostics} className="neo-btn w-full text-xs py-1.5 mt-2 flex items-center justify-center gap-2 border-primary/20 hover:bg-primary/5">
+              {runningDiagnostics ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />} Run Token Diagnostics
+            </button>
           </div>
         </div>
       </div>
 
       {showSecretModal && <MetaSecretSetupModal onClose={() => setShowSecretModal(false)} />}
       {showTestModal && <SendTestMessageModal onClose={() => setShowTestModal(false)} onSuccess={() => { setShowTestModal(false); fetchStatus(); }} />}
+      {showDiagnosticModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden border-2 border-shadow-darker/20 neo-shadow">
+            <div className="bg-surface p-4 border-b border-shadow-darker/10 flex justify-between items-center">
+              <h3 className="font-bold text-primary-dark flex items-center gap-2">
+                <Activity size={18} className="text-primary" /> Token Diagnostics
+              </h3>
+              <button onClick={() => setShowDiagnosticModal(false)} className="text-secondary hover:text-black">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 max-h-[70vh] overflow-y-auto space-y-4 bg-dots">
+              {runningDiagnostics ? (
+                <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                  <Loader2 className="animate-spin text-primary" size={32} />
+                  <p className="text-sm font-bold text-secondary">Checking tokens securely...</p>
+                </div>
+              ) : diagnosticReport ? (
+                <div className="space-y-3">
+                  {diagnosticReport.checks?.map((check: any, idx: number) => (
+                    <div key={idx} className="bg-white p-3 rounded-lg border border-shadow-darker/10 flex items-start gap-3">
+                      <div className="mt-0.5">
+                        {check.passed ? <CheckCircle size={16} className="text-green-500" /> : <AlertCircle size={16} className="text-red-500" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-primary-dark">{check.name}</p>
+                        {check.details && <p className="text-xs text-secondary mt-1">{check.details}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

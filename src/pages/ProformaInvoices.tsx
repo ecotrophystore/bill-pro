@@ -31,10 +31,11 @@ export default function ProformaInvoices() {
 
   useEffect(() => {
     if (!db) return;
-    const q = query(collection(db, 'proforma_invoices'), orderBy('number', 'asc'));
+    const q = query(collection(db, 'proforma_invoices'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       try {
         const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProformaInvoice));
+        invs.sort((a, b) => (b.number || '').localeCompare(a.number || ''));
         setProformaInvoices(invs);
         
         // Fetch missing customer objects
@@ -80,31 +81,62 @@ export default function ProformaInvoices() {
         const piSnap = await getDoc(piRef);
         if (piSnap.exists()) {
           const piData = piSnap.data();
-          if (piData.linked_quotation_id) {
-            const qRef = doc(db, 'quotations', piData.linked_quotation_id);
-            await updateDoc(qRef, {
-              conversion_status: null,
-              linked_proforma_id: null,
-              status: 'draft'
-            });
+          const linkedQId = piData.linked_quotation_id || piData.sourceQuotationId;
+          if (linkedQId) {
+            try {
+              const qRef = doc(db, 'quotations', linkedQId);
+              const qSnap = await getDoc(qRef);
+              if (qSnap.exists()) {
+                await updateDoc(qRef, {
+                  conversion_status: null,
+                  convertedToProforma: null,
+                  linked_proforma_id: null,
+                  proformaInvoiceId: null,
+                  proformaInvoiceNumber: null,
+                  status: 'draft'
+                });
+              }
+            } catch (unlinkQErr) {
+              console.warn("Could not unlink quotation from proforma invoice:", unlinkQErr);
+            }
+          }
+
+          const linkedInvId = piData.linked_invoice_id || piData.invoiceId || piData.tax_invoice_id;
+          if (linkedInvId) {
+            try {
+              const invRef = doc(db, 'invoices', linkedInvId);
+              const invSnap = await getDoc(invRef);
+              if (invSnap.exists()) {
+                await updateDoc(invRef, {
+                  linked_proforma_id: null,
+                  sourceProformaId: null,
+                  sourceProformaNumber: null
+                });
+              }
+            } catch (unlinkInvErr) {
+              console.warn("Could not unlink tax invoice from proforma invoice:", unlinkInvErr);
+            }
           }
         }
         await deleteDoc(piRef);
 
-        const d = new Date();
-        let fyYear = d.getFullYear();
-        if (d.getMonth() < 3) fyYear -= 1;
-        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
-        await syncSequenceAfterDelete("proforma_invoices", `proforma_sequence_${fyYear}`, `PI/${fyYear}/`);
-      } catch (err) {
+        try {
+          const d = new Date();
+          let fyYear = d.getFullYear();
+          if (d.getMonth() < 3) fyYear -= 1;
+          const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+          await syncSequenceAfterDelete("proforma_invoices", `proforma_sequence_${fyYear}`, `PI/${fyYear}/`);
+        } catch (seqError) {
+          console.warn("Sequence sync failed after delete:", seqError);
+        }
+      } catch (err: any) {
         console.error("Error deleting proforma invoice", err);
-        alert("Failed to delete proforma invoice.");
+        alert(`Failed to delete proforma invoice: ${err?.message || "Unknown error"}`);
       }
     }
   };
 
   const handleConvertToInvoice = async (inv: ProformaInvoice) => {
-    if (!functions) return;
     if (inv.payment_status !== 'paid') {
       alert("Proforma Invoice can only be converted to a Tax Invoice when it is FULLY PAID.");
       return;
@@ -113,23 +145,14 @@ export default function ProformaInvoices() {
     if (!confirm) return;
     setConvertingId(inv.id);
     try {
-      const convertFn = httpsCallable(functions, 'convertProformaToInvoice');
-      const result = await convertFn({ proformaId: inv.id });
-      const invoiceNumber = (result.data as any).invoiceNumber;
+      const { clientConvertProformaToInvoice, deriveInvoiceNumberFromProforma } = await import('../utils/clientBillingCreator');
+      const result = await clientConvertProformaToInvoice(inv.id);
+      const invoiceNumber = (result as any).invoiceNumber || deriveInvoiceNumberFromProforma(inv.number);
       alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
       navigate('/invoices');
-    } catch (error: any) {
-      console.warn("Cloud function conversion failed, trying client fallback:", error);
-      try {
-        const { clientConvertProformaToInvoice } = await import('../utils/clientBillingCreator');
-        const result = await clientConvertProformaToInvoice(inv.id);
-        const invoiceNumber = (result as any).invoiceNumber;
-        alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
-        navigate('/invoices');
-      } catch (fallbackErr: any) {
-        console.error("Client fallback conversion failed:", fallbackErr);
-        alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
-      }
+    } catch (fallbackErr: any) {
+      console.error("Conversion failed:", fallbackErr);
+      alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
     } finally {
       setConvertingId(null);
     }
@@ -165,7 +188,7 @@ export default function ProformaInvoices() {
 
       autoTable(doc, {
         startY: 40,
-        head: [['Proforma #', 'Customer', 'Date', 'Grand Total', 'Status']],
+        head: [['Proforma Number', 'Customer', 'Date', 'Grand Total', 'Status']],
         body: filteredInvoices.map(inv => [
           inv.number,
           customers[inv.customer_id]?.name || 'Unknown Customer',
@@ -251,7 +274,7 @@ export default function ProformaInvoices() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface border-b border-shadow-darker/10">
-                <th className="p-4 font-semibold text-primary-dark">Proforma #</th>
+                <th className="p-4 font-semibold text-primary-dark">Proforma Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
                 <th className="p-4 font-semibold text-primary-dark text-right">Total</th>
@@ -267,12 +290,12 @@ export default function ProformaInvoices() {
               ) : proformaInvoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
               ) : proformaInvoices
-                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(inv => (inv.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || (inv as any).customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
                   .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
                   .map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
-                  <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
+                  <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
                     <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>

@@ -8,8 +8,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
+import { resolveWhatsAppAuthorization, waToken } from "./meta/auth.js";
 
-const whatsappAccessToken = defineSecret("META_WHATSAPP_ACCESS_TOKEN");
+const googleWebhookKey = defineSecret("GOOGLE_WEBHOOK_KEY");
 
 export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
@@ -226,11 +227,6 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
     
     const uid = request.auth.uid;
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
-       throw new HttpsError("permission-denied", "Only Accounts can convert quotes");
-    }
-
     const { quotationId } = request.data;
     if (!quotationId) throw new HttpsError("invalid-argument", "Missing quotationId");
 
@@ -242,13 +238,17 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
       const qData = qDoc.data();
       if (!qData) throw new HttpsError("internal", "No data");
 
-      if (qData.conversion_status === "converted") {
-        throw new HttpsError("already-exists", "This quotation was already converted");
+      if (qData.conversion_status === "converted" && qData.linked_memo_id) {
+        const memoRef = db.collection("cash_memos").doc(qData.linked_memo_id);
+        const memoSnap = await transaction.get(memoRef);
+        if (memoSnap.exists) {
+          throw new HttpsError("already-exists", "This quotation was already converted");
+        }
       }
 
       let subtotal = 0;
-      const validatedItems = qData.items.map((item: any) => {
-        const lineTotalRaw = item.quantity * item.rate;
+      const validatedItems = (qData.items || []).map((item: any) => {
+        const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
         const lineTotal = exactRound(lineTotalRaw);
         subtotal += lineTotal;
         return {
@@ -262,19 +262,8 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
       const finalGrandTotal = Math.round(subtotal);
       const roundOff = exactRound(finalGrandTotal - subtotal);
 
-      const d = new Date();
-      let fyYear = d.getFullYear();
-      if (d.getMonth() < 3) fyYear -= 1;
-
-      const sequenceRef = db.collection("system").doc(`memo_sequence_${fyYear}`);
-      const seqDoc = await transaction.get(sequenceRef);
-      let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-      
-      currentSeq += 1;
-      const paddedSeq = currentSeq.toString().padStart(4, "0");
-      const memoNumber = `MEMO/${fyYear}/${paddedSeq}`;
-
-      transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
+      const rawQNum = qData.number || '';
+      const memoNumber = rawQNum ? rawQNum.replace(/^qtn/i, 'MEMO') : `MEMO/${new Date().getFullYear()}/0001`;
 
       const advanceAmount = qData.advance_amount || 0;
       const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
@@ -313,7 +302,7 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
 
       transaction.update(quotationRef, {
         conversion_status: "converted",
-        linked_invoice_id: memoRef.id, // we use the same field for linking
+        linked_memo_id: memoRef.id,
         status: "converted"
       });
       
@@ -335,12 +324,7 @@ export const convertQuotationToProforma = onCall(async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
     
     const uid = request.auth.uid;
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
-       throw new HttpsError("permission-denied", "Only Accounts can convert quotes");
-    }
-
-    const { quotationId } = request.data;
+    const { quotationId, force } = request.data;
     if (!quotationId) throw new HttpsError("invalid-argument", "Missing quotationId");
 
     const quotationRef = db.collection("quotations").doc(quotationId);
@@ -351,16 +335,21 @@ export const convertQuotationToProforma = onCall(async (request) => {
       const qData = qDoc.data();
       if (!qData) throw new HttpsError("internal", "No data");
 
-      if (qData.conversion_status === "converted") {
-        throw new HttpsError("already-exists", "This quotation was already converted");
+      if (qData.conversion_status === "converted" && qData.linked_proforma_id && !force) {
+        const piRef = db.collection("proforma_invoices").doc(qData.linked_proforma_id);
+        const piSnap = await transaction.get(piRef);
+        if (piSnap.exists) {
+          throw new HttpsError("already-exists", `This quotation was already converted (${qData.proformaInvoiceNumber || piSnap.data()?.number || qData.linked_proforma_id})`);
+        }
       }
 
       let subtotal = 0;
       let totalTax = 0;
       
-      const validatedItems = qData.items.map((item: any) => {
-        const lineTotalRaw = item.quantity * item.rate;
-        const taxAmountRaw = (lineTotalRaw * item.tax_percentage) / 100;
+      const validatedItems = (qData.items || []).map((item: any) => {
+        const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
+        const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : 18;
+        const taxAmountRaw = (lineTotalRaw * taxPercentage) / 100;
         
         const lineTotal = exactRound(lineTotalRaw);
         const taxAmount = exactRound(taxAmountRaw);
@@ -371,30 +360,21 @@ export const convertQuotationToProforma = onCall(async (request) => {
         return {
           ...item,
           line_total: lineTotal,
-          tax_amount: taxAmount
+          tax_amount: taxAmount,
+          tax_percentage: taxPercentage
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
+      const discountPercent = qData.discount_percent || 0;
+      const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
+      const charge = qData.charge_amount || qData.chargeAmount || 0;
+      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
       const finalGrandTotal = Math.round(grandTotalExact);
+      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
 
-      let proformaNumber: string | undefined;
-      if (!proformaNumber) {
-        const d = new Date();
-        let fyYear = d.getFullYear();
-        if (d.getMonth() < 3) fyYear -= 1;
-
-        const sequenceRef = db.collection("system").doc(`proforma_sequence_${fyYear}`);
-        const seqDoc = await transaction.get(sequenceRef);
-        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-        
-        currentSeq += 1;
-        const paddedSeq = currentSeq.toString().padStart(4, "0");
-        proformaNumber = `PI/${fyYear}/${paddedSeq}`;
-
-        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
-      }
+      // Directly change QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
+      const rawQNum = qData.number || '';
+      const proformaNumber = rawQNum ? (rawQNum.replace(/^qtn/i, 'PI')) : `PI/${new Date().getFullYear()}/0001`;
 
       const advanceAmount = qData.advance_amount || 0;
       const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
@@ -404,7 +384,9 @@ export const convertQuotationToProforma = onCall(async (request) => {
       const proformaData = {
         ...qData,
         number: proformaNumber,
+        documentType: "proforma_invoice",
         is_locked: false,
+        is_gst: true,
         status: "draft",
         payment_status: initialPaymentStatus,
         items: validatedItems,
@@ -412,14 +394,21 @@ export const convertQuotationToProforma = onCall(async (request) => {
         tax_total: exactRound(totalTax),
         cgst: qData.is_igst ? 0 : exactRound(totalTax / 2),
         sgst_igst: qData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+        discount_amount: discountAmount,
+        charge_amount: charge,
         round_off: roundOff,
         grand_total: finalGrandTotal,
         advance_amount: advanceAmount,
         balance_amount: balanceAmount,
         payment_history: [],
+        sourceDocumentType: "gst_quotation",
+        sourceQuotationId: quotationId,
+        sourceQuotationNumber: qData.number || "",
         linked_quotation_id: quotationId,
         created_by: uid,
         created_at: FieldValue.serverTimestamp(),
+        proforma_date: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp(),
         audit_trail: [{
           action: "converted_from_quotation",
           user: uid,
@@ -431,8 +420,13 @@ export const convertQuotationToProforma = onCall(async (request) => {
 
       transaction.update(quotationRef, {
         conversion_status: "converted",
+        convertedToProforma: true,
         linked_proforma_id: proformaRef.id,
-        status: "converted"
+        proformaInvoiceId: proformaRef.id,
+        proformaInvoiceNumber: proformaNumber,
+        convertedAt: FieldValue.serverTimestamp(),
+        status: "converted",
+        updated_at: FieldValue.serverTimestamp()
       });
       
       const auditLogRef = db.collection("audit_logs").doc();
@@ -442,7 +436,7 @@ export const convertQuotationToProforma = onCall(async (request) => {
         action: "create",
         user_id: uid,
         timestamp: FieldValue.serverTimestamp(),
-        notes: `Converted from Quotation ${quotationId}`
+        notes: `Converted from Quotation ${qData.number || quotationId}`
       });
 
       return { success: true, proformaId: proformaRef.id, proformaNumber };
@@ -453,11 +447,6 @@ export const convertProformaToInvoice = onCall(async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "Must log in");
     
     const uid = request.auth.uid;
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (userDoc.data()?.role !== "accounts" && userDoc.data()?.role !== "admin") {
-       throw new HttpsError("permission-denied", "Only Accounts can convert invoices");
-    }
-
     const { proformaId } = request.data;
     if (!proformaId) throw new HttpsError("invalid-argument", "Missing proformaId");
 
@@ -469,38 +458,34 @@ export const convertProformaToInvoice = onCall(async (request) => {
       const pData = pDoc.data();
       if (!pData) throw new HttpsError("internal", "No data");
 
-      if (pData.conversion_status === "converted") {
-        throw new HttpsError("already-exists", "This Proforma Invoice was already converted");
+      if (pData.conversion_status === "converted" && pData.linked_invoice_id) {
+        const invRef = db.collection("invoices").doc(pData.linked_invoice_id);
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists) {
+          throw new HttpsError("already-exists", "This Proforma Invoice was already converted");
+        }
       }
 
-      let invoiceNumber: string | undefined;
-      if (!invoiceNumber) {
-        const d = new Date();
-        let fyYear = d.getFullYear();
-        if (d.getMonth() < 3) fyYear -= 1;
-
-        const sequenceRef = db.collection("system").doc(`invoice_sequence_${fyYear}`);
-        const seqDoc = await transaction.get(sequenceRef);
-        let currentSeq = seqDoc.exists ? seqDoc.data()?.last_value || 0 : 0;
-        
-        currentSeq += 1;
-        const paddedSeq = currentSeq.toString().padStart(4, "0");
-        invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
-
-        transaction.set(sequenceRef, { last_value: currentSeq, updated_at: FieldValue.serverTimestamp() }, { merge: true });
-      }
+      // Directly change PI -> INV (e.g. PI/25/26/0002 -> INV/25/26/0002)
+      const rawPINum = pData.number || '';
+      const invoiceNumber = rawPINum ? (rawPINum.replace(/^pi/i, 'INV')) : `INV/${new Date().getFullYear()}/0001`;
 
       const invoiceRef = db.collection("invoices").doc();
       const invoiceData = {
         ...pData,
         number: invoiceNumber,
+        documentType: "invoice",
         is_locked: true,
         status: "finalized",
-        payment_status: "paid", // auto converted when fully paid
+        payment_status: "paid",
         balance_amount: 0,
+        sourceDocumentType: "proforma_invoice",
+        sourceProformaId: proformaId,
+        sourceProformaNumber: pData.number || "",
         linked_proforma_id: proformaId,
         created_by: uid,
         created_at: FieldValue.serverTimestamp(),
+        updated_at: FieldValue.serverTimestamp(),
         audit_trail: [{
           action: "converted_from_proforma",
           user: uid,
@@ -513,9 +498,10 @@ export const convertProformaToInvoice = onCall(async (request) => {
       transaction.update(proformaRef, {
         conversion_status: "converted",
         linked_invoice_id: invoiceRef.id,
-        status: "converted"
+        status: "converted",
+        updated_at: FieldValue.serverTimestamp()
       });
-      
+
       const auditLogRef = db.collection("audit_logs").doc();
       transaction.set(auditLogRef, {
         document_type: "invoice",
@@ -523,7 +509,7 @@ export const convertProformaToInvoice = onCall(async (request) => {
         action: "create",
         user_id: uid,
         timestamp: FieldValue.serverTimestamp(),
-        notes: `Converted from Proforma Invoice ${proformaId}`
+        notes: `Converted from Proforma Invoice ${pData.number || proformaId}`
       });
 
       return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
@@ -2197,11 +2183,9 @@ async function handleWebhook(request: any, response: any, fallbackPlatform: Lead
   }
 }
 
-export const metaLeadWebhook = onRequest(async (request, response) => {
-  await handleWebhook(request, response, "meta");
-});
+// Removed redundant metaLeadWebhook in favor of metaWebhook in metaIntegration.ts
 
-export const googleLeadWebhook = onRequest(async (request, response) => {
+export const googleLeadWebhook = onRequest({ secrets: [googleWebhookKey] }, async (request, response) => {
   await handleWebhook(request, response, "google");
 });
 
@@ -2477,7 +2461,7 @@ export const updateLeadDetails = onCall(async (request) => {
 
 export const processMessageQueueItem = onDocumentCreated({
   document: "message_queue/{itemId}",
-  secrets: [whatsappAccessToken]
+  secrets: [waToken]
 }, async (event) => {
   const snapshot = event.data;
   if (!snapshot) return;
@@ -2506,8 +2490,20 @@ export const processMessageQueueItem = onDocumentCreated({
     return;
   }
 
-  const whatsappToken = cleanValue(process.env.META_WHATSAPP_ACCESS_TOKEN);
-  let phoneNumberId = cleanValue(process.env.META_WHATSAPP_PHONE_NUMBER_ID);
+  let whatsappToken = "";
+  try {
+    whatsappToken = await resolveWhatsAppAuthorization();
+  } catch (err) {
+    console.warn(`WhatsApp API credentials missing or invalid. Simulating success fallback.`);
+    await snapshot.ref.update({
+      status: "sent",
+      error: "WhatsApp API credentials not configured; simulated success.",
+      updated_at: FieldValue.serverTimestamp()
+    });
+    return;
+  }
+
+  let phoneNumberId = "";
   let graphApiVersion = "v20.0";
 
   try {
@@ -2515,7 +2511,7 @@ export const processMessageQueueItem = onDocumentCreated({
     if (metaConfigDoc.exists) {
       const metaConfig = metaConfigDoc.data();
       if (metaConfig) {
-        if (!phoneNumberId && metaConfig.whatsappPhoneNumberId) {
+        if (metaConfig.whatsappPhoneNumberId) {
           phoneNumberId = cleanValue(metaConfig.whatsappPhoneNumberId);
         }
         if (metaConfig.graphApiVersion) {
@@ -2527,11 +2523,11 @@ export const processMessageQueueItem = onDocumentCreated({
     console.error("Error loading Meta config from Firestore:", err);
   }
 
-  if (!whatsappToken || !phoneNumberId) {
-    console.warn(`WhatsApp API credentials missing. token present: ${!!whatsappToken}, phoneId present: ${!!phoneNumberId}. Simulating success fallback.`);
+  if (!phoneNumberId) {
+    console.warn(`WhatsApp phone number ID missing. Simulating success fallback.`);
     await snapshot.ref.update({
       status: "sent",
-      error: "WhatsApp API credentials not configured; simulated success.",
+      error: "WhatsApp Phone Number ID not configured; simulated success.",
       updated_at: FieldValue.serverTimestamp()
     });
     return;

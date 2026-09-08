@@ -68,7 +68,11 @@ export interface Quotation {
   id: string;
   number: string;
   customer_id: string;
+  customer_name?: string;
   customer_type?: 'gst' | 'non_gst';
+  customer_address?: string;
+  customer_state?: string;
+  customer_gstin?: string;
   status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'convert_requested' | 'converted';
   items: LineItem[];
   subtotal: number;
@@ -76,11 +80,17 @@ export interface Quotation {
   grand_total: number;
   advance_amount?: number;
   advance_payment_method?: string;
-  advance_payment_date?: Timestamp;
+  advance_payment_date?: any;
   advance_reference_number?: string;
   terms?: string;
+  notes?: string;
   validity_days?: number;
   conversion_status?: 'converted';
+  convertedToProforma?: boolean;
+  linked_proforma_id?: string;
+  proformaInvoiceId?: string;
+  proformaInvoiceNumber?: string;
+  linked_memo_id?: string;
   linked_invoice_id?: string;
   payment_method_to_show?: 'Bank Details' | 'UPI Details' | 'GPay Details' | 'All Payment Details' | 'None';
   created_by: string;
@@ -107,6 +117,10 @@ export interface Invoice {
   balance_amount?: number;
   payment_history?: string[]; // IDs of PaymentRecords
   linked_quotation_id?: string;
+  linked_proforma_id?: string;
+  sourceDocumentType?: string;
+  sourceProformaId?: string;
+  sourceProformaNumber?: string;
   payment_method_to_show?: 'Bank Details' | 'UPI Details' | 'GPay Details' | 'All Payment Details' | 'None';
   created_by: string;
   created_at: Timestamp;
@@ -121,6 +135,9 @@ export interface CashMemo extends Omit<Invoice, 'number'> {
 export interface ProformaInvoice extends Omit<Invoice, 'number' | 'status'> {
   number: string; // format: PI/YYYY/0001
   status: 'draft' | 'finalized' | 'cancelled' | 'converted';
+  sourceDocumentType?: string;
+  sourceQuotationId?: string;
+  sourceQuotationNumber?: string;
 }
 
 export interface PurchaseItem {
@@ -229,12 +246,33 @@ export interface Settings {
 
   // Other Details
   termsAndConditions: string;
+  gstTermsAndConditions?: string;
+  nonGstTermsAndConditions?: string;
   notes: string;
   authorizedSignature?: string;
   defaultGst: number;
 
   // Global settings (existing)
   invoice_prefix: string;
+  quotation_prefix?: string;
+  proforma_prefix?: string;
+  memo_prefix?: string;
+
+  quotation_format?: string;
+  proforma_format?: string;
+  invoice_format?: string;
+  memo_format?: string;
+
+  quotation_year?: string;
+  proforma_year?: string;
+  invoice_year?: string;
+  memo_year?: string;
+
+  quotation_next_number?: number;
+  proforma_next_number?: number;
+  invoice_next_number?: number;
+  memo_next_number?: number;
+
   email_list: string[];
   weekly_report_day: string;
   monthly_report_date: number;
@@ -375,7 +413,7 @@ export interface MessageQueueItem {
   error?: string;
   created_at: Timestamp;
   updated_at?: Timestamp;
-  // Automation fields (optional â€“ only present for automation-sourced queue items)
+  // Automation fields (optional – only present for automation-sourced queue items)
   source?: 'automation' | 'manual';
   automationId?: string;
   enrollmentId?: string;
@@ -513,7 +551,7 @@ export const CRM_ROLE_PERMISSIONS: Record<UserRole, CRMPermissionAction[]> = {
   ],
 };
 
-// â”€â”€â”€ WhatsApp Automation Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── WhatsApp Automation Types ────────────────────────────────────────────
 
 export type AudienceMode = 'current_leads' | 'future_leads' | 'current_and_future';
 export type ScheduleType = 'immediate' | 'fixed_date' | 'days_after_stage' | 'repeat_followup';
@@ -620,16 +658,3 @@ export interface AutomationEnrollment {
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

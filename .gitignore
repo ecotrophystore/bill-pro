@@ -30,5 +30,10 @@ dist-ssr
 
 # Secret and key files
 secret.txt
-test-key.js
+test-*.js
+test_*.js
+parse_transcript*.js
+list_models*.js
+remove_ai.mjs
 users.json
+

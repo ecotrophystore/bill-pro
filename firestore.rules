@@ -4,11 +4,11 @@ service cloud.firestore {
   
     // Helpers
     function isAuthenticated() {
-      return true; // TEMPORARY for verification
+      return request.auth != null;
     }
     
     function getUserRole() {
-      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.is_active == true
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.is_active == true
         ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
         : null;
     }
@@ -33,55 +33,63 @@ service cloud.firestore {
       return resource != null && resource.data.is_locked == true;
     }
 
-    // 7. Role Isolation: Strict Firestore security rules (Admin override everything)
+    // Role Isolation: Strict Firestore security rules
     
     // USERS COLLECTION
+    // Users can read profiles; users can initialize their own profile as 'sales'; admins can manage all roles
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create: if (isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'sales') || isAdmin();
+      allow update, delete: if isAdmin();
     }
     
     // CUSTOMERS COLLECTION
     match /customers/{customerId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin() || isAccounts();
     }
     
     // PRODUCTS COLLECTION
     match /products/{productId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin();
     }
     
     // SETTINGS COLLECTION
     match /settings/{docId} {
       allow read: if isAuthenticated();
-      // 15. Settings Integrity: Admin-only edits
       allow write: if isAdmin(); 
     }
     
     // QUOTATIONS COLLECTION
     match /quotations/{quotationId} {
-      allow read: if isAdmin() || isAccounts() || (isSales() && resource.data.created_by == request.auth.uid);
-      allow create: if (isAdmin() || isAccounts() || isSales());
-      allow update: if (isAdmin() || isAccounts() || isSales());
-      allow delete: if (isAdmin() || isAccounts() || isSales());
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin() || isAccounts();
     }
     
     // INVOICES COLLECTION
     match /invoices/{invoiceId} {
-      allow read: if isAdmin() || isAccounts() || (isSales() && resource.data.created_by == request.auth.uid);
-      allow create: if (isAdmin() || isAccounts());
-      allow update: if isAdmin() || isAccounts();
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update: if (isAdmin() || isAccounts()) && (!isLocked() || isAdmin());
+      allow delete: if isAdmin();
+    }
+    
+    // PROFORMA INVOICES COLLECTION
+    match /proforma_invoices/{proformaId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
       allow delete: if isAdmin() || isAccounts();
     }
     
     // CASH MEMOS COLLECTION
     match /cash_memos/{memoId} {
-      allow read: if isAdmin() || isAccounts();
-      allow create: if (isAdmin() || isAccounts());
-      allow update: if (isAdmin() || isAccounts());
-      allow delete: if (isAdmin() || isAccounts());
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin() || isAccounts();
     }
     
     // PURCHASES COLLECTION
@@ -90,6 +98,13 @@ service cloud.firestore {
       allow create: if isAdmin() || isAccounts() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
       allow update: if isAdmin() || isAccounts() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    // EXPENSES COLLECTION
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin();
     }
 
     // PURCHASE ATTACHMENTS
@@ -146,7 +161,7 @@ service cloud.firestore {
     // META INTEGRATION CONFIG
     match /meta_integrations/{docId} {
       allow read: if isAuthenticated(); // All authenticated users can see connection status
-      allow write: if isAdmin();        // Only admins save config; Cloud Functions also write via admin SDK (bypasses rules)
+      allow write: if isAdmin(); // Only Admins can save API secrets/config
     }
     
     match /leads/{leadId} {
@@ -200,10 +215,12 @@ service cloud.firestore {
     
     // AUDIT LOG
     match /audit_logs/{logId} {
-      allow read: if isAdmin();
-      allow write: if false; // Only Cloud Functions can write to audit logs
+      allow read: if isAdmin() || isAccounts();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
     }
     
   }
 }
+
 

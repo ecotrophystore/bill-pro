@@ -79,27 +79,35 @@ export default function Invoices() {
         if (invSnap.exists()) {
           const invData = invSnap.data();
           if (invData.linked_proforma_id) {
-            const pRef = doc(db, 'proforma_invoices', invData.linked_proforma_id);
-            const pSnap = await getDoc(pRef);
-            if (pSnap.exists()) {
-              await updateDoc(pRef, {
-                conversion_status: null,
-                linked_invoice_id: null,
-                status: 'draft'
-              });
+            try {
+              const pRef = doc(db, 'proforma_invoices', invData.linked_proforma_id);
+              const pSnap = await getDoc(pRef);
+              if (pSnap.exists()) {
+                await updateDoc(pRef, {
+                  conversion_status: null,
+                  linked_invoice_id: null,
+                  status: 'draft'
+                });
+              }
+            } catch (pErr) {
+              console.warn("Could not unlink proforma invoice (may be permissions), continuing...", pErr);
             }
           }
         }
         await deleteDoc(invRef);
 
-        const d = new Date();
-        let fyYear = d.getFullYear();
-        if (d.getMonth() < 3) fyYear -= 1;
-        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
-        await syncSequenceAfterDelete("invoices", `invoice_sequence_${fyYear}`, `ECO/${fyYear}/`);
-      } catch (err) {
+        try {
+          const d = new Date();
+          let fyYear = d.getFullYear();
+          if (d.getMonth() < 3) fyYear -= 1;
+          const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+          await syncSequenceAfterDelete("invoices", `invoice_sequence_${fyYear}`, `ECO/${fyYear}/`);
+        } catch (seqError) {
+          console.warn("Sequence sync failed after delete, continuing...", seqError);
+        }
+      } catch (err: any) {
         console.error("Error deleting invoice", err);
-        alert("Failed to delete invoice.");
+        alert(`Failed to delete invoice: ${err.message || "Unknown Error"}`);
       }
     }
   };
@@ -224,7 +232,7 @@ export default function Invoices() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface border-b border-shadow-darker/10">
-                <th className="p-4 font-semibold text-primary-dark">Invoice #</th>
+                <th className="p-4 font-semibold text-primary-dark">Invoice Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
                 <th className="p-4 font-semibold text-primary-dark text-right">Total</th>

@@ -26,9 +26,12 @@ import {
   Shield,
   Bot,
   ChevronDown,
+  Command,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
+import { GlobalSearchModal } from './GlobalSearchModal';
+import { NotificationDrawer } from './NotificationDrawer';
 
 interface SubMenuItem {
   path: string;
@@ -98,6 +101,9 @@ export function AppLayout() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const { logout, dbUser } = useAuth();
 
   // Helper to identify category for path
@@ -132,6 +138,18 @@ export function AppLayout() {
     };
   }, [mobileMenuOpen]);
 
+  // Keyboard shortcut for Cmd/Ctrl+K to trigger global search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const handleCategoryClick = (categoryId: string) => {
     setOpenCategory((prev) => (prev === categoryId ? null : categoryId));
   };
@@ -140,6 +158,9 @@ export function AppLayout() {
 
   return (
     <div className="min-h-screen flex bg-surface text-secondary">
+      {/* Global Omnichannel Search Modal */}
+      <GlobalSearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+
       {/* Mobile Dark Backdrop Overlay */}
       {mobileMenuOpen && (
         <div
@@ -317,36 +338,62 @@ export function AppLayout() {
               <Menu size={24} />
             </button>
 
-            <div className="hidden sm:flex items-center neo-input !py-2 w-64 lg:w-96 gap-2">
-              <Search size={18} className="text-secondary" />
-              <input
-                type="text"
-                placeholder="Global Search (Coming Soon)"
-                className="bg-transparent border-none outline-none w-full text-sm"
-                onKeyDown={(e) =>
-                  e.key === 'Enter' &&
-                  alert('Global Search: Indexing is in progress for the current fiscal year. Detailed search will be enabled shortly.')
-                }
-              />
+            {/* Global Search Bar Button */}
+            <div
+              onClick={() => setSearchOpen(true)}
+              className="hidden sm:flex items-center neo-input !py-2 w-64 lg:w-96 gap-2 cursor-pointer hover:bg-shadow-darker/5 transition-colors select-none group"
+            >
+              <Search size={18} className="text-secondary group-hover:text-primary transition-colors" />
+              <span className="text-secondary/70 text-sm flex-1 font-medium">Quick search anything...</span>
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-surface border border-shadow-darker/20 rounded shadow-xs text-secondary">
+                <Command size={10} />K
+              </kbd>
             </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 relative">
+            {/* Mobile search trigger */}
             <button
-              onClick={() => alert('Notifications: You have 3 system alerts pending. Full notification management is being integrated.')}
-              className="p-2 neo-btn !rounded-full !px-3"
+              onClick={() => setSearchOpen(true)}
+              className="p-2 neo-btn !rounded-full !px-3 sm:hidden"
+              title="Search"
             >
-              <div className="relative">
-                <Bell size={20} className="text-primary-dark" />
-                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-error rounded-full"></span>
-              </div>
+              <Search size={18} className="text-primary-dark" />
             </button>
+
+            {/* Notification Bell with Drawer */}
+            <div className="relative">
+              <button
+                onClick={() => setNotificationsOpen((prev) => !prev)}
+                className="p-2 neo-btn !rounded-full !px-3 relative"
+                title="Notifications"
+              >
+                <div className="relative">
+                  <Bell size={20} className="text-primary-dark" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-4 h-4 bg-error text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1 animate-pulse">
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </span>
+                  )}
+                </div>
+              </button>
+
+              <NotificationDrawer
+                isOpen={notificationsOpen}
+                onClose={() => setNotificationsOpen(false)}
+                onUnreadCountChange={setUnreadCount}
+              />
+            </div>
+
+            {/* User Avatar */}
             <div className="w-10 h-10 rounded-full neo-card !p-0 overflow-hidden flex items-center justify-center">
-              <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold" title={dbUser?.role}>
+              <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold text-xs" title={`Role: ${dbUser?.role || 'User'}`}>
                 {dbUser?.name ? dbUser.name.substring(0, 2).toUpperCase() : 'AD'}
               </div>
             </div>
-            <button onClick={logout} className="p-2 text-error hover:bg-error/10 rounded-full transition-colors ml-2" title="Logout">
+
+            {/* Logout */}
+            <button onClick={logout} className="p-2 text-error hover:bg-error/10 rounded-full transition-colors ml-1" title="Logout">
               <LogOut size={20} />
             </button>
           </div>
@@ -359,3 +406,4 @@ export function AppLayout() {
     </div>
   );
 }
+

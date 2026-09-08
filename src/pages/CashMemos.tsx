@@ -66,15 +66,42 @@ export default function CashMemos() {
   const deleteCashMemo = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this cash memo?")) {
       try {
-        await deleteDoc(doc(db, 'cash_memos', id));
-        const d = new Date();
-        let fyYear = d.getFullYear();
-        if (d.getMonth() < 3) fyYear -= 1;
-        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
-        await syncSequenceAfterDelete("cash_memos", `memo_sequence_${fyYear}`, `MEMO/${fyYear}/`);
-      } catch (err) {
+        const memoRef = doc(db, 'cash_memos', id);
+        const memoSnap = await getDoc(memoRef);
+        if (memoSnap.exists()) {
+          const memoData = memoSnap.data();
+          const linkedQId = memoData.linked_quotation_id || memoData.sourceQuotationId;
+          if (linkedQId) {
+            try {
+              const qRef = doc(db, 'quotations', linkedQId);
+              const qSnap = await getDoc(qRef);
+              if (qSnap.exists()) {
+                await updateDoc(qRef, {
+                  conversion_status: null,
+                  convertedToCashMemo: null,
+                  linked_memo_id: null,
+                  status: 'draft'
+                });
+              }
+            } catch (unlinkErr) {
+              console.warn("Could not unlink quotation from cash memo:", unlinkErr);
+            }
+          }
+        }
+        await deleteDoc(memoRef);
+
+        try {
+          const d = new Date();
+          let fyYear = d.getFullYear();
+          if (d.getMonth() < 3) fyYear -= 1;
+          const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+          await syncSequenceAfterDelete("cash_memos", `memo_sequence_${fyYear}`, `MEMO/${fyYear}/`);
+        } catch (seqErr) {
+          console.warn("Sequence sync failed after delete:", seqErr);
+        }
+      } catch (err: any) {
         console.error("Error deleting cash memo", err);
-        alert("Failed to delete cash memo.");
+        alert(`Failed to delete cash memo: ${err?.message || "Unknown error"}`);
       }
     }
   };
@@ -203,7 +230,7 @@ export default function CashMemos() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface border-b border-shadow-darker/10">
-                <th className="p-4 font-semibold text-primary-dark">Memo #</th>
+                <th className="p-4 font-semibold text-primary-dark">Cash Memo Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer / Type</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
                 <th className="p-4 font-semibold text-primary-dark text-right">Amount</th>

@@ -3,11 +3,11 @@ import { FieldValue } from "firebase-admin/firestore";
 import * as crypto from "node:crypto";
 import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
+import { resolveWhatsAppAuthorization, resolveFacebookAuthorization, waToken, fbToken } from "./meta/auth.js";
+import { graphGet } from "./meta/graphApi.js";
 // We define Firebase Secrets that need to be set via CLI
 const metaAppSecret = defineSecret("META_APP_SECRET");
 const metaVerifyToken = defineSecret("META_WEBHOOK_VERIFY_TOKEN");
-const whatsappAccessToken = defineSecret("META_WHATSAPP_ACCESS_TOKEN");
-const facebookToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
 /**
  * Validates if the user is an admin
  */
@@ -20,7 +20,7 @@ async function requireAdmin(uid) {
 /**
  * Get Meta Secrets Status safely
  */
-export const getMetaSecretStatus = onCall({ secrets: [metaAppSecret, metaVerifyToken, whatsappAccessToken, facebookToken] }, async (request) => {
+export const getMetaSecretStatus = onCall({ secrets: [metaAppSecret, metaVerifyToken, waToken, fbToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Must log in");
     let appSecretConfigured = false;
@@ -38,12 +38,12 @@ export const getMetaSecretStatus = onCall({ secrets: [metaAppSecret, metaVerifyT
     }
     catch (e) { }
     try {
-        if (whatsappAccessToken.value())
+        if (waToken.value())
             whatsappTokenConfigured = true;
     }
     catch (e) { }
     try {
-        if (facebookToken.value())
+        if (fbToken.value())
             facebookTokenConfigured = true;
     }
     catch (e) { }
@@ -134,17 +134,11 @@ export const saveMetaIntegrationConfig = onCall(async (request) => {
 /**
  * Test WhatsApp Connection
  */
-export const testWhatsAppConnection = onCall({ secrets: [whatsappAccessToken] }, async (request) => {
+export const testWhatsAppConnection = onCall({ secrets: [waToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Must log in");
     await requireAdmin(request.auth.uid);
-    let token = "";
-    try {
-        token = whatsappAccessToken.value();
-    }
-    catch (e) { }
-    if (!token)
-        throw new HttpsError("failed-precondition", "WhatsApp Access Token is empty or not configured.");
+    const token = await resolveWhatsAppAuthorization();
     const docRef = await db.collection("meta_integrations").doc("default").get();
     const data = docRef.data();
     if (!data || !data.whatsappPhoneNumberId) {
@@ -197,17 +191,11 @@ export const testWhatsAppConnection = onCall({ secrets: [whatsappAccessToken] },
         throw new HttpsError("internal", err.message);
     }
 });
-export const subscribeWhatsAppWebhook = onCall({ secrets: [whatsappAccessToken] }, async (request) => {
+export const subscribeWhatsAppWebhook = onCall({ secrets: [waToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Must log in");
     await requireAdmin(request.auth.uid);
-    let token = "";
-    try {
-        token = whatsappAccessToken.value();
-    }
-    catch (e) { }
-    if (!token)
-        throw new HttpsError("failed-precondition", "WhatsApp Access Token missing.");
+    const token = await resolveWhatsAppAuthorization();
     const docRef = await db.collection("meta_integrations").doc("default").get();
     const data = docRef.data();
     if (!data || !data.metaAppId || !data.whatsappBusinessAccountId) {
@@ -246,17 +234,11 @@ export const subscribeWhatsAppWebhook = onCall({ secrets: [whatsappAccessToken] 
         throw new HttpsError("internal", err.message);
     }
 });
-export const unsubscribeWhatsAppWebhook = onCall({ secrets: [whatsappAccessToken] }, async (request) => {
+export const unsubscribeWhatsAppWebhook = onCall({ secrets: [waToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Must log in");
     await requireAdmin(request.auth.uid);
-    let token = "";
-    try {
-        token = whatsappAccessToken.value();
-    }
-    catch (e) { }
-    if (!token)
-        throw new HttpsError("failed-precondition", "WhatsApp Access Token missing.");
+    const token = await resolveWhatsAppAuthorization();
     const docRef = await db.collection("meta_integrations").doc("default").get();
     const data = docRef.data();
     if (!data || !data.whatsappBusinessAccountId) {
@@ -287,20 +269,14 @@ export const unsubscribeWhatsAppWebhook = onCall({ secrets: [whatsappAccessToken
         throw new HttpsError("internal", err.message);
     }
 });
-export const sendWhatsAppTestMessage = onCall({ secrets: [whatsappAccessToken] }, async (request) => {
+export const sendWhatsAppTestMessage = onCall({ secrets: [waToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Must log in");
     await requireAdmin(request.auth.uid);
     const { phoneNumber, mode, templateName, templateLanguage, textBody } = request.data;
     if (!phoneNumber)
         throw new HttpsError("invalid-argument", "Phone number required");
-    let token = "";
-    try {
-        token = whatsappAccessToken.value();
-    }
-    catch (e) { }
-    if (!token)
-        throw new HttpsError("failed-precondition", "WhatsApp Access Token missing.");
+    const token = await resolveWhatsAppAuthorization();
     const docRef = await db.collection("meta_integrations").doc("default").get();
     const data = docRef.data();
     if (!data || !data.whatsappPhoneNumberId) {
@@ -354,21 +330,22 @@ export const sendWhatsAppTestMessage = onCall({ secrets: [whatsappAccessToken] }
 /**
  * Webhook Handler (GET & POST)
  */
-export const metaWebhook = onRequest({ secrets: [metaVerifyToken, metaAppSecret] }, async (req, res) => {
+export const metaWebhook = onRequest({ secrets: [metaAppSecret, metaVerifyToken] }, async (req, res) => {
     // 1. Webhook Verification (GET)
     if (req.method === "GET") {
         const mode = req.query["hub.mode"];
         const token = req.query["hub.verify_token"];
         const challenge = req.query["hub.challenge"];
-        let expectedToken = "";
+        let verifyToken = "ecotrophy_billpro_verify_2026_eco";
         try {
-            expectedToken = metaVerifyToken.value();
+            if (metaVerifyToken.value()) {
+                verifyToken = metaVerifyToken.value();
+            }
         }
         catch (e) {
-            res.status(500).send("Verify Token Secret not configured");
-            return;
+            // Fallback to default verify token if secret not set
         }
-        if (mode === "subscribe" && token === expectedToken) {
+        if (mode === "subscribe" && token === verifyToken) {
             await db.collection("meta_integrations").doc("default").set({
                 whatsappWebhookVerified: true
             }, { merge: true });
@@ -490,6 +467,102 @@ export const metaWebhook = onRequest({ secrets: [metaVerifyToken, metaAppSecret]
     }
     else {
         res.status(405).send("Method Not Allowed");
+    }
+});
+// ── diagnoseMetaAccess ───────────────────────────────────────────────────────
+export const diagnoseMetaAccess = onCall({ secrets: [fbToken, waToken] }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    await requireAdmin(request.auth.uid);
+    const config = await db.collection("meta_integrations").doc("default").get().then(d => d.data() || {});
+    const report = { status: "success", checks: [] };
+    try {
+        // 1. Check Facebook System User Token
+        const fb = await resolveFacebookAuthorization();
+        report.checks.push({ name: "Facebook Token Present", passed: true });
+        try {
+            const debugInfo = await graphGet(`/debug_token`, fb, { input_token: fb });
+            const isValid = debugInfo.data?.is_valid;
+            const scopes = debugInfo.data?.scopes || [];
+            report.checks.push({
+                name: "Facebook Token Valid",
+                passed: isValid,
+                details: isValid ? "Token is valid" : "Token is invalid or expired"
+            });
+            report.checks.push({
+                name: "Facebook Permissions",
+                passed: scopes.includes("pages_show_list") && scopes.includes("pages_manage_metadata"),
+                details: `Found scopes: ${scopes.join(", ")}`
+            });
+        }
+        catch (err) {
+            report.checks.push({ name: "Facebook Token Valid", passed: false, details: err.message });
+        }
+    }
+    catch (err) {
+        report.checks.push({ name: "Facebook Token Present", passed: false, details: err.message });
+    }
+    try {
+        // 2. Check WhatsApp Token
+        const wa = await resolveWhatsAppAuthorization();
+        report.checks.push({ name: "WhatsApp Token Present", passed: true });
+        try {
+            const debugInfo = await graphGet(`/debug_token`, wa, { input_token: wa });
+            const isValid = debugInfo.data?.is_valid;
+            const scopes = debugInfo.data?.scopes || [];
+            report.checks.push({
+                name: "WhatsApp Token Valid",
+                passed: isValid,
+                details: isValid ? "Token is valid" : "Token is invalid or expired"
+            });
+            report.checks.push({
+                name: "WhatsApp Permissions",
+                passed: scopes.includes("whatsapp_business_messaging") && scopes.includes("whatsapp_business_management"),
+                details: `Found scopes: ${scopes.join(", ")}`
+            });
+        }
+        catch (err) {
+            report.checks.push({ name: "WhatsApp Token Valid", passed: false, details: err.message });
+        }
+    }
+    catch (err) {
+        report.checks.push({ name: "WhatsApp Token Present", passed: false, details: err.message });
+    }
+    return report;
+});
+// ── syncMetaTemplates ────────────────────────────────────────────────────────
+export const syncMetaTemplates = onCall({ secrets: [waToken] }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    await requireAdmin(request.auth.uid);
+    const config = await db.collection("meta_integrations").doc("default").get().then(d => d.data() || {});
+    const version = config.graphApiVersion || "v18.0";
+    if (!config.whatsappBusinessAccountId) {
+        throw new HttpsError("failed-precondition", "WhatsApp Business Account ID not configured");
+    }
+    try {
+        const token = await resolveWhatsAppAuthorization();
+        const response = await graphGet(`/${version}/${config.whatsappBusinessAccountId}/message_templates`, token);
+        const templates = response.data || [];
+        const batch = db.batch();
+        for (const t of templates) {
+            const tRef = db.collection("meta_whatsapp_templates").doc(t.id);
+            batch.set(tRef, {
+                ...t,
+                updatedAt: FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+        await batch.commit();
+        await db.collection("audit_logs").add({
+            action: "meta_templates_synced",
+            user: request.auth.uid,
+            timestamp: FieldValue.serverTimestamp(),
+            count: templates.length
+        });
+        return { success: true, count: templates.length };
+    }
+    catch (err) {
+        throw new HttpsError("internal", err.message);
     }
 });
 //# sourceMappingURL=metaIntegration.js.map

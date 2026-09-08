@@ -1,36 +1,15 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
-import { defineSecret } from 'firebase-functions/params';
 import { graphGet, graphPost, graphDelete } from './graphApi.js';
 import { extractSafeError } from './errors.js';
 import { db } from '../config.js';
-const fbToken = defineSecret('META_FACEBOOK_SYSTEM_USER_TOKEN');
-async function requireAdmin(uid) {
-    const userDoc = await db.collection('users').doc(uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new HttpsError('permission-denied', 'Only admins can perform this action.');
-    }
-}
-async function getConfig() {
-    const doc = await db.collection('meta_integrations').doc('default').get();
-    return doc.data() || {};
-}
-async function getToken() {
-    let token = '';
-    try {
-        token = fbToken.value();
-    }
-    catch { /* not configured */ }
-    if (!token)
-        throw new HttpsError('failed-precondition', 'META_FACEBOOK_SYSTEM_USER_TOKEN is not configured. Run: firebase functions:secrets:set META_FACEBOOK_SYSTEM_USER_TOKEN');
-    return token;
-}
+import { resolveFacebookAuthorization, requireAdmin, getConfig, fbToken } from './auth.js';
 // ── fetchAvailableFacebookPages ────────────────────────────────────────────────
 export const fetchAvailableFacebookPages = onCall({ secrets: [fbToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     try {
@@ -55,7 +34,7 @@ export const testFacebookConnection = onCall({ secrets: [fbToken] }, async (requ
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId) {
@@ -103,7 +82,7 @@ export const fetchFacebookLeadForms = onCall({ secrets: [fbToken] }, async (requ
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId) {
@@ -181,7 +160,7 @@ export const subscribeFacebookLeadAds = onCall({ secrets: [fbToken] }, async (re
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId)
@@ -210,7 +189,7 @@ export const unsubscribeFacebookLeadAds = onCall({ secrets: [fbToken] }, async (
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId)
@@ -238,7 +217,7 @@ export const subscribeFacebookPageMessages = onCall({ secrets: [fbToken] }, asyn
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId)
@@ -273,6 +252,61 @@ export const unsubscribeFacebookPageMessages = onCall({ secrets: [fbToken] }, as
     }, { merge: true });
     await db.collection('audit_logs').add({
         action: 'facebook_page_messages_unsubscribed',
+        user: request.auth.uid,
+        timestamp: FieldValue.serverTimestamp(),
+    });
+    return { success: true };
+});
+// ── disconnectFacebookIntegration ──────────────────────────────────────────────
+export const disconnectFacebookIntegration = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError('unauthenticated', 'Must be logged in.');
+    await requireAdmin(request.auth.uid);
+    try {
+        const token = await resolveFacebookAuthorization();
+        const config = await getConfig();
+        const version = config.graphApiVersion || 'v18.0';
+        // Best effort unsubscribe
+        if (config.facebookPageId) {
+            if (config.facebookLeadAdsSubscribed || config.facebookMessagesSubscribed) {
+                try {
+                    await graphDelete(`/${version}/${config.facebookPageId}/subscribed_apps`, token);
+                }
+                catch (e) {
+                    console.warn('Failed to unsubscribe from Facebook apps during disconnect:', e);
+                }
+            }
+        }
+    }
+    catch (e) {
+        // Ignore missing tokens on disconnect
+    }
+    // Clear config
+    await db.collection('meta_integrations').doc('default').set({
+        facebookPageId: '',
+        facebookPageName: '',
+        facebookPageCategory: '',
+        facebookLeadFormId: '',
+        facebookConnectionStatus: 'not_configured',
+        facebookLeadAdsSubscribed: false,
+        facebookMessagesSubscribed: false,
+        lastFacebookTestAt: '',
+        lastFacebookLeadAt: '',
+        lastFacebookMessageAt: '',
+        facebookLastErrorCode: '',
+        facebookLastErrorMessage: '',
+        // also clear dependent instagram config
+        instagramAccountId: '',
+        instagramUsername: '',
+        instagramName: '',
+        instagramConnectedPageId: '',
+        instagramConnectionStatus: 'not_configured',
+        instagramMessagesSubscribed: false,
+        updatedAt: new Date().toISOString(),
+        updatedBy: request.auth.uid,
+    }, { merge: true });
+    await db.collection('audit_logs').add({
+        action: 'facebook_integration_disconnected',
         user: request.auth.uid,
         timestamp: FieldValue.serverTimestamp(),
     });

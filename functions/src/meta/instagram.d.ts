@@ -22,4 +22,7 @@ export declare const subscribeInstagramMessages: import("firebase-functions/v2/h
 export declare const unsubscribeInstagramMessages: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
 }>, unknown>;
+export declare const disconnectInstagramIntegration: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
 //# sourceMappingURL=instagram.d.ts.map

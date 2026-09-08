@@ -8,6 +8,7 @@ import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
+import { getNextProposedNumber } from '../utils/numberGenerator';
 
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
@@ -35,6 +36,7 @@ export default function CreateQuotation() {
   ]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
+  const [documentNumber, setDocumentNumber] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
   const [loadingData, setLoadingData] = useState(true);
@@ -51,8 +53,6 @@ export default function CreateQuotation() {
         const loadedCustomers = custSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
         setCustomers(loadedCustomers);
         setProducts(prodSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
-
-
 
         if (id) {
           const qDoc = await getDoc(doc(db, 'quotations', id));
@@ -73,6 +73,15 @@ export default function CreateQuotation() {
             setAdvanceReferenceNumber(data.advance_reference_number || '');
             setDiscountPercent(data.discount_percent || 0);
             setChargeAmount(data.charge_amount || 0);
+            setDocumentNumber(data.number || '');
+          }
+        } else {
+          // Auto-generate proposed quotation number based on settings
+          try {
+            const proposed = await getNextProposedNumber('quotations', 'quotation', companySettings);
+            setDocumentNumber(proposed);
+          } catch (numErr) {
+            console.warn("Could not generate proposed quotation number:", numErr);
           }
         }
       } catch (error) {
@@ -82,7 +91,7 @@ export default function CreateQuotation() {
       }
     }
     fetchData();
-  }, [id]);
+  }, [id, companySettings?.quotation_prefix, companySettings?.quotation_format, companySettings?.quotation_year, companySettings?.quotation_next_number]);
 
   const autoSaveDraft = async (customerName: string | null, voiceItems: any[], voiceCustomerType?: 'gst' | 'non_gst') => {
     if (!auth?.currentUser || !functions || !db) {
@@ -316,6 +325,7 @@ export default function CreateQuotation() {
       setIsSaving(true);
       try {
         await updateDoc(doc(db, 'quotations', id), {
+          number: documentNumber || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           customer_address: customerAddress,
@@ -354,6 +364,7 @@ export default function CreateQuotation() {
     try {
       const createQuotationFn = httpsCallable(functions, 'createQuotation');
       const quotationData = {
+        number: documentNumber || undefined,
         customer_id: selectedCustomerId || `new_${Date.now()}`,
         customer_name: selectedCustomerName,
         customer_address: customerAddress,
@@ -378,6 +389,7 @@ export default function CreateQuotation() {
       console.warn("Cloud function failed, attempting client-side save fallback:", error);
       try {
         const quotationData = {
+          number: documentNumber || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           customer_address: customerAddress,
@@ -487,6 +499,19 @@ export default function CreateQuotation() {
                     Non-GST (Cash Memo)
                   </label>
                 </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-primary-dark px-1 flex items-center justify-between">
+                  <span>Quotation No</span>
+                  <span className="text-xs text-primary font-normal">Editable</span>
+                </label>
+                <SpeechInput 
+                  type="text" 
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-surface" 
+                  placeholder="e.g. QTN/25/26/0001" 
+                  value={documentNumber} 
+                  onChange={(e: any) => setDocumentNumber(e.target.value)}
+                />
               </div>
             </div>
           </div>

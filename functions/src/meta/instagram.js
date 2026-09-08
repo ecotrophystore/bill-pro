@@ -1,36 +1,15 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
-import { defineSecret } from 'firebase-functions/params';
 import { graphGet, graphPost, graphDelete } from './graphApi.js';
 import { extractSafeError } from './errors.js';
 import { db } from '../config.js';
-const fbToken = defineSecret('META_FACEBOOK_SYSTEM_USER_TOKEN');
-async function requireAdmin(uid) {
-    const userDoc = await db.collection('users').doc(uid).get();
-    if (userDoc.data()?.role !== 'admin') {
-        throw new HttpsError('permission-denied', 'Only admins can perform this action.');
-    }
-}
-async function getConfig() {
-    const doc = await db.collection('meta_integrations').doc('default').get();
-    return doc.data() || {};
-}
-async function getToken() {
-    let token = '';
-    try {
-        token = fbToken.value();
-    }
-    catch { /* not configured */ }
-    if (!token)
-        throw new HttpsError('failed-precondition', 'META_FACEBOOK_SYSTEM_USER_TOKEN is not configured.');
-    return token;
-}
+import { resolveFacebookAuthorization, requireAdmin, getConfig, fbToken } from './auth.js';
 // ── fetchConnectedInstagramAccount ─────────────────────────────────────────────
 export const fetchConnectedInstagramAccount = onCall({ secrets: [fbToken] }, async (request) => {
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId) {
@@ -68,7 +47,7 @@ export const testInstagramConnection = onCall({ secrets: [fbToken] }, async (req
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.instagramAccountId) {
@@ -114,7 +93,7 @@ export const subscribeInstagramMessages = onCall({ secrets: [fbToken] }, async (
     if (!request.auth)
         throw new HttpsError('unauthenticated', 'Must be logged in.');
     await requireAdmin(request.auth.uid);
-    const token = await getToken();
+    const token = await resolveFacebookAuthorization();
     const config = await getConfig();
     const version = config.graphApiVersion || 'v18.0';
     if (!config.facebookPageId) {
@@ -150,6 +129,33 @@ export const unsubscribeInstagramMessages = onCall({ secrets: [fbToken] }, async
     }, { merge: true });
     await db.collection('audit_logs').add({
         action: 'instagram_messages_unsubscribed',
+        user: request.auth.uid,
+        timestamp: FieldValue.serverTimestamp(),
+    });
+    return { success: true };
+});
+// ── disconnectInstagramIntegration ───────────────────────────────────────────────
+export const disconnectInstagramIntegration = onCall(async (request) => {
+    if (!request.auth)
+        throw new HttpsError('unauthenticated', 'Must be logged in.');
+    await requireAdmin(request.auth.uid);
+    // Clear Instagram-specific config
+    await db.collection('meta_integrations').doc('default').set({
+        instagramAccountId: '',
+        instagramUsername: '',
+        instagramName: '',
+        instagramConnectedPageId: '',
+        instagramConnectionStatus: 'not_configured',
+        instagramMessagesSubscribed: false,
+        lastInstagramTestAt: '',
+        lastInstagramMessageAt: '',
+        instagramLastErrorCode: '',
+        instagramLastErrorMessage: '',
+        updatedAt: new Date().toISOString(),
+        updatedBy: request.auth.uid,
+    }, { merge: true });
+    await db.collection('audit_logs').add({
+        action: 'instagram_integration_disconnected',
         user: request.auth.uid,
         timestamp: FieldValue.serverTimestamp(),
     });

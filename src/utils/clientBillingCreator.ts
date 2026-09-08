@@ -6,6 +6,7 @@ import {
   serverTimestamp, 
   getDoc,
   setDoc,
+  updateDoc,
   query,
   where,
   orderBy,
@@ -13,9 +14,25 @@ import {
   getDocs
 } from 'firebase/firestore';
 
+import { formatDocumentNumber } from './numberGenerator';
+import type { Settings } from '../types';
+
 const exactRound = (num: number): number => {
   return Math.round(num * 100) / 100;
 };
+
+// Helper to retrieve saved company settings from localStorage
+export function getSavedCompanySettings(): Partial<Settings> {
+  try {
+    const saved = localStorage.getItem('companySettings');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (err) {
+    console.error('Error reading companySettings from localStorage:', err);
+  }
+  return {};
+}
 
 // Helper to get the highest existing sequence number from a collection
 export async function getHighestExistingNumber(collectionName: string, prefix: string): Promise<number> {
@@ -26,17 +43,53 @@ export async function getHighestExistingNumber(collectionName: string, prefix: s
       where('number', '>=', prefix),
       where('number', '<=', prefix + '\uf8ff'),
       orderBy('number', 'desc'),
-      limit(1)
+      limit(20)
     );
     const snapshot = await getDocs(q);
-    if (snapshot.empty) return 0;
-    const lastNumStr = snapshot.docs[0].data().number || '';
-    const parts = lastNumStr.split(/[-/]/);
-    const lastSeq = parseInt(parts[parts.length - 1], 10);
-    return isNaN(lastSeq) ? 0 : lastSeq;
+    if (!snapshot.empty) {
+      let maxSeq = 0;
+      for (const d of snapshot.docs) {
+        const lastNumStr = d.data().number || '';
+        const parts = lastNumStr.split(/[-/]/);
+        const lastSeq = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastSeq) && lastSeq > maxSeq) {
+          maxSeq = lastSeq;
+        }
+      }
+      if (maxSeq > 0) return maxSeq;
+    }
+
+    // Fallback: query without prefix filter in case legacy records used varied format
+    const allQ = query(collection(db, collectionName), limit(50));
+    const allSnap = await getDocs(allQ);
+    let maxSeq = 0;
+    for (const d of allSnap.docs) {
+      const lastNumStr = d.data().number || '';
+      const parts = lastNumStr.split(/[-/]/);
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq) && lastSeq > maxSeq) {
+        maxSeq = lastSeq;
+      }
+    }
+    return maxSeq;
   } catch (error) {
     console.error(`Error fetching highest existing number for ${collectionName}:`, error);
-    return 0;
+    try {
+      const allQ = query(collection(db, collectionName), limit(50));
+      const allSnap = await getDocs(allQ);
+      let maxSeq = 0;
+      for (const d of allSnap.docs) {
+        const lastNumStr = d.data().number || '';
+        const parts = lastNumStr.split(/[-/]/);
+        const lastSeq = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastSeq) && lastSeq > maxSeq) {
+          maxSeq = lastSeq;
+        }
+      }
+      return maxSeq;
+    } catch {
+      return 0;
+    }
   }
 }
 
@@ -107,13 +160,18 @@ export async function clientCreateQuotation(rawData: any) {
 
     let quotationNumber = rawData.number;
     if (!quotationNumber) {
+      const settings = getSavedCompanySettings();
+      const prefix = (settings.quotation_prefix || 'QTN').trim().toUpperCase();
+      const format = settings.quotation_format || 'prefix_hyphen_fy';
+      const year = settings.quotation_year || '';
+      const configuredStart = settings.quotation_next_number || 1;
+
       const sequenceRef = doc(db, "system", "quotation_sequence");
       const seqDoc = await transaction.get(sequenceRef);
       const currentSeqVal = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
       
-      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1);
-      const paddedSeq = nextSeq.toString().padStart(4, "0");
-      quotationNumber = `QTN-${paddedSeq}`;
+      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1, configuredStart);
+      quotationNumber = formatDocumentNumber(prefix, format, nextSeq, year);
 
       transaction.set(sequenceRef, { 
         last_value: nextSeq, 
@@ -181,13 +239,18 @@ export async function clientCreateInvoice(rawData: any) {
 
     let invoiceNumber = rawData.number;
     if (!invoiceNumber) {
+      const settings = getSavedCompanySettings();
+      const prefix = (settings.invoice_prefix || 'ECO').trim().toUpperCase();
+      const format = settings.invoice_format || 'prefix_hyphen_fy';
+      const year = settings.invoice_year || '';
+      const configuredStart = settings.invoice_next_number || 1;
+
       const sequenceRef = doc(db, "system", `invoice_sequence_${fyYear}`);
       const seqDoc = await transaction.get(sequenceRef);
       const currentSeqVal = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
       
-      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1);
-      const paddedSeq = nextSeq.toString().padStart(4, "0");
-      invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
+      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1, configuredStart);
+      invoiceNumber = formatDocumentNumber(prefix, format, nextSeq, year);
 
       transaction.set(sequenceRef, { 
         last_value: nextSeq, 
@@ -274,13 +337,18 @@ export async function clientCreateProformaInvoice(rawData: any) {
 
     let proformaNumber = rawData.number;
     if (!proformaNumber) {
+      const settings = getSavedCompanySettings();
+      const prefix = (settings.proforma_prefix || 'PI').trim().toUpperCase();
+      const format = settings.proforma_format || 'prefix_hyphen_fy';
+      const year = settings.proforma_year || '';
+      const configuredStart = settings.proforma_next_number || 1;
+
       const sequenceRef = doc(db, "system", `proforma_sequence_${fyYear}`);
       const seqDoc = await transaction.get(sequenceRef);
       const currentSeqVal = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
       
-      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1);
-      const paddedSeq = nextSeq.toString().padStart(4, "0");
-      proformaNumber = `PI/${fyYear}/${paddedSeq}`;
+      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1, configuredStart);
+      proformaNumber = formatDocumentNumber(prefix, format, nextSeq, year);
 
       transaction.set(sequenceRef, { 
         last_value: nextSeq, 
@@ -294,7 +362,7 @@ export async function clientCreateProformaInvoice(rawData: any) {
       number: proformaNumber,
       is_locked: false,
       status: "draft",
-      payment_status: "unpaid",
+      payment_status: rawData.payment_status || "unpaid",
       items: validatedItems,
       subtotal: exactRound(subtotal),
       tax_total: exactRound(totalTax),
@@ -305,7 +373,7 @@ export async function clientCreateProformaInvoice(rawData: any) {
       round_off: roundOff,
       grand_total: finalGrandTotal,
       advance_amount: rawData.advance_amount || 0,
-      balance_amount: rawData.balance_amount || finalGrandTotal,
+      balance_amount: rawData.balance_amount !== undefined ? rawData.balance_amount : Math.max(0, finalGrandTotal - (rawData.advance_amount || 0)),
       payment_history: [],
       created_by: uid,
       created_at: serverTimestamp(),
@@ -368,13 +436,18 @@ export async function clientCreateCashMemo(rawData: any) {
 
     let memoNumber = rawData.number;
     if (!memoNumber) {
+      const settings = getSavedCompanySettings();
+      const prefix = (settings.memo_prefix || 'MEMO').trim().toUpperCase();
+      const format = settings.memo_format || 'prefix_hyphen_fy';
+      const year = settings.memo_year || '';
+      const configuredStart = settings.memo_next_number || 1;
+
       const sequenceRef = doc(db, "system", `memo_sequence_${fyYear}`);
       const seqDoc = await transaction.get(sequenceRef);
       const currentSeqVal = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
       
-      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1);
-      const paddedSeq = nextSeq.toString().padStart(4, "0");
-      memoNumber = `MEMO/${fyYear}/${paddedSeq}`;
+      const nextSeq = Math.max(highestExisting + 1, currentSeqVal + 1, configuredStart);
+      memoNumber = formatDocumentNumber(prefix, format, nextSeq, year);
 
       transaction.set(sequenceRef, { 
         last_value: nextSeq, 
@@ -430,35 +503,207 @@ export async function clientCreateCashMemo(rawData: any) {
   });
 }
 
-export async function clientConvertQuotationToProforma(quotationId: string) {
+// Helper to derive Proforma number from Quotation number (e.g., QTN/25-26/0002 -> PI/25-26/0002)
+export function deriveProformaNumberFromQuotation(quotationNumber?: string, targetPrefix?: string): string {
+  const settings = getSavedCompanySettings();
+  const prefix = (targetPrefix || settings.proforma_prefix || 'PI').trim().toUpperCase();
+  const format = settings.proforma_format || 'prefix_hyphen_fy';
+  const year = settings.proforma_year || '';
+
+  if (!quotationNumber) {
+    return formatDocumentNumber(prefix, format, 1, year);
+  }
+  const clean = quotationNumber.trim();
+  const parts = clean.split(/[-/]/);
+  const lastPart = parseInt(parts[parts.length - 1], 10);
+  if (!isNaN(lastPart)) {
+    return formatDocumentNumber(prefix, format, lastPart, year);
+  }
+  if (/^[A-Za-z0-9_]+([/-].*)$/.test(clean)) {
+    return clean.replace(/^[A-Za-z0-9_]+([/-].*)$/, `${prefix}$1`);
+  }
+  return `${prefix}/${clean}`;
+}
+
+// Helper to derive Invoice number from Proforma number (e.g., PI/25-26/0002 -> ECO/25-26/0002)
+export function deriveInvoiceNumberFromProforma(proformaNumber?: string, targetPrefix?: string): string {
+  const settings = getSavedCompanySettings();
+  const prefix = (targetPrefix || settings.invoice_prefix || 'ECO').trim().toUpperCase();
+  const format = settings.invoice_format || 'prefix_hyphen_fy';
+  const year = settings.invoice_year || '';
+
+  if (!proformaNumber) {
+    return formatDocumentNumber(prefix, format, 1, year);
+  }
+  const clean = proformaNumber.trim();
+  const parts = clean.split(/[-/]/);
+  const lastPart = parseInt(parts[parts.length - 1], 10);
+  if (!isNaN(lastPart)) {
+    return formatDocumentNumber(prefix, format, lastPart, year);
+  }
+  if (/^[A-Za-z0-9_]+([/-].*)$/.test(clean)) {
+    return clean.replace(/^[A-Za-z0-9_]+([/-].*)$/, `${prefix}$1`);
+  }
+  return `${prefix}/${clean}`;
+}
+
+// Helper to derive Cash Memo number from Quotation number (e.g., QTN/25-26/0001 -> MEMO/25-26/0001)
+export function deriveCashMemoNumberFromQuotation(quotationNumber?: string, targetPrefix?: string): string {
+  const settings = getSavedCompanySettings();
+  const prefix = (targetPrefix || settings.memo_prefix || 'MEMO').trim().toUpperCase();
+  const format = settings.memo_format || 'prefix_hyphen_fy';
+  const year = settings.memo_year || '';
+
+  if (!quotationNumber) {
+    return formatDocumentNumber(prefix, format, 1, year);
+  }
+  const clean = quotationNumber.trim();
+  const parts = clean.split(/[-/]/);
+  const lastPart = parseInt(parts[parts.length - 1], 10);
+  if (!isNaN(lastPart)) {
+    return formatDocumentNumber(prefix, format, lastPart, year);
+  }
+  if (/^[A-Za-z0-9_]+([/-].*)$/.test(clean)) {
+    return clean.replace(/^[A-Za-z0-9_]+([/-].*)$/, `${prefix}$1`);
+  }
+  return `${prefix}/${clean}`;
+}
+
+export async function clientConvertQuotationToProforma(quotationId: string, force: boolean = false) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
-  return await runTransaction(db, async (transaction) => {
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const quotationRef = doc(db, "quotations", quotationId);
+      const qDoc = await transaction.get(quotationRef);
+      if (!qDoc.exists()) throw new Error("Quotation not found");
+      const qData = qDoc.data();
+
+      if (qData.conversion_status === "converted" && qData.linked_proforma_id && !force) {
+        const piRef = doc(db, "proforma_invoices", qData.linked_proforma_id);
+        const piSnap = await transaction.get(piRef);
+        if (piSnap.exists()) {
+          return {
+            success: true,
+            proformaId: qData.linked_proforma_id,
+            proformaNumber: qData.proformaInvoiceNumber || piSnap.data()?.number || qData.linked_proforma_id
+          };
+        }
+      }
+
+      let subtotal = 0;
+      let totalTax = 0;
+
+      const validatedItems = (qData.items || []).map((item: any) => {
+        const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
+        const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : 18;
+        const taxAmountRaw = (lineTotalRaw * taxPercentage) / 100;
+        const lineTotal = exactRound(lineTotalRaw);
+        const taxAmount = exactRound(taxAmountRaw);
+        subtotal += lineTotal;
+        totalTax += taxAmount;
+        return { 
+          ...item, 
+          line_total: lineTotal, 
+          tax_amount: taxAmount,
+          tax_percentage: taxPercentage
+        };
+      });
+
+      const discountPercent = qData.discount_percent || 0;
+      const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
+      const charge = qData.charge_amount || qData.chargeAmount || 0;
+      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
+      const finalGrandTotal = Math.round(grandTotalExact);
+      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+
+      // Derived Proforma Number changing QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
+      const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
+
+      const advanceAmount = qData.advance_amount || 0;
+      const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
+      const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
+
+      const proformaRef = doc(collection(db, "proforma_invoices"));
+      const proformaData = {
+        ...qData,
+        id: proformaRef.id,
+        number: proformaNumber,
+        documentType: "proforma_invoice",
+        is_locked: false,
+        is_gst: true,
+        status: "draft",
+        conversion_status: null,
+        convertedToInvoice: false,
+        linked_invoice_id: null,
+        payment_status: initialPaymentStatus,
+        items: validatedItems,
+        subtotal: exactRound(subtotal),
+        tax_total: exactRound(totalTax),
+        cgst: qData.is_igst ? 0 : exactRound(totalTax / 2),
+        sgst_igst: qData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+        discount_amount: discountAmount,
+        charge_amount: charge,
+        round_off: roundOff,
+        grand_total: finalGrandTotal,
+        advance_amount: advanceAmount,
+        balance_amount: balanceAmount,
+        payment_history: [],
+        sourceDocumentType: "gst_quotation",
+        sourceQuotationId: quotationId,
+        sourceQuotationNumber: qData.number || "",
+        linked_quotation_id: quotationId,
+        created_by: uid,
+        created_at: serverTimestamp(),
+        proforma_date: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_quotation",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(proformaRef, proformaData);
+
+      transaction.update(quotationRef, {
+        conversion_status: "converted",
+        convertedToProforma: true,
+        linked_proforma_id: proformaRef.id,
+        proformaInvoiceId: proformaRef.id,
+        proformaInvoiceNumber: proformaNumber,
+        convertedAt: serverTimestamp(),
+        status: "converted",
+        updated_at: serverTimestamp()
+      });
+
+      return { success: true, proformaId: proformaRef.id, proformaNumber };
+    });
+  } catch (txError) {
+    console.warn("Transaction conversion had an issue, attempting direct setDoc fallback:", txError);
     const quotationRef = doc(db, "quotations", quotationId);
-    const qDoc = await transaction.get(quotationRef);
+    const qDoc = await getDoc(quotationRef);
     if (!qDoc.exists()) throw new Error("Quotation not found");
     const qData = qDoc.data();
-
-    if (qData.conversion_status === "converted" && qData.linked_proforma_id) {
-      const piRef = doc(db, "proforma_invoices", qData.linked_proforma_id);
-      const piSnap = await transaction.get(piRef);
-      if (piSnap.exists()) {
-        throw new Error("This quotation was already converted");
-      }
-    }
 
     let subtotal = 0;
     let totalTax = 0;
 
     const validatedItems = (qData.items || []).map((item: any) => {
       const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
-      const taxAmountRaw = (lineTotalRaw * (item.tax_percentage || 0)) / 100;
+      const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : 18;
+      const taxAmountRaw = (lineTotalRaw * taxPercentage) / 100;
       const lineTotal = exactRound(lineTotalRaw);
       const taxAmount = exactRound(taxAmountRaw);
       subtotal += lineTotal;
       totalTax += taxAmount;
-      return { ...item, line_total: lineTotal, tax_amount: taxAmount };
+      return { 
+        ...item, 
+        line_total: lineTotal, 
+        tax_amount: taxAmount,
+        tax_percentage: taxPercentage
+      };
     });
 
     const discountPercent = qData.discount_percent || 0;
@@ -468,23 +713,7 @@ export async function clientConvertQuotationToProforma(quotationId: string) {
     const finalGrandTotal = Math.round(grandTotalExact);
     const roundOff = exactRound(finalGrandTotal - grandTotalExact);
 
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3) fyYear -= 1;
-
-    const sequenceRef = doc(db, "system", `proforma_sequence_${fyYear}`);
-    const seqDoc = await transaction.get(sequenceRef);
-    let currentSeq = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
-    
-    currentSeq += 1;
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const proformaNumber = `PI/${fyYear}/${paddedSeq}`;
-
-    transaction.set(sequenceRef, { 
-      last_value: currentSeq, 
-      updated_at: serverTimestamp() 
-    }, { merge: true });
-
+    const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
     const advanceAmount = qData.advance_amount || 0;
     const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
     const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
@@ -492,9 +721,15 @@ export async function clientConvertQuotationToProforma(quotationId: string) {
     const proformaRef = doc(collection(db, "proforma_invoices"));
     const proformaData = {
       ...qData,
+      id: proformaRef.id,
       number: proformaNumber,
+      documentType: "proforma_invoice",
       is_locked: false,
+      is_gst: true,
       status: "draft",
+      conversion_status: null,
+      convertedToInvoice: false,
+      linked_invoice_id: null,
       payment_status: initialPaymentStatus,
       items: validatedItems,
       subtotal: exactRound(subtotal),
@@ -508,9 +743,14 @@ export async function clientConvertQuotationToProforma(quotationId: string) {
       advance_amount: advanceAmount,
       balance_amount: balanceAmount,
       payment_history: [],
+      sourceDocumentType: "gst_quotation",
+      sourceQuotationId: quotationId,
+      sourceQuotationNumber: qData.number || "",
       linked_quotation_id: quotationId,
       created_by: uid,
       created_at: serverTimestamp(),
+      proforma_date: serverTimestamp(),
+      updated_at: serverTimestamp(),
       audit_trail: [{
         action: "converted_from_quotation",
         user: uid,
@@ -518,58 +758,128 @@ export async function clientConvertQuotationToProforma(quotationId: string) {
       }]
     };
 
-    transaction.set(proformaRef, proformaData);
-
-    transaction.update(quotationRef, {
+    await setDoc(proformaRef, proformaData);
+    await updateDoc(quotationRef, {
       conversion_status: "converted",
+      convertedToProforma: true,
       linked_proforma_id: proformaRef.id,
-      status: "converted"
-    });
-
-    const auditLogRef = doc(collection(db, "audit_logs"));
-    transaction.set(auditLogRef, {
-      document_type: "proforma_invoice",
-      document_id: proformaRef.id,
-      action: "create",
-      user_id: uid,
-      timestamp: serverTimestamp(),
-      notes: `Converted from Quotation ${quotationId} (client)`
+      proformaInvoiceId: proformaRef.id,
+      proformaInvoiceNumber: proformaNumber,
+      convertedAt: serverTimestamp(),
+      status: "converted",
+      updated_at: serverTimestamp()
     });
 
     return { success: true, proformaId: proformaRef.id, proformaNumber };
-  });
+  }
 }
 
 export async function clientConvertQuotationToCashMemo(quotationId: string) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
-  return await runTransaction(db, async (transaction) => {
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const quotationRef = doc(db, "quotations", quotationId);
+      const qDoc = await transaction.get(quotationRef);
+      if (!qDoc.exists()) throw new Error("Quotation not found");
+      const qData = qDoc.data();
+
+      if (qData.conversion_status === "converted" && qData.linked_memo_id) {
+        const memoRef = doc(db, "cash_memos", qData.linked_memo_id);
+        const memoSnap = await transaction.get(memoRef);
+        if (memoSnap.exists()) {
+          return {
+            success: true,
+            memoId: qData.linked_memo_id,
+            memoNumber: memoSnap.data()?.number || qData.linked_memo_id
+          };
+        }
+      }
+
+      let subtotal = 0;
+
+      const validatedItems = (qData.items || []).map((item: any) => {
+        const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
+        const lineTotal = exactRound(lineTotalRaw);
+        subtotal += lineTotal;
+        return {
+          ...item,
+          tax_percentage: 0,
+          tax_amount: 0,
+          line_total: lineTotal
+        };
+      });
+
+      const discountPercent = qData.discount_percent || 0;
+      const discountAmount = exactRound((subtotal * discountPercent) / 100);
+      const charge = qData.charge_amount || qData.chargeAmount || 0;
+      const grandTotalExact = subtotal - discountAmount + charge;
+      const finalGrandTotal = Math.round(grandTotalExact);
+      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+
+      // Derived Cash Memo Number changing QTN -> MEMO
+      const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
+
+      const memoRef = doc(collection(db, "cash_memos"));
+      const memoData = {
+        ...qData,
+        id: memoRef.id,
+        number: memoNumber,
+        documentType: "cash_memo",
+        is_gst: false,
+        is_locked: true,
+        status: "finalized",
+        payment_status: "paid",
+        items: validatedItems,
+        subtotal: exactRound(subtotal),
+        tax_total: 0,
+        cgst: 0,
+        sgst_igst: 0,
+        discount_amount: discountAmount,
+        charge_amount: charge,
+        round_off: roundOff,
+        grand_total: finalGrandTotal,
+        balance_amount: 0,
+        payment_history: [],
+        sourceDocumentType: "non_gst_quotation",
+        sourceQuotationId: quotationId,
+        sourceQuotationNumber: qData.number || "",
+        linked_quotation_id: quotationId,
+        created_by: uid,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_quotation",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(memoRef, memoData);
+
+      transaction.update(quotationRef, {
+        conversion_status: "converted",
+        linked_memo_id: memoRef.id,
+        status: "converted",
+        updated_at: serverTimestamp()
+      });
+
+      return { success: true, memoId: memoRef.id, memoNumber };
+    });
+  } catch (txError) {
+    console.warn("Direct write fallback for Cash Memo conversion:", txError);
     const quotationRef = doc(db, "quotations", quotationId);
-    const qDoc = await transaction.get(quotationRef);
+    const qDoc = await getDoc(quotationRef);
     if (!qDoc.exists()) throw new Error("Quotation not found");
     const qData = qDoc.data();
 
-    if (qData.conversion_status === "converted" && qData.linked_memo_id) {
-      const memoRef = doc(db, "cash_memos", qData.linked_memo_id);
-      const memoSnap = await transaction.get(memoRef);
-      if (memoSnap.exists()) {
-        throw new Error("This quotation was already converted");
-      }
-    }
-
     let subtotal = 0;
-
     const validatedItems = (qData.items || []).map((item: any) => {
       const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
       const lineTotal = exactRound(lineTotalRaw);
       subtotal += lineTotal;
-      return {
-        ...item,
-        tax_percentage: 0,
-        tax_amount: 0,
-        line_total: lineTotal
-      };
+      return { ...item, tax_percentage: 0, tax_amount: 0, line_total: lineTotal };
     });
 
     const discountPercent = qData.discount_percent || 0;
@@ -579,27 +889,13 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
     const finalGrandTotal = Math.round(grandTotalExact);
     const roundOff = exactRound(finalGrandTotal - grandTotalExact);
 
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3) fyYear -= 1;
-
-    const sequenceRef = doc(db, "system", `memo_sequence_${fyYear}`);
-    const seqDoc = await transaction.get(sequenceRef);
-    let currentSeq = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
-    
-    currentSeq += 1;
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const memoNumber = `MEMO/${fyYear}/${paddedSeq}`;
-
-    transaction.set(sequenceRef, { 
-      last_value: currentSeq, 
-      updated_at: serverTimestamp() 
-    }, { merge: true });
-
+    const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
     const memoRef = doc(collection(db, "cash_memos"));
     const memoData = {
       ...qData,
+      id: memoRef.id,
       number: memoNumber,
+      documentType: "cash_memo",
       is_gst: false,
       is_locked: true,
       status: "finalized",
@@ -615,9 +911,13 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
       grand_total: finalGrandTotal,
       balance_amount: 0,
       payment_history: [],
+      sourceDocumentType: "non_gst_quotation",
+      sourceQuotationId: quotationId,
+      sourceQuotationNumber: qData.number || "",
       linked_quotation_id: quotationId,
       created_by: uid,
       created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
       audit_trail: [{
         action: "converted_from_quotation",
         user: uid,
@@ -625,74 +925,104 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
       }]
     };
 
-    transaction.set(memoRef, memoData);
-
-    transaction.update(quotationRef, {
+    await setDoc(memoRef, memoData);
+    await updateDoc(quotationRef, {
       conversion_status: "converted",
       linked_memo_id: memoRef.id,
-      status: "converted"
-    });
-
-    const auditLogRef = doc(collection(db, "audit_logs"));
-    transaction.set(auditLogRef, {
-      document_type: "cash_memo",
-      document_id: memoRef.id,
-      action: "create",
-      user_id: uid,
-      timestamp: serverTimestamp(),
-      notes: `Converted from Quotation ${quotationId} (client)`
+      status: "converted",
+      updated_at: serverTimestamp()
     });
 
     return { success: true, memoId: memoRef.id, memoNumber };
-  });
+  }
 }
 
 export async function clientConvertProformaToInvoice(proformaId: string) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
-  return await runTransaction(db, async (transaction) => {
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const proformaRef = doc(db, "proforma_invoices", proformaId);
+      const pDoc = await transaction.get(proformaRef);
+      if (!pDoc.exists()) throw new Error("Proforma Invoice not found");
+      const pData = pDoc.data();
+
+      if (pData.conversion_status === "converted" && pData.linked_invoice_id) {
+        const invRef = doc(db, "invoices", pData.linked_invoice_id);
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists()) {
+          return {
+            success: true,
+            invoiceId: pData.linked_invoice_id,
+            invoiceNumber: invSnap.data()?.number || pData.linked_invoice_id
+          };
+        }
+      }
+
+      // Derived Invoice Number changing PI -> INV (e.g. PI/25/26/0002 -> INV/25/26/0002)
+      const invoiceNumber = deriveInvoiceNumberFromProforma(pData.number);
+
+      const invoiceRef = doc(collection(db, "invoices"));
+      const invoiceData = {
+        ...pData,
+        id: invoiceRef.id,
+        number: invoiceNumber,
+        documentType: "invoice",
+        is_locked: true,
+        status: "finalized",
+        payment_status: "paid",
+        balance_amount: 0,
+        sourceDocumentType: "proforma_invoice",
+        sourceProformaId: proformaId,
+        sourceProformaNumber: pData.number || "",
+        linked_proforma_id: proformaId,
+        created_by: uid,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_proforma",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(invoiceRef, invoiceData);
+
+      transaction.update(proformaRef, {
+        conversion_status: "converted",
+        linked_invoice_id: invoiceRef.id,
+        status: "converted",
+        updated_at: serverTimestamp()
+      });
+
+      return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
+    });
+  } catch (txError) {
+    console.warn("Direct write fallback for Proforma to Invoice conversion:", txError);
     const proformaRef = doc(db, "proforma_invoices", proformaId);
-    const pDoc = await transaction.get(proformaRef);
+    const pDoc = await getDoc(proformaRef);
     if (!pDoc.exists()) throw new Error("Proforma Invoice not found");
     const pData = pDoc.data();
 
-    if (pData.conversion_status === "converted" && pData.linked_invoice_id) {
-      const invRef = doc(db, "invoices", pData.linked_invoice_id);
-      const invSnap = await transaction.get(invRef);
-      if (invSnap.exists()) {
-        throw new Error("This Proforma Invoice was already converted");
-      }
-    }
-
-    const d = new Date();
-    let fyYear = d.getFullYear();
-    if (d.getMonth() < 3) fyYear -= 1;
-
-    const sequenceRef = doc(db, "system", `invoice_sequence_${fyYear}`);
-    const seqDoc = await transaction.get(sequenceRef);
-    let currentSeq = seqDoc.exists() ? seqDoc.data()?.last_value || 0 : 0;
-    
-    currentSeq += 1;
-    const paddedSeq = currentSeq.toString().padStart(4, "0");
-    const invoiceNumber = `ECO/${fyYear}/${paddedSeq}`;
-
-    transaction.set(sequenceRef, { 
-      last_value: currentSeq, 
-      updated_at: serverTimestamp() 
-    }, { merge: true });
-
+    const invoiceNumber = deriveInvoiceNumberFromProforma(pData.number);
     const invoiceRef = doc(collection(db, "invoices"));
     const invoiceData = {
       ...pData,
+      id: invoiceRef.id,
       number: invoiceNumber,
+      documentType: "invoice",
       is_locked: true,
       status: "finalized",
-      payment_status: "paid", // auto converted when fully paid
+      payment_status: "paid",
       balance_amount: 0,
+      sourceDocumentType: "proforma_invoice",
+      sourceProformaId: proformaId,
+      sourceProformaNumber: pData.number || "",
       linked_proforma_id: proformaId,
       created_by: uid,
       created_at: serverTimestamp(),
+      updated_at: serverTimestamp(),
       audit_trail: [{
         action: "converted_from_proforma",
         user: uid,
@@ -700,24 +1030,14 @@ export async function clientConvertProformaToInvoice(proformaId: string) {
       }]
     };
 
-    transaction.set(invoiceRef, invoiceData);
-
-    transaction.update(proformaRef, {
+    await setDoc(invoiceRef, invoiceData);
+    await updateDoc(proformaRef, {
       conversion_status: "converted",
       linked_invoice_id: invoiceRef.id,
-      status: "converted"
-    });
-
-    const auditLogRef = doc(collection(db, "audit_logs"));
-    transaction.set(auditLogRef, {
-      document_type: "invoice",
-      document_id: invoiceRef.id,
-      action: "create",
-      user_id: uid,
-      timestamp: serverTimestamp(),
-      notes: `Converted from Proforma Invoice ${proformaId} (client)`
+      status: "converted",
+      updated_at: serverTimestamp()
     });
 
     return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
-  });
+  }
 }

@@ -61,41 +61,70 @@ export default function Quotations() {
     return () => unsubscribe();
   }, [customers]);
 
-  const handleConvert = async (quotation: Quotation) => {
-    if (!functions) return;
-    
+  const handleConvert = async (quotation: Quotation, force: boolean = false) => {
     const isGST = quotation.customer_type === 'gst' || !quotation.customer_type;
     const targetDoc = isGST ? 'Proforma Invoice' : 'Cash Memo';
     
-    const confirm = window.confirm(`This will generate a ${targetDoc}. Proceed?`);
+    // Validation check before proceeding
+    if (!quotation.items || quotation.items.length === 0) {
+      alert("Unable to convert: This quotation contains no line items.");
+      return;
+    }
+
+    if (!force && (quotation.status === 'converted' || (quotation as any).conversion_status === 'converted')) {
+      const viewExisting = window.confirm(`This quotation is already marked as converted. Would you like to view ${targetDoc}s?`);
+      if (viewExisting) {
+        navigate(isGST ? '/proforma-invoices' : '/cash-memos');
+      }
+      return;
+    }
+    
+    const confirm = window.confirm(`Generate ${targetDoc} from quotation "${quotation.number}"?`);
     if (!confirm) return;
 
     setConvertingId(quotation.id);
     try {
-      // GST quotations now go to Proforma Invoice first, then to Invoice
-      const fnName = isGST ? 'convertQuotationToProforma' : 'convertQuotationToCashMemo';
-      const convertFn = httpsCallable(functions, fnName);
-      const result = await convertFn({ quotationId: quotation.id });
-      
-      const docNum = (result.data as any).proformaNumber || (result.data as any).memoNumber;
-      alert(`Successfully converted! Document: ${docNum}`);
+      let docNum: string = '';
+      const { clientConvertQuotationToProforma, clientConvertQuotationToCashMemo, deriveProformaNumberFromQuotation, deriveCashMemoNumberFromQuotation } = await import('../utils/clientBillingCreator');
+      const result = isGST 
+        ? await clientConvertQuotationToProforma(quotation.id, force) 
+        : await clientConvertQuotationToCashMemo(quotation.id);
+      docNum = (result as any).proformaNumber || (result as any).memoNumber || (isGST ? deriveProformaNumberFromQuotation(quotation.number) : deriveCashMemoNumberFromQuotation(quotation.number));
+
+      alert(`${targetDoc} ${docNum} created successfully!`);
       navigate(isGST ? '/proforma-invoices' : '/cash-memos');
-    } catch (error) {
-      console.warn("Cloud function conversion failed, trying client fallback:", error);
-      try {
-        const { clientConvertQuotationToProforma, clientConvertQuotationToCashMemo } = await import('../utils/clientBillingCreator');
-        const result = isGST 
-          ? await clientConvertQuotationToProforma(quotation.id) 
-          : await clientConvertQuotationToCashMemo(quotation.id);
-        const docNum = (result as any).proformaNumber || (result as any).memoNumber;
-        alert(`Successfully converted! Document: ${docNum}`);
-        navigate(isGST ? '/proforma-invoices' : '/cash-memos');
-      } catch (fallbackErr: any) {
-        console.error("Client fallback conversion failed:", fallbackErr);
-        alert("Failed to convert. Check permissions or if already converted.");
-      }
+    } catch (error: any) {
+      console.error("Conversion failed:", error);
+      const errMsg = error?.message || error?.details || "Failed to convert quotation. Please check your network and permissions.";
+      alert(`Conversion Error: ${errMsg}`);
     } finally {
       setConvertingId(null);
+    }
+  };
+
+  const handleViewOrConvert = async (quotation: Quotation) => {
+    const isGST = quotation.customer_type === 'gst' || !quotation.customer_type;
+    const targetColl = isGST ? 'proforma_invoices' : 'cash_memos';
+    const targetRoute = isGST ? '/proforma-invoices' : '/cash-memos';
+    const linkedId = quotation.linked_proforma_id || (quotation as any).proformaInvoiceId || (quotation as any).linked_memo_id;
+
+    if (db && linkedId) {
+      try {
+        const docSnap = await getDoc(doc(db, targetColl, linkedId));
+        if (docSnap.exists()) {
+          navigate(targetRoute);
+          return;
+        }
+      } catch (err) {
+        console.warn("Error checking linked document:", err);
+      }
+    }
+
+    const retry = window.confirm(`The ${isGST ? 'Proforma Invoice' : 'Cash Memo'} record was not found in the database. Generate it now?`);
+    if (retry) {
+      await handleConvert(quotation, true);
+    } else {
+      navigate(targetRoute);
     }
   };
 
@@ -108,23 +137,81 @@ export default function Quotations() {
     }
   };
 
-  const deleteQuotation = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this quotation?")) {
+  const deleteQuotation = async (q: Quotation) => {
+    if (window.confirm(`Are you sure you want to delete quotation "${q.number}"?`)) {
       try {
-        await deleteDoc(doc(db, 'quotations', id));
-        const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
-        await syncSequenceAfterDelete("quotations", "quotation_sequence", "QTN-");
-      } catch (err) {
+        if (db) {
+          const qRef = doc(db, 'quotations', q.id);
+          const qSnap = await getDoc(qRef);
+          if (qSnap.exists()) {
+            const qData = qSnap.data();
+            const linkedPiId = qData.linked_proforma_id || qData.proformaInvoiceId;
+            if (linkedPiId) {
+              try {
+                const piRef = doc(db, 'proforma_invoices', linkedPiId);
+                const piSnap = await getDoc(piRef);
+                if (piSnap.exists()) {
+                  await updateDoc(piRef, {
+                    linked_quotation_id: null,
+                    sourceQuotationId: null,
+                    sourceQuotationNumber: null
+                  });
+                }
+              } catch (unlinkErr) {
+                console.warn("Could not unlink proforma invoice:", unlinkErr);
+              }
+            }
+
+            const linkedMemoId = qData.linked_memo_id;
+            if (linkedMemoId) {
+              try {
+                const memoRef = doc(db, 'cash_memos', linkedMemoId);
+                const memoSnap = await getDoc(memoRef);
+                if (memoSnap.exists()) {
+                  await updateDoc(memoRef, {
+                    linked_quotation_id: null,
+                    sourceQuotationId: null,
+                    sourceQuotationNumber: null
+                  });
+                }
+              } catch (unlinkMemoErr) {
+                console.warn("Could not unlink cash memo:", unlinkMemoErr);
+              }
+            }
+          }
+          await deleteDoc(doc(db, 'quotations', q.id));
+
+          try {
+            const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+            await syncSequenceAfterDelete("quotations", "quotation_sequence", "QTN-");
+          } catch (seqError) {
+            console.warn("Sequence sync failed after delete:", seqError);
+          }
+        }
+      } catch (err: any) {
         console.error("Error deleting quotation", err);
-        alert("Failed to delete quotation.");
+        alert("Failed to delete quotation: " + (err?.message || "Unknown error"));
       }
     }
   };
 
   const getStatusBadge = (q: Quotation) => {
     const status = q.status;
-    if (status === 'converted') {
-      return <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>;
+    if (status === 'converted' || (q as any).conversion_status === 'converted') {
+      return (
+        <div className="flex flex-col items-center gap-0.5">
+          <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+          {((q as any).proformaInvoiceNumber || (q as any).proforma_number) && (
+            <span 
+              onClick={() => navigate('/proforma-invoices')}
+              className="text-[11px] font-semibold text-primary cursor-pointer hover:underline"
+              title="Click to view Proforma Invoices"
+            >
+              {(q as any).proformaInvoiceNumber || (q as any).proforma_number}
+            </span>
+          )}
+        </div>
+      );
     }
     
     return (
@@ -300,44 +387,63 @@ export default function Quotations() {
                   <td className="py-4 px-4 text-center">{getStatusBadge(q)}</td>
                   <td className="py-4 px-4 pr-0 text-right">
                     <div className="flex items-center justify-end gap-2">
-                       {q.status === 'convert_requested' && (
-                         <button 
-                           onClick={() => handleConvert(q)}
-                           disabled={convertingId === q.id}
-                           className="neo-btn !p-2 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold"
-                         >
-                           {convertingId === q.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                           Convert
-                         </button>
-                       )}
-                       <button 
-                         onClick={() => navigate(`/quotations/edit/${q.id}`)}
-                         className="p-2 text-secondary hover:text-primary transition-colors"
-                         title="Edit Quotation"
-                       >
-                         <Edit size={18} />
-                       </button>
+                        {q.status !== 'converted' && (q as any).conversion_status !== 'converted' ? (
+                          <button 
+                            onClick={() => handleConvert(q)}
+                            disabled={convertingId === q.id}
+                            className="neo-btn !p-2 !px-2.5 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold whitespace-nowrap"
+                            title={(q.customer_type === 'gst' || !q.customer_type) ? "Convert to Proforma Invoice" : "Convert to Cash Memo"}
+                          >
+                            {convertingId === q.id ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                <span>Converting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles size={14} />
+                                <span>Convert</span>
+                              </>
+                            )}
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => handleViewOrConvert(q)}
+                            className="neo-btn !p-2 !px-2.5 text-xs text-primary font-semibold hover:text-primary-dark transition-all flex items-center gap-1 whitespace-nowrap"
+                            title="View or verify converted document"
+                          >
+                            <span>View {(q.customer_type === 'gst' || !q.customer_type) ? 'PI' : 'Memo'}</span>
+                            <span>→</span>
+                          </button>
+                        )}
                         <button 
-                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)}
-                         className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                         title="View PDF"
-                       >
-                         <FileText size={18} />
-                       </button>
-                       <button 
-                         onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)}
-                         className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                         title="Download PDF"
-                       >
-                         <Download size={18} />
-                       </button>
-                       <button 
-                         onClick={() => deleteQuotation(q.id)}
-                         className="p-2 text-secondary hover:text-red-600 transition-colors"
-                         title="Delete Quotation"
-                       >
-                         <Trash2 size={18} />
-                       </button>
+                          onClick={() => navigate(`/quotations/edit/${q.id}`)}
+                          className="p-2 text-secondary hover:text-primary transition-colors"
+                          title="Edit Quotation"
+                        >
+                          <Edit size={18} />
+                        </button>
+                        <button 
+                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)}
+                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
+                          title="View PDF"
+                        >
+                          <FileText size={18} />
+                        </button>
+                        <button 
+                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)}
+                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
+                          title="Download PDF"
+                        >
+                          <Download size={18} />
+                        </button>
+                        <button 
+                          onClick={() => deleteQuotation(q)}
+                          className="p-2 text-secondary hover:text-red-600 transition-colors"
+                          title="Delete Quotation"
+                        >
+                          <Trash2 size={18} />
+                        </button>
                     </div>
                   </td>
                 </tr>

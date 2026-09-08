@@ -117,3 +117,20 @@
   animation: wave-processing 1s ease-in-out infinite;
 }
 
+/* Custom Pipeline Scrollbar */
+.pipeline-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+.pipeline-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 9999px;
+}
+.pipeline-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 103, 102, 0.2);
+  border-radius: 9999px;
+}
+.pipeline-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 103, 102, 0.4);
+}
+
+

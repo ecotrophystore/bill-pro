@@ -8,6 +8,7 @@ import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
+import { getNextProposedNumber } from '../utils/numberGenerator';
 
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
@@ -15,6 +16,7 @@ const exactRound = (num: number) => Math.round(num * 100) / 100;
 export default function CreateInvoice() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { settings: companySettings } = useSettings();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
@@ -28,6 +30,7 @@ export default function CreateInvoice() {
   const [advanceReferenceNumber, setAdvanceReferenceNumber] = useState('');
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
+  const [documentNumber, setDocumentNumber] = useState('');
 
   const [isGstInfo, setIsGstInfo] = useState({ isIgst: false });
   const [applyGst, setApplyGst] = useState(true);
@@ -64,6 +67,14 @@ export default function CreateInvoice() {
             setAdvanceReferenceNumber(data.advance_reference_number || '');
             setDiscountPercent(data.discount_percent || 0);
             setChargeAmount(data.charge_amount || 0);
+            setDocumentNumber(data.number || '');
+          }
+        } else {
+          try {
+            const proposed = await getNextProposedNumber('invoices', 'invoice', companySettings);
+            setDocumentNumber(proposed);
+          } catch (numErr) {
+            console.warn("Could not generate proposed invoice number:", numErr);
           }
         }
       } catch (error) {
@@ -73,7 +84,7 @@ export default function CreateInvoice() {
       }
     }
     fetchData();
-  }, []);
+  }, [id, companySettings?.invoice_prefix, companySettings?.invoice_format, companySettings?.invoice_year, companySettings?.invoice_next_number]);
 
   useEffect(() => {
     if (location.state?.voiceData && !loadingData && !id && customers.length > 0) {
@@ -171,6 +182,7 @@ export default function CreateInvoice() {
       setIsSaving(true);
       try {
         await updateDoc(doc(db, 'invoices', id), {
+          number: documentNumber || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           is_igst: isGstInfo.isIgst,
@@ -208,6 +220,7 @@ export default function CreateInvoice() {
     try {
       const createInvoiceFn = httpsCallable(functions, 'createInvoice');
       const invoiceData: any = {
+        number: documentNumber || undefined,
         customer_id: selectedCustomerId || `new_${Date.now()}`,
         customer_name: selectedCustomerName,
         is_igst: isGstInfo.isIgst,
@@ -229,6 +242,7 @@ export default function CreateInvoice() {
       console.warn("Cloud function failed, attempting client-side save fallback:", error);
       try {
         const invoiceData: any = {
+          number: documentNumber || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           is_igst: isGstInfo.isIgst,
@@ -301,6 +315,19 @@ export default function CreateInvoice() {
                     setSelectedCustomerName(val);
                   }}
                   placeholder="Search customers..."
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-primary-dark px-1 flex items-center justify-between">
+                  <span>Invoice No</span>
+                  <span className="text-xs text-primary font-normal">Editable</span>
+                </label>
+                <SpeechInput 
+                  type="text" 
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-surface" 
+                  placeholder="e.g. INV/25/26/0001" 
+                  value={documentNumber} 
+                  onChange={(e: any) => setDocumentNumber(e.target.value)} 
                 />
               </div>
               <div className="space-y-1">

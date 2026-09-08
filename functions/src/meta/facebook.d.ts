@@ -31,4 +31,7 @@ export declare const subscribeFacebookPageMessages: import("firebase-functions/v
 export declare const unsubscribeFacebookPageMessages: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     success: boolean;
 }>, unknown>;
+export declare const disconnectFacebookIntegration: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
 //# sourceMappingURL=facebook.d.ts.map
