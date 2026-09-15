@@ -32,6 +32,7 @@ import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
+import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
 
 interface SubMenuItem {
   path: string;
@@ -58,21 +59,20 @@ const navCategories: NavCategory[] = [
     label: 'CRM',
     icon: Target,
     items: [
-      { path: '/crm-dashboard', label: 'CRM Dashboard', icon: Target },
-      { path: '/leads/new', label: 'Add Lead', icon: UserPlus },
       { path: '/leads', label: 'Leads', icon: Users },
-      { path: '/pipeline', label: 'Pipeline', icon: Columns3 },
-      { path: '/lead-intake', label: 'Intake Log', icon: Inbox },
-      { path: '/message-templates', label: 'Templates', icon: MessageSquare },
-      { path: '/whatsapp-automation', label: 'WA Automation', icon: Bot },
-      { path: '/message-queue', label: 'Queue Log', icon: Send },
-      { path: '/audit-logs', label: 'Audit Logs', icon: ShieldAlert },
-      { path: '/auditor', label: 'AI Audit Trail', icon: Shield },
+      { path: '/leads/new', label: 'Add Lead', icon: UserPlus },
+      { path: '/pipeline', label: 'Pipeline Board', icon: Columns3 },
+      { path: '/lead-intake', label: 'Lead Intake', icon: Inbox },
+      { path: '/message-templates', label: 'Message Templates', icon: MessageSquare },
+      { path: '/message-queue', label: 'Message Queue', icon: Send },
+      { path: '/whatsapp-automation', label: 'WhatsApp Automation', icon: Bot },
+      { path: '/crm-dashboard', label: 'CRM Analytics', icon: BarChart3 },
+      { path: '/audit-logs', label: 'Audit Logs', icon: Shield },
     ],
   },
   {
-    id: 'billing',
-    label: 'Billing',
+    id: 'sales_finance',
+    label: 'Sales & Finance',
     icon: Receipt,
     items: [
       { path: '/quotations', label: 'Quotations', icon: FileText },
@@ -98,6 +98,7 @@ const navCategories: NavCategory[] = [
 ];
 
 export function AppLayout() {
+  useWhatsAppAutoProcessor();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);

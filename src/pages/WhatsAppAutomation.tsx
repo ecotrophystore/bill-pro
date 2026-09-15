@@ -4,14 +4,16 @@ import {
   collection, query, orderBy, onSnapshot, addDoc, doc, setDoc, updateDoc, serverTimestamp
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Bot, Plus, Loader2, Play, Pause, Edit2, Check, AlertCircle, X } from 'lucide-react';
+import { Bot, Plus, Loader2, Play, Pause, Edit2, Check, AlertCircle, X, Sparkles, Workflow } from 'lucide-react';
 import { db, functions, auth } from '../lib/firebase';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import type { WhatsAppAutomation, Pipeline } from '../types';
 import { WorkflowBuilder } from '../components/WhatsAppAutomation/WorkflowBuilder';
+import { WhatsAppAiInbox } from '../components/WhatsAppAutomation/WhatsAppAiInbox';
 
 export default function WhatsAppAutomation() {
   const { hasPermission } = useCRMPermission();
+  const [activeTab, setActiveTab] = useState<'inbox' | 'workflows'>('inbox');
   const [view, setView] = useState<'list' | 'form' | 'detail'>('list');
   const [automations, setAutomations] = useState<WhatsAppAutomation[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -118,15 +120,31 @@ export default function WhatsAppAutomation() {
   };
 
   const doActivate = async (a: WhatsAppAutomation) => {
-    if (!functions) return;
+    if (!db) return;
     setActivating(true); setIsError(false); setMessage('');
     try {
-      const fn = httpsCallable(functions, 'activateAutomation');
-      const result: any = await fn({ automationId: a.id });
-      setMessage(`✓ Activated! Enrolled ${result.data?.enrolled ?? 0} leads. Skipped: ${result.data?.skipped ?? 0}.`);
+      if (functions) {
+        try {
+          const fn = httpsCallable(functions, 'activateAutomation');
+          const result: any = await fn({ automationId: a.id });
+          setMessage(`✓ Activated! Enrolled ${result.data?.enrolled ?? 0} leads. Skipped: ${result.data?.skipped ?? 0}.`);
+          return;
+        } catch (fnErr: any) {
+          console.warn('Callable activateAutomation fallback to direct Firestore:', fnErr);
+        }
+      }
+      await updateDoc(doc(db, 'whatsapp_automations', a.id), { 
+        status: 'active', 
+        updatedAt: serverTimestamp() 
+      });
+      setMessage(`✓ Automation "${a.name || 'Automation'}" is now active!`);
     } catch (err: any) {
-      setIsError(true); setMessage(err?.message ?? 'Activation failed.');
-    } finally { setActivating(false); }
+      console.error('Error activating automation:', err);
+      setIsError(true); 
+      setMessage(err?.message ?? 'Activation failed.');
+    } finally { 
+      setActivating(false); 
+    }
   };
 
   if (view === 'form' && draft) {
@@ -142,44 +160,77 @@ export default function WhatsAppAutomation() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
+    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
+      {/* Header & Tabs */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shrink-0">
             <Bot size={20} className="text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">WhatsApp Automation</h1>
-            <p className="text-secondary mt-0.5 text-sm">Visual node builder for automated WhatsApp sequences.</p>
+            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">WhatsApp Command Center</h1>
+            <p className="text-secondary mt-0.5 text-sm">Automated AI lead qualification, inbound parsing & sequence workflows.</p>
           </div>
         </div>
-        {hasPermission('manage_automation') && (
-          <button onClick={openCreate} className="neo-btn-primary inline-flex items-center gap-2">
-            <Plus size={16} /> New Automation
+
+        {/* Tab Switcher */}
+        <div className="flex items-center p-1 bg-slate-100/80 rounded-xl border border-shadow-darker/10">
+          <button
+            onClick={() => setActiveTab('inbox')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'inbox'
+                ? 'bg-white text-primary shadow-sm'
+                : 'text-secondary hover:text-primary-dark'
+            }`}
+          >
+            <Sparkles size={14} className="text-emerald-500" /> AI Lead Inbox & Qualification
           </button>
-        )}
+          <button
+            onClick={() => setActiveTab('workflows')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'workflows'
+                ? 'bg-white text-primary shadow-sm'
+                : 'text-secondary hover:text-primary-dark'
+            }`}
+          >
+            <Workflow size={14} className="text-teal-500" /> Workflow Sequences ({automations.length})
+          </button>
+        </div>
       </div>
 
-      {message && (
-        <div className={`neo-card !p-3 text-sm flex items-start gap-2 border ${isError ? 'bg-rose-500/5 border-rose-500/20 text-rose-400' : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'}`}>
-          {isError ? <AlertCircle size={16} className="mt-0.5 shrink-0" /> : <Check size={16} className="mt-0.5 shrink-0" />}
-          <span>{message}</span>
-          <button onClick={() => setMessage('')} className="ml-auto opacity-60 hover:opacity-100"><X size={14} /></button>
-        </div>
-      )}
-
-      {loading ? (
-        <div className="neo-card py-20 flex items-center justify-center text-secondary">
-          <Loader2 className="animate-spin mr-2" size={20} /> Loading automations...
-        </div>
-      ) : automations.length === 0 ? (
-        <div className="neo-card py-20 text-center space-y-4">
-          <Bot size={32} className="text-emerald-400 mx-auto opacity-50" />
-          <p className="text-lg font-semibold text-primary-dark">No automations yet</p>
-          <button onClick={openCreate} className="neo-btn-primary mx-auto inline-flex items-center gap-2"><Plus size={16}/> Create First Automation</button>
-        </div>
+      {activeTab === 'inbox' ? (
+        <WhatsAppAiInbox />
       ) : (
-        <div className="grid gap-4">
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-primary-dark">Automated Sequences</h2>
+            {hasPermission('manage_automation') && (
+              <button onClick={openCreate} className="neo-btn-primary inline-flex items-center gap-2 text-sm">
+                <Plus size={16} /> New Automation
+              </button>
+            )}
+          </div>
+
+          {message && (
+            <div className={`neo-card !p-3 text-sm flex items-start gap-2 border ${isError ? 'bg-rose-500/5 border-rose-500/20 text-rose-400' : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'}`}>
+              {isError ? <AlertCircle size={16} className="mt-0.5 shrink-0" /> : <Check size={16} className="mt-0.5 shrink-0" />}
+              <span>{message}</span>
+              <button onClick={() => setMessage('')} className="ml-auto opacity-60 hover:opacity-100"><X size={14} /></button>
+            </div>
+          )}
+
+          {loading ? (
+            <div className="neo-card py-20 flex items-center justify-center text-secondary">
+              <Loader2 className="animate-spin mr-2" size={20} /> Loading automations...
+            </div>
+          ) : automations.length === 0 ? (
+            <div className="neo-card py-20 text-center space-y-4">
+              <Bot size={32} className="text-emerald-400 mx-auto opacity-50" />
+              <p className="text-lg font-semibold text-primary-dark">No automations yet</p>
+              <button onClick={openCreate} className="neo-btn-primary mx-auto inline-flex items-center gap-2"><Plus size={16}/> Create First Automation</button>
+            </div>
+          ) : (
+            <div className="grid gap-4">
           {automations.map(a => {
             const pipelineName = allPipelines.find(p => p && p.id === a.pipelineId)?.name || a.pipelineId || 'Unknown Pipeline';
             const stageName = allPipelines.find(p => p && p.id === a.pipelineId)?.stages?.find(s => s && s.id === a.stageId)?.label || a.stageId || 'Unknown Stage';
@@ -214,6 +265,8 @@ export default function WhatsAppAutomation() {
               </div>
             );
           })}
+        </div>
+      )}
         </div>
       )}
     </div>

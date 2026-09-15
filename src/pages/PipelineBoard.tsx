@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download, ChevronLeft, ChevronRight, Bot, Sparkles, AlertTriangle } from 'lucide-react';
 import { auth, db, functions } from '../lib/firebase';
 import * as XLSX from 'xlsx';
 import type { Lead, Pipeline, PipelineStage } from '../types';
@@ -1044,15 +1044,63 @@ export default function PipelineBoard() {
                           setDragId(lead.id);
                         }} 
                         onDragEnd={() => setDragId('')} 
-                        className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow"
+                        className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow relative overflow-hidden"
                       >
+                        {/* AI Qualification Indicator Bar */}
+                        {lead.qualification_status === 'Qualified' && (
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400" />
+                        )}
+                        {lead.qualification_status === 'Needs Follow-up' && (
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-400" />
+                        )}
+                        {lead.qualification_status === 'Not Qualified' && (
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-red-400" />
+                        )}
+
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <div className="font-semibold text-primary-dark">{lead.name}</div>
-                            <div className="text-xs text-secondary mt-1">{lead.phone || lead.email || 'No contact yet'}</div>
+                            <div className="text-xs text-secondary mt-0.5">{lead.phone || lead.email || 'No contact yet'}</div>
                           </div>
                           <GripVertical size={16} className="text-secondary shrink-0" />
                         </div>
+
+                        {/* AI Badges & Qualification Tags */}
+                        {(lead.qualification_status || lead.urgency || lead.flag_for_review) && (
+                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                            {lead.qualification_status === 'Qualified' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                                <Sparkles size={10} /> Qualified
+                              </span>
+                            )}
+                            {lead.qualification_status === 'Needs Follow-up' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                                <Bot size={10} /> Needs Follow-up
+                              </span>
+                            )}
+                            {lead.qualification_status === 'Not Qualified' && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20">
+                                Not Qualified
+                              </span>
+                            )}
+                            {lead.urgency === 'high' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-600 border border-red-500/20">
+                                Urgent
+                              </span>
+                            )}
+                            {lead.flag_for_review && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-yellow-500/10 text-yellow-700 border border-yellow-500/20" title="Low confidence or ambiguous">
+                                <AlertTriangle size={10} /> Review
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {lead.requirement && (
+                          <div className="mt-2 text-xs bg-shadow-darker/5 p-2 rounded-xl text-primary-dark line-clamp-2 border border-shadow-darker/10">
+                            <span className="text-secondary font-medium">Req: </span>{lead.requirement}
+                          </div>
+                        )}
 
                         <div className="mt-3 space-y-1 text-xs text-secondary">
                           <div>{lead.source}</div>
@@ -1060,7 +1108,7 @@ export default function PipelineBoard() {
                           <div>{formatDate(lead.created_at)}</div>
                         </div>
 
-                        <div className="mt-4 flex items-center justify-between gap-2">
+                        <div className="mt-4 flex items-center justify-between gap-2 pt-2 border-t border-shadow-darker/10">
                           <Link to={`/leads/${lead.id}`} className="inline-flex items-center gap-1 text-primary-dark font-semibold text-sm hover:underline">
                             Open <ArrowRight size={13} />
                           </Link>

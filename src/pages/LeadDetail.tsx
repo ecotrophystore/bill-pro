@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { collection, doc, onSnapshot, query, where, updateDoc, addDoc } from 'firebase/firestore';
-import { ArrowLeft, BadgeCheck, CalendarDays, Loader2, Mail, MessageSquare, Phone, Save, Send } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CalendarDays, Loader2, Mail, MessageSquare, Phone, Save, Send, Sparkles, Bot, AlertTriangle, CheckCircle2, DollarSign, Clock, MapPin, Target } from 'lucide-react';
 import { db, functions } from '../lib/firebase';
 import type { Lead, LeadActivity, MessageTemplate, Pipeline, User } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
@@ -445,6 +445,128 @@ export default function LeadDetail() {
           </div>
         </div>
       </div>
+
+      {/* AI Qualification & Intelligence Card */}
+      {(lead.qualification_status || lead.requirement || lead.suggested_reply || lead.flag_for_review) && (
+        <div className="neo-card space-y-4 border border-primary/20 bg-gradient-to-br from-surface via-surface to-primary/5 relative overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-shadow-darker/10 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary-dark">
+                <Sparkles size={18} />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-primary-dark">AI Sales Qualification & Intelligence</h2>
+                <p className="text-xs text-secondary">Extracted automatically from incoming WhatsApp conversation</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {lead.qualification_status === 'Qualified' && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                  <CheckCircle2 size={13} /> Qualified
+                </span>
+              )}
+              {lead.qualification_status === 'Needs Follow-up' && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
+                  <Bot size={13} /> Needs Follow-up
+                </span>
+              )}
+              {lead.qualification_status === 'Not Qualified' && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20">
+                  Not Qualified
+                </span>
+              )}
+
+              {lead.urgency && (
+                <span className={`px-2.5 py-1 rounded-full text-xs font-bold capitalize border ${
+                  lead.urgency === 'high'
+                    ? 'bg-rose-500/10 text-rose-700 border-rose-500/20'
+                    : lead.urgency === 'medium'
+                    ? 'bg-amber-500/10 text-amber-700 border-amber-500/20'
+                    : 'bg-secondary/10 text-secondary border-secondary/20'
+                }`}>
+                  Urgency: {lead.urgency}
+                </span>
+              )}
+
+              {typeof lead.confidence_score === 'number' && (
+                <span className="text-xs text-secondary font-medium px-2.5 py-1 rounded-full bg-shadow-darker/5 border border-shadow-darker/10">
+                  Confidence: {Math.round(lead.confidence_score * 100)}%
+                </span>
+              )}
+            </div>
+          </div>
+
+          {lead.flag_for_review && (
+            <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-800 dark:text-yellow-300 text-xs flex items-center gap-2">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span><strong>Flagged for Review:</strong> Ambiguous intent or low AI confidence score. Review conversation carefully before proceeding.</span>
+            </div>
+          )}
+
+          {lead.qualification_reason && (
+            <div className="text-xs text-secondary bg-shadow-darker/5 p-3 rounded-xl border border-shadow-darker/10">
+              <span className="font-semibold text-primary-dark">Qualification Analysis: </span>
+              {lead.qualification_reason}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            {lead.requirement && (
+              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
+                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
+                  <Target size={12} /> Requirement
+                </div>
+                <div className="font-semibold text-primary-dark text-sm">{lead.requirement}</div>
+              </div>
+            )}
+            {lead.budget && (
+              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
+                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
+                  <DollarSign size={12} /> Budget
+                </div>
+                <div className="font-semibold text-primary-dark text-sm">{lead.budget}</div>
+              </div>
+            )}
+            {lead.timeline && (
+              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
+                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
+                  <Clock size={12} /> Timeline
+                </div>
+                <div className="font-semibold text-primary-dark text-sm">{lead.timeline}</div>
+              </div>
+            )}
+            {lead.location && (
+              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
+                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
+                  <MapPin size={12} /> Location
+                </div>
+                <div className="font-semibold text-primary-dark text-sm">{lead.location}</div>
+              </div>
+            )}
+          </div>
+
+          {lead.next_action && (
+            <div className="text-xs bg-primary/5 p-3 rounded-xl border border-primary/15 text-primary-dark">
+              <strong>Recommended Next Action:</strong> {lead.next_action}
+            </div>
+          )}
+
+          {lead.suggested_reply && (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-primary-dark">AI Drafted Reply (Awaiting Approval):</span>
+                <Link to="/whatsapp-automation" className="text-xs text-primary font-semibold hover:underline">
+                  Open in WhatsApp Inbox →
+                </Link>
+              </div>
+              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 text-xs text-secondary whitespace-pre-wrap font-sans">
+                {lead.suggested_reply}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="neo-card space-y-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">

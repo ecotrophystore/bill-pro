@@ -361,6 +361,17 @@ export interface Lead {
   lastCustomerReplyAt?: Timestamp;
   whatsappOptedOut?: boolean;
   leadStatus?: 'active' | 'won' | 'lost';
+  // AI Qualification & WhatsApp Inbound Analysis
+  qualification_status?: 'Qualified' | 'Not Qualified' | 'Needs Follow-up';
+  qualification_reason?: string;
+  confidence_score?: number;
+  urgency?: 'low' | 'medium' | 'high';
+  requirement?: string;
+  budget?: string;
+  timeline?: string;
+  flag_for_review?: boolean;
+  suggested_reply?: string;
+  next_action?: string;
 }
 
 export interface LeadIntakeEvent {
@@ -429,6 +440,8 @@ export interface MessageQueueItem {
   deliveredAt?: Timestamp;
   readAt?: Timestamp;
   failedAt?: Timestamp;
+  recipient?: string;
+  phone?: string;
 }
 
 export interface PipelineStage {

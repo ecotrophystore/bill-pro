@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
-import { AlertCircle, Loader2, RefreshCw, Send } from 'lucide-react';
+import { collection, onSnapshot, orderBy, query, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { AlertCircle, Loader2, RefreshCw, Send, CheckCircle2 } from 'lucide-react';
 import { db } from '../lib/firebase';
 import type { MessageQueueItem } from '../types';
 
@@ -17,6 +17,8 @@ export default function MessageQueue() {
   const [items, setItems] = useState<MessageQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState('');
 
   useEffect(() => {
     if (!db) return;
@@ -42,6 +44,87 @@ export default function MessageQueue() {
     return { queued, sent, failed };
   }, [items]);
 
+  const handleDispatchQueue = async () => {
+    if (!db) return;
+    const queuedItems = items.filter(i => i.status === 'queued');
+    if (queuedItems.length === 0) return;
+
+    setDispatching(true);
+    setDispatchResult('');
+    let successCount = 0;
+    let failCount = 0;
+
+    const token = "EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD";
+    const phoneId = "1292217613971980";
+
+    for (const item of queuedItems) {
+      try {
+        let recipientPhone = item.recipient || (item as any).phone;
+        if (!recipientPhone && item.lead_id) {
+          try {
+            const leadSnap = await getDoc(doc(db, 'leads', item.lead_id));
+            if (leadSnap.exists()) {
+              recipientPhone = leadSnap.data()?.phone;
+            }
+          } catch (e) {
+            console.warn('Could not fetch lead doc:', e);
+          }
+        }
+
+        if (!recipientPhone) {
+          recipientPhone = '918148936699';
+        }
+
+        const cleanDigits = String(recipientPhone).replace(/\D/g, '');
+        const finalPhone = cleanDigits.length === 10 ? `91${cleanDigits}` : cleanDigits;
+
+        const templateName = 'hello_world';
+
+        const res = await fetch(`https://graph.facebook.com/v18.0/${phoneId}/messages`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: finalPhone,
+            type: 'template',
+            template: {
+              name: templateName,
+              language: { code: 'en_US' }
+            }
+          })
+        });
+
+        const data = await res.json();
+        if (data.messages && data.messages[0]?.id) {
+          await updateDoc(doc(db, 'message_queue', item.id), {
+            status: 'sent',
+            metaMessageId: data.messages[0].id,
+            sent_at: serverTimestamp(),
+            updated_at: serverTimestamp()
+          });
+          successCount++;
+        } else {
+          await updateDoc(doc(db, 'message_queue', item.id), {
+            status: 'failed',
+            error: data.error?.message || 'Meta API delivery error',
+            updated_at: serverTimestamp()
+          });
+          failCount++;
+        }
+      } catch (err: any) {
+        console.error('Failed to dispatch item:', item.id, err);
+        failCount++;
+      }
+    }
+
+    setDispatching(false);
+    setDispatchResult(`Processed: ${successCount} sent successfully, ${failCount} failed.`);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -65,6 +148,13 @@ export default function MessageQueue() {
         </div>
       </div>
 
+      {dispatchResult && (
+        <div className="neo-card !p-3 bg-success/5 border border-success/20 text-sm text-success flex items-center gap-2">
+          <CheckCircle2 size={16} />
+          <span>{dispatchResult}</span>
+        </div>
+      )}
+
       {error && (
         <div className="neo-card !p-3 bg-warning/5 border border-warning/20 text-sm text-primary-dark flex items-start gap-2">
           <AlertCircle size={16} className="mt-0.5 text-warning" />
@@ -78,9 +168,21 @@ export default function MessageQueue() {
             <h2 className="text-lg font-bold text-primary-dark flex items-center gap-2"><Send size={18} /> Queue log</h2>
             <p className="text-sm text-secondary">Every queued message stays visible here for quick review.</p>
           </div>
-          <button onClick={() => window.location.reload()} className="neo-btn !px-3 !py-2 flex items-center gap-2 text-sm">
-            <RefreshCw size={15} /> Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {stats.queued > 0 && (
+              <button 
+                onClick={handleDispatchQueue} 
+                disabled={dispatching}
+                className="neo-btn-primary !px-4 !py-2 flex items-center gap-2 text-sm"
+              >
+                {dispatching ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+                Dispatch Pending ({stats.queued})
+              </button>
+            )}
+            <button onClick={() => window.location.reload()} className="neo-btn !px-3 !py-2 flex items-center gap-2 text-sm">
+              <RefreshCw size={15} /> Refresh
+            </button>
+          </div>
         </div>
 
         {loading ? (

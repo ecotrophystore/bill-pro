@@ -1,6 +1,7 @@
 import { httpsCallable } from 'firebase/functions';
 import { auth, functions, db } from './firebase';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { runAutomationForLead } from './whatsappAutomationRunner';
 
 export async function testLeadIngestHttp(payload: Record<string, any>) {
   if (!functions || !db) {
@@ -28,16 +29,25 @@ export async function testLeadIngestHttp(payload: Record<string, any>) {
       throw new Error(data?.error || data?.message || 'Test ingest failed');
     }
 
+    if (data?.leadId) {
+      runAutomationForLead(data.leadId, payload).catch(e => console.error('[Automation error]:', e));
+    }
+
     return data;
   } catch (error: any) {
     console.warn("Cloud function testLeadIngest failed, attempting client-side save fallback:", error);
     try {
-      const leadRef = await addDoc(collection(db, 'leads'), {
+      const leadData = {
         ...payload,
         status: 'new',
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),
-      });
+      };
+      const leadRef = await addDoc(collection(db, 'leads'), leadData);
+      
+      // Run WhatsApp automation immediately
+      runAutomationForLead(leadRef.id, leadData).catch(e => console.error('[Automation error]:', e));
+
       return { ok: true, leadId: leadRef.id, status: 'fallback_success' };
     } catch (fallbackError: any) {
       console.error("Client-side fallback also failed:", fallbackError);
