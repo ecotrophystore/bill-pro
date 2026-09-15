@@ -41,6 +41,8 @@ import {
   Eye,
   Send,
   MessageSquare,
+  StickyNote,
+  BellRing,
 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
@@ -53,6 +55,7 @@ import {
 } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
+import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 
 type StageDraft = {
   id: string;
@@ -93,6 +96,46 @@ function formatDate(value: any) {
   if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toLocaleDateString('en-IN');
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-IN');
+}
+
+function getReminderBadge(reminder: any): { text: string; tone: string; isOverdue: boolean } | null {
+  if (!reminder || !reminder.datetime) return null;
+  const d =
+    typeof reminder.datetime.toDate === 'function'
+      ? reminder.datetime.toDate()
+      : typeof reminder.datetime.seconds === 'number'
+      ? new Date(reminder.datetime.seconds * 1000)
+      : new Date(reminder.datetime);
+  if (Number.isNaN(d.getTime())) return null;
+
+  const diffMs = d.getTime() - Date.now();
+  const diffMins = Math.round(diffMs / 60000);
+
+  if (diffMins < 0) {
+    const minsAgo = Math.abs(diffMins);
+    const timeStr = minsAgo < 60 ? `${minsAgo}m ago` : `${Math.round(minsAgo / 60)}h ago`;
+    return {
+      text: `🔔 Overdue (${timeStr})`,
+      tone: 'bg-rose-100 text-rose-900 border-rose-300 font-bold animate-pulse',
+      isOverdue: true,
+    };
+  }
+
+  if (diffMins < 60) {
+    return {
+      text: `🔔 In ${diffMins}m`,
+      tone: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+      isOverdue: false,
+    };
+  }
+
+  const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  const isToday = d.toDateString() === new Date().toDateString();
+  return {
+    text: `🔔 ${isToday ? 'Today' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} ${timeStr}`,
+    tone: 'bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold',
+    isOverdue: false,
+  };
 }
 
 function normalizePipeline(pipeline: any): Pipeline {
@@ -152,6 +195,17 @@ export default function PipelineBoard() {
     lead: null,
     fromStage: { id: '', label: '' },
     toStage: { id: '', label: '' },
+  });
+
+  // Notes & Reminders Drawer State
+  const [notesDrawerState, setNotesDrawerState] = useState<{
+    isOpen: boolean;
+    lead: Lead | null;
+    stageName?: string;
+  }>({
+    isOpen: false,
+    lead: null,
+    stageName: '',
   });
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -767,14 +821,44 @@ export default function PipelineBoard() {
                             )}
                           </div>
 
+                          {/* Active Reminder Banner (if any) */}
+                          {lead.active_reminder && (() => {
+                            const badge = getReminderBadge(lead.active_reminder);
+                            if (!badge) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })}
+                                className={`w-full text-left text-[10px] px-2 py-1 rounded-lg border flex items-center justify-between transition-all hover:scale-[1.01] ${badge.tone}`}
+                                title={`Active reminder: ${lead.active_reminder.title || ''}`}
+                              >
+                                <span className="truncate">{badge.text}</span>
+                                <Clock size={11} className="shrink-0 ml-1 opacity-80" />
+                              </button>
+                            );
+                          })()}
+
                           {/* Card Footer Actions */}
-                          <div className="flex items-center justify-between pt-2 border-t border-shadow-darker/10">
-                            <Link
-                              to={`/leads/${lead.id}`}
-                              className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1"
-                            >
-                              <Eye size={12} /> View 360°
-                            </Link>
+                          <div className="flex items-center justify-between pt-2 border-t border-shadow-darker/10 gap-1.5 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              <Link
+                                to={`/leads/${lead.id}`}
+                                className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1"
+                              >
+                                <Eye size={12} /> 360°
+                              </Link>
+
+                              {/* Quick Notes & Reminders Drawer Trigger */}
+                              <button
+                                type="button"
+                                onClick={() => setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })}
+                                className="text-[11px] font-bold text-slate-700 hover:text-primary transition-colors flex items-center gap-1 bg-slate-100 hover:bg-primary/10 px-2 py-0.5 rounded-md border border-shadow-darker/5"
+                                title="Open Notes, Team Mentions & Reminder Alarms"
+                              >
+                                <StickyNote size={12} className={lead.notes_count ? 'text-primary' : 'text-slate-500'} />
+                                <span>{lead.notes_count ? `${lead.notes_count} Notes` : '+ Note'}</span>
+                              </button>
+                            </div>
 
                             {/* Quick Stage Move Dropdown */}
                             <select
@@ -823,6 +907,20 @@ export default function PipelineBoard() {
         onSuccess={(res) => {
           setMessage(res.message);
         }}
+      />
+
+      {/* Pipeline Stage Notes, Multi-Member Mentions & Reminder Drawer */}
+      <LeadNotesDrawer
+        isOpen={notesDrawerState.isOpen}
+        lead={notesDrawerState.lead}
+        stageName={notesDrawerState.stageName}
+        onClose={() =>
+          setNotesDrawerState({
+            isOpen: false,
+            lead: null,
+            stageName: '',
+          })
+        }
       />
     </div>
   );

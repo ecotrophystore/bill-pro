@@ -32,6 +32,7 @@ import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
+import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
 import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
 
 interface SubMenuItem {
@@ -161,6 +162,9 @@ export function AppLayout() {
     <div className="min-h-screen flex bg-surface text-secondary">
       {/* Global Omnichannel Search Modal */}
       <GlobalSearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
+
+      {/* Global Live Reminder Audio Alarm Modal */}
+      <ActiveAlarmModal />
 
       {/* Mobile Dark Backdrop Overlay */}
       {mobileMenuOpen && (

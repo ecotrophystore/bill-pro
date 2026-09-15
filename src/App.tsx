@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
+import { ReminderAlarmProvider } from './contexts/ReminderAlarmContext';
 import { AppLayout } from './components/Layout/AppLayout';
 import Login from './pages/Login';
 
@@ -51,9 +52,10 @@ export default function App() {
   return (
     <AuthProvider>
       <SettingsProvider>
-        <BrowserRouter>
-          <Suspense fallback={<RouteFallback />}>
-            <Routes>
+        <ReminderAlarmProvider>
+          <BrowserRouter>
+            <Suspense fallback={<RouteFallback />}>
+              <Routes>
               <Route path="/login" element={<Login />} />
 
               <Route
@@ -109,6 +111,7 @@ export default function App() {
             </Routes>
           </Suspense>
         </BrowserRouter>
+        </ReminderAlarmProvider>
       </SettingsProvider>
     </AuthProvider>
   );

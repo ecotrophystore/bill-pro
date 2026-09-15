@@ -29,6 +29,9 @@ import {
   Check,
   X,
   ExternalLink,
+  StickyNote,
+  Bell,
+  Plus,
 } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import {
@@ -46,6 +49,7 @@ import {
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner';
+import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 import { openWhatsAppWebDirect } from '../services/stageNotificationService';
 
@@ -105,7 +109,8 @@ export default function LeadDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'conversation' | 'history' | 'quotation'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'notes' | 'conversation' | 'history' | 'quotation'>('details');
+  const [notesDrawerOpen, setNotesDrawerOpen] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [composerText, setComposerText] = useState('');
   const [dismissedReassign, setDismissedReassign] = useState(false);
@@ -437,6 +442,16 @@ export default function LeadDetail() {
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
             type="button"
+            onClick={() => setNotesDrawerOpen(true)}
+            className="neo-btn text-xs px-3.5 py-1.5 font-bold flex items-center gap-1.5 text-primary-dark hover:bg-primary/10"
+            title="Open Notes, Team Mentions & Reminder Alarms"
+          >
+            <StickyNote size={14} className={lead.notes_count ? 'text-primary' : 'text-secondary'} />
+            <span>Notes & Reminders {lead.notes_count ? `(${lead.notes_count})` : ''}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleConvertToCustomer}
             className="neo-btn text-xs px-3.5 py-1.5 font-bold flex items-center gap-1.5 text-secondary hover:text-primary-dark"
           >
@@ -613,6 +628,16 @@ export default function LeadDetail() {
           }`}
         >
           Customer & Order Details
+        </button>
+        <button
+          onClick={() => setActiveTab('notes')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            activeTab === 'notes'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+          }`}
+        >
+          <StickyNote size={14} /> Notes & Reminders {lead.notes_count ? `(${lead.notes_count})` : ''}
         </button>
         <button
           onClick={() => setActiveTab('conversation')}
@@ -823,7 +848,51 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* TAB 2: Omnichannel Conversation Feed (Rule 10) */}
+      {/* TAB 2: Notes & Reminders Full Workspace */}
+      {activeTab === 'notes' && (
+        <div className="space-y-6">
+          <div className="neo-card space-y-4">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3 flex-wrap gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+                  <StickyNote size={16} className="text-primary" />
+                  Notes, Team Mentions & Follow-up Reminders
+                </h2>
+                <p className="text-xs text-secondary mt-0.5">
+                  Keep track of client requirements, tag team members (@mentions), set audio alarms, and sync follow-ups to calendar.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setNotesDrawerOpen(true)}
+                className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+              >
+                <Plus size={14} /> Open Notes & Audio Dictation Drawer
+              </button>
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-50/70 border border-shadow-darker/10 text-center space-y-3">
+              <StickyNote size={36} className="mx-auto text-primary opacity-60" />
+              <div className="max-w-md mx-auto space-y-1">
+                <h3 className="text-sm font-bold text-primary-dark">Collaborative Stage Notes & Alarms</h3>
+                <p className="text-xs text-secondary leading-relaxed">
+                  Use the Slide-over Drawer to compose notes with @member autocomplete, live audio alarms, action checklists, and 1-click Google Calendar sync.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setNotesDrawerOpen(true)}
+                className="neo-btn text-xs px-5 py-2 font-bold inline-flex items-center gap-2 text-primary shadow-sm hover:bg-primary/10"
+              >
+                <StickyNote size={14} /> View / Add Notes for {lead.name}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: Omnichannel Conversation Feed (Rule 10) */}
       {activeTab === 'conversation' && (
         <div className="space-y-6">
           <div className="neo-card space-y-4">
@@ -1098,6 +1167,14 @@ export default function LeadDetail() {
         onSuccess={(res) => {
           setFeedback(res.message);
         }}
+      />
+
+      {/* Slide-over Notes & Reminders Drawer */}
+      <LeadNotesDrawer
+        isOpen={notesDrawerOpen}
+        lead={lead}
+        stageName={currentStageLabel}
+        onClose={() => setNotesDrawerOpen(false)}
       />
     </div>
   );

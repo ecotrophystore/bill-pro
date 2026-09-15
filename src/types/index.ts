@@ -458,6 +458,70 @@ export interface Lead {
   last_message?: string;
   last_message_channel?: 'whatsapp' | 'facebook_messenger' | 'facebook_lead_ad' | 'instagram' | 'email';
   last_message_time?: any;
+  // Notes & Reminder metadata
+  notes_count?: number;
+  active_reminder?: {
+    note_id?: string;
+    datetime: any;
+    title: string;
+    status: ReminderStatus;
+    priority?: NotePriority;
+    alarm_enabled?: boolean;
+  };
+}
+
+export type NotePriority = 'low' | 'medium' | 'high' | 'urgent';
+export type NoteCategory = 'general' | 'call' | 'whatsapp' | 'meeting' | 'task' | 'stage_blocker';
+export type ReminderStatus = 'pending' | 'triggered' | 'snoozed' | 'completed' | 'dismissed';
+
+export interface TaggedUser {
+  id: string;
+  name: string;
+  email?: string;
+  role?: string;
+}
+
+export interface NoteChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+export interface LeadNote {
+  id: string;
+  lead_id: string;
+  lead_name?: string;
+  company?: string;
+  phone?: string;
+  pipeline_id?: string;
+  stage_id?: string;
+  stage_name?: string;
+  author_id: string;
+  author_name: string;
+  author_email?: string;
+  content: string;
+  category: NoteCategory;
+  priority: NotePriority;
+  is_pinned?: boolean;
+  
+  // Tagged Team Members
+  tagged_users: TaggedUser[];
+  
+  // Reminder & Alarm Specs
+  has_reminder: boolean;
+  reminder_datetime?: any; // Firestore Timestamp, Date, or ISO string
+  reminder_status?: ReminderStatus;
+  alarm_enabled?: boolean;
+  alarm_sound?: 'chime' | 'digital' | 'bell' | 'urgent';
+  snoozed_until?: any;
+  completed_at?: any;
+  completed_by?: string;
+  
+  // Checklist Action Items
+  checklist?: NoteChecklistItem[];
+
+  created_at: any;
+  updated_at?: any;
 }
 
 export interface LeadIntakeEvent {
