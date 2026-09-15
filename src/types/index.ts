@@ -28,14 +28,21 @@ export interface User {
 export interface Customer {
   id: string;
   name: string;
-  gst_number: string;
-  billing_address: string;
+  gst_number?: string;
+  billing_address?: string;
   shipping_address?: string;
   email?: string;
   phone?: string;
-  type: 'business' | 'individual'; // New: categorizing customer type
+  whatsapp_number?: string;
+  facebook_id?: string;
+  instagram_id?: string;
+  type?: 'business' | 'individual'; // New: categorizing customer type
+  customer_type?: 'new' | 'existing' | 'repeat';
+  total_enquiries_count?: number;
+  total_orders_count?: number;
   notes?: string;
   created_at: Timestamp;
+  updated_at?: Timestamp;
 }
 
 export interface Product {
@@ -358,7 +365,7 @@ export interface PipelineRule {
   description?: string;
   is_active: boolean;
   priority: number;
-  field: 'required_quantity' | 'value' | 'customer_type' | 'source' | 'event_type' | 'category' | 'location' | 'urgency' | 'is_repeat_customer';
+  field: 'required_quantity' | 'value' | 'customer_type' | 'source' | 'event_type' | 'category' | 'location' | 'urgency' | 'is_repeat_customer' | 'budget';
   operator: 'equals' | 'greater_than_or_equal' | 'less_than_or_equal' | 'between' | 'in' | 'contains';
   value: any;
   secondary_value?: any;
@@ -435,6 +442,22 @@ export interface Lead {
   flag_for_review?: boolean;
   suggested_reply?: string;
   next_action?: string;
+  // Customer & Meta Omnichannel tracking
+  customer_id?: string;
+  is_repeat_customer?: boolean;
+  customer_lifecycle?: 'new_customer' | 'existing_customer' | 'repeat_customer';
+  whatsapp_number?: string;
+  facebook_profile?: string;
+  instagram_profile?: string;
+  campaign_name?: string;
+  ad_name?: string;
+  ad_set_name?: string;
+  event_type?: string;
+  trophy_type?: string;
+  customer_type?: string;
+  last_message?: string;
+  last_message_channel?: 'whatsapp' | 'facebook_messenger' | 'facebook_lead_ad' | 'instagram' | 'email';
+  last_message_time?: any;
 }
 
 export interface LeadIntakeEvent {
@@ -566,6 +589,14 @@ export const DEFAULT_QUANTITY_PIPELINES: Pipeline[] = [
     id: 'bulk_order',
     name: 'Bulk Order Pipeline',
     scenario: '100+ Pieces',
+    is_default: false,
+    stages: STANDARD_CRM_STAGES,
+    created_at: new Date() as any,
+  },
+  {
+    id: 'unclassified',
+    name: 'Unclassified / Requirement Pending',
+    scenario: 'Requirement Pending',
     is_default: false,
     stages: STANDARD_CRM_STAGES,
     created_at: new Date() as any,

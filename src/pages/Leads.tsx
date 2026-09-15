@@ -151,8 +151,26 @@ export default function Leads() {
                 {filtered.map((lead) => (
                   <tr key={lead.id} className="border-b border-shadow-darker/5">
                     <td className="py-4 pr-4">
-                      <div className="font-semibold text-primary-dark">{lead.name}</div>
-                      <div className="text-xs text-secondary">{lead.phone || '-'} {lead.email ? `• ${lead.email}` : ''}</div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-primary-dark">{lead.name}</span>
+                        {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200">
+                            Repeat
+                          </span>
+                        ) : lead.customer_lifecycle === 'existing_customer' ? (
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
+                            Existing
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            New
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-secondary mt-0.5">
+                        {lead.phone || '-'} {lead.email ? `• ${lead.email}` : ''}{' '}
+                        {lead.required_quantity ? `• 🎯 ${lead.required_quantity} pcs` : ''}
+                      </div>
                     </td>
                     <td className="py-4 pr-4 text-secondary">{lead.source}</td>
                     <td className="py-4 pr-4 capitalize">{lead.platform}</td>

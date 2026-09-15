@@ -3,6 +3,7 @@ import { Database, Save, Loader2, Copy, Check, ExternalLink, AlertCircle, CheckC
 import { MetaStatusCard, type ConnectionStatus } from './MetaStatusCard';
 import { MetaSecretSetupModal } from './MetaSecretSetupModal';
 import { SendTestMessageModal } from './SendTestMessageModal';
+import { MetaInboundSimulator } from './MetaInboundSimulator';
 import { useAuth } from '../../contexts/AuthContext';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../../lib/firebase';
@@ -601,6 +602,9 @@ export default function MetaIntegrationPanel() {
               onRefresh={fetchStatus}
             />
           </Suspense>
+
+          {/* Meta Inbound Lead Simulator (Live Tester) */}
+          <MetaInboundSimulator />
         </div>
 
         {/* ── Right: Status (35%) ────────────────────────────────────────────── */}

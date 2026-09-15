@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Check,
   X,
+  ExternalLink,
 } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import {
@@ -46,6 +47,7 @@ import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
+import { openWhatsAppWebDirect } from '../services/stageNotificationService';
 
 type LeadFormState = {
   name: string;
@@ -103,7 +105,9 @@ export default function LeadDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'quotation'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'conversation' | 'history' | 'quotation'>('details');
+  const [messages, setMessages] = useState<any[]>([]);
+  const [composerText, setComposerText] = useState('');
   const [dismissedReassign, setDismissedReassign] = useState(false);
   const { hasPermission } = useCRMPermission();
 
@@ -197,11 +201,36 @@ export default function LeadDetail() {
       }
     );
 
+    // Load omnichannel messages
+    const unsubMessages = onSnapshot(
+      query(collection(db, 'messages'), where('leadId', '==', id)),
+      (snap) => {
+        const msgs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        msgs.sort((a: any, b: any) => {
+          const at =
+            typeof a.created_at?.toDate === 'function'
+              ? a.created_at.toDate().getTime()
+              : (a.created_at as any)?.seconds
+              ? (a.created_at as any).seconds * 1000
+              : 0;
+          const bt =
+            typeof b.created_at?.toDate === 'function'
+              ? b.created_at.toDate().getTime()
+              : (b.created_at as any)?.seconds
+              ? (b.created_at as any).seconds * 1000
+              : 0;
+          return at - bt;
+        });
+        setMessages(msgs);
+      }
+    );
+
     return () => {
       unsubLead();
       unsubPipelines();
       unsubUsers();
       unsubActivities();
+      unsubMessages();
     };
   }, [id]);
 
@@ -437,12 +466,40 @@ export default function LeadDetail() {
       <div className="neo-card space-y-4 border border-shadow-darker/10">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-xs font-bold text-primary tracking-wide uppercase">
                 {activePipeline.name}
               </span>
               <span>•</span>
               <span className="text-xs text-secondary">Created {formatDate(lead.created_at)}</span>
+
+              {/* Customer Lifecycle Badge (Rule 2) */}
+              {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 shadow-xs">
+                  Repeat Customer
+                </span>
+              ) : lead.customer_lifecycle === 'existing_customer' ? (
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-xs">
+                  Existing Customer
+                </span>
+              ) : (
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
+                  New Customer
+                </span>
+              )}
+
+              {/* Lead Source Badge */}
+              {lead.source && (
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                  {lead.source}
+                </span>
+              )}
+
+              {lead.campaign_name && (
+                <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                  Campaign: {lead.campaign_name}
+                </span>
+              )}
             </div>
             <h1 className="text-3xl font-extrabold text-primary-dark mt-1">{lead.name}</h1>
             {lead.company && (
@@ -475,9 +532,26 @@ export default function LeadDetail() {
 
         {/* Quick Contact & Metrics Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-shadow-darker/10 text-xs">
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
-            <span className="text-secondary font-medium block">Phone</span>
-            <span className="font-bold text-primary-dark">{lead.phone || 'No phone'}</span>
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5 flex items-center justify-between">
+            <div>
+              <span className="text-secondary font-medium block">Phone</span>
+              <span className="font-bold text-primary-dark">{lead.phone || 'No phone'}</span>
+            </div>
+            {lead.phone && (
+              <button
+                type="button"
+                onClick={() =>
+                  openWhatsAppWebDirect(
+                    lead.phone || '',
+                    `Hi ${lead.name}, regarding your enquiry with EcoTrophy:`
+                  )
+                }
+                className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 border border-emerald-200 transition-colors"
+                title="Chat on WhatsApp Web"
+              >
+                <ExternalLink size={14} />
+              </button>
+            )}
           </div>
           <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
             <span className="text-secondary font-medium block">Quantity</span>
@@ -528,8 +602,8 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* Tab Navigation (Details Form vs Activity & History) */}
-      <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+      {/* Tab Navigation */}
+      <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2 flex-wrap">
         <button
           onClick={() => setActiveTab('details')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
@@ -539,6 +613,16 @@ export default function LeadDetail() {
           }`}
         >
           Customer & Order Details
+        </button>
+        <button
+          onClick={() => setActiveTab('conversation')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            activeTab === 'conversation'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+          }`}
+        >
+          <MessageSquare size={14} /> Omnichannel Conversation ({messages.length})
         </button>
         <button
           onClick={() => setActiveTab('history')}
@@ -739,7 +823,166 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* TAB 2: Stage Transition & Notification History Stream */}
+      {/* TAB 2: Omnichannel Conversation Feed (Rule 10) */}
+      {activeTab === 'conversation' && (
+        <div className="space-y-6">
+          <div className="neo-card space-y-4">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3 flex-wrap gap-2">
+              <div>
+                <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+                  <MessageSquare size={16} className="text-primary" />
+                  Meta Omnichannel Conversation History
+                </h2>
+                <p className="text-xs text-secondary mt-0.5">
+                  Unified communication timeline across WhatsApp, Facebook Messenger, Lead Ads, and Instagram.
+                </p>
+              </div>
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {messages.length} messages
+              </span>
+            </div>
+
+            {/* Message Stream */}
+            {messages.length === 0 ? (
+              <div className="py-12 text-center text-xs text-secondary space-y-2">
+                <MessageSquare size={32} className="mx-auto text-secondary/40 animate-pulse" />
+                <p className="font-semibold text-primary-dark">No Meta messages recorded for this lead yet.</p>
+                <p className="text-[11px] text-secondary max-w-sm mx-auto">
+                  Enquiries received through WhatsApp Webhooks, Facebook Messenger, Instagram, or Lead Ads will automatically appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3.5 max-h-[450px] overflow-y-auto p-2 bg-slate-50/50 rounded-xl border border-shadow-darker/5">
+                {messages.map((m: any, idx: number) => {
+                  const isInbound = m.direction === 'inbound';
+                  const platformLabel =
+                    m.platform === 'whatsapp'
+                      ? 'WhatsApp'
+                      : m.platform === 'facebook_messenger'
+                      ? 'Messenger'
+                      : m.platform === 'facebook_lead_ad'
+                      ? 'Lead Ad'
+                      : m.platform === 'instagram'
+                      ? 'Instagram'
+                      : m.platform || 'Direct';
+
+                  const badgeColor =
+                    m.platform === 'whatsapp'
+                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                      : m.platform === 'facebook_messenger'
+                      ? 'bg-sky-100 text-sky-800 border-sky-200'
+                      : m.platform === 'facebook_lead_ad'
+                      ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
+                      : 'bg-rose-100 text-rose-800 border-rose-200';
+
+                  return (
+                    <div
+                      key={m.id || idx}
+                      className={`flex flex-col ${isInbound ? 'items-start' : 'items-end'} text-xs`}
+                    >
+                      <div className="flex items-center gap-2 mb-1 px-1 text-[10px] text-secondary">
+                        <span className={`px-1.5 py-0.2 rounded font-extrabold uppercase border ${badgeColor}`}>
+                          {platformLabel}
+                        </span>
+                        <span className="font-bold text-slate-700">{isInbound ? m.senderName || lead.name : 'EcoTrophy Team'}</span>
+                        <span>•</span>
+                        <span>{formatDate(m.created_at)}</span>
+                      </div>
+
+                      <div
+                        className={`max-w-lg p-3.5 rounded-2xl border shadow-xs whitespace-pre-wrap leading-relaxed ${
+                          isInbound
+                            ? 'bg-white text-slate-800 border-shadow-darker/10 rounded-tl-none'
+                            : 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none'
+                        }`}
+                      >
+                        {m.content}
+                      </div>
+
+                      {m.campaignName && (
+                        <span className="text-[10px] text-secondary mt-0.5 px-1">
+                          Campaign: {m.campaignName} {m.adName ? `• Ad: ${m.adName}` : ''}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Quick WhatsApp Web Composer */}
+            <div className="pt-4 border-t border-shadow-darker/10 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-primary-dark flex items-center gap-1.5">
+                  <Phone size={13} className="text-emerald-600" />
+                  Direct WhatsApp Response Composer
+                </label>
+                <span className="text-[10px] text-secondary">
+                  Target: {lead.phone || 'No phone number'}
+                </span>
+              </div>
+
+              {/* Variable Chips */}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-[10px] font-bold text-secondary uppercase">Quick Variables:</span>
+                {[
+                  { label: 'Customer Name', value: lead.name },
+                  { label: 'Stage', value: activeStages.find((s) => s.id === lead.status)?.label || lead.status },
+                  { label: 'Quantity', value: lead.required_quantity ? `${lead.required_quantity} pcs` : '' },
+                  { label: 'Event', value: lead.event_name || '' },
+                  { label: 'Delivery Date', value: lead.delivery_date || '' },
+                ]
+                  .filter((chip) => Boolean(chip.value))
+                  .map((chip, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setComposerText((prev) => `${prev} ${chip.value} `.trim())}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 border border-slate-200 text-primary-dark font-medium transition-colors"
+                    >
+                      + {chip.label}
+                    </button>
+                  ))}
+              </div>
+
+              <textarea
+                className="neo-input w-full text-xs min-h-[85px] resize-y"
+                placeholder={`Hi ${lead.name}, regarding your trophy enquiry for ${lead.event_name || 'your event'}...`}
+                value={composerText}
+                onChange={(e) => setComposerText(e.target.value)}
+              />
+
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setComposerText(
+                      `Hi ${lead.name}, thank you for contacting EcoTrophy! We have received your enquiry for ${lead.required_quantity || ''} trophies and our team is reviewing your requirements.`
+                    )
+                  }
+                  className="text-[11px] font-bold text-primary hover:underline"
+                >
+                  Use Greeting Template
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = composerText.trim() || `Hi ${lead.name}, regarding your trophy enquiry with EcoTrophy:`;
+                    openWhatsAppWebDirect(lead.phone || '', text);
+                  }}
+                  disabled={!lead.phone}
+                  className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md disabled:opacity-50"
+                >
+                  <ExternalLink size={14} /> Open & Send via WhatsApp Web
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: Stage Transition & Notification History Stream */}
       {activeTab === 'history' && (
         <div className="space-y-6">
           {/* Stage Move History */}

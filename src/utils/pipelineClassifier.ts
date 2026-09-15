@@ -29,6 +29,18 @@ function evaluateCondition(lead: Partial<Lead>, rule: PipelineRule): boolean {
     case 'urgency':
       val = (lead.urgency || '').toLowerCase();
       break;
+    case 'customer_type':
+      val = (lead.customer_type || '').toLowerCase();
+      break;
+    case 'event_type':
+      val = (lead.event_type || '').toLowerCase();
+      break;
+    case 'is_repeat_customer':
+      val = Boolean(lead.is_repeat_customer || lead.customer_lifecycle === 'existing_customer' || lead.customer_lifecycle === 'repeat_customer');
+      break;
+    case 'budget':
+      val = (lead.budget || '').toLowerCase();
+      break;
     default:
       val = (lead as any)[rule.field];
   }
@@ -62,6 +74,7 @@ function evaluateCondition(lead: Partial<Lead>, rule: PipelineRule): boolean {
  * - Small Order Pipeline: Quantity < 10 (1–9 pcs)
  * - Regular Order Pipeline: Quantity 10–99 pcs
  * - Bulk Order Pipeline: Quantity >= 100 pcs
+ * - Unclassified / Requirement Pending: Quantity not yet provided or requirement unclear
  */
 export function classifyLeadPipeline(
   lead: Partial<Lead>,
@@ -90,6 +103,7 @@ export function classifyLeadPipeline(
   const smallPipe = availablePipelines.find((p) => p.id === 'small_order' || p.name.toLowerCase().includes('small'));
   const regularPipe = availablePipelines.find((p) => p.id === 'regular_order' || p.name.toLowerCase().includes('regular'));
   const bulkPipe = availablePipelines.find((p) => p.id === 'bulk_order' || p.name.toLowerCase().includes('bulk'));
+  const unclassifiedPipe = availablePipelines.find((p) => p.id === 'unclassified' || p.name.toLowerCase().includes('unclassified') || p.name.toLowerCase().includes('pending'));
 
   if (!isNaN(qty) && qty > 0) {
     if (qty >= 100) {
@@ -116,12 +130,11 @@ export function classifyLeadPipeline(
     }
   }
 
-  // Default fallback to Regular or first available
-  const defaultPipe = availablePipelines.find((p) => p.is_default) || regularPipe || availablePipelines[0];
+  // 3. If quantity or requirement is unclear/unknown -> Unclassified / Requirement Pending
   return {
-    pipeline_id: defaultPipe?.id || 'regular_order',
-    pipeline_name: defaultPipe?.name || 'Regular Order Pipeline',
-    matched_rule_name: 'Default Pipeline',
-    reason: 'Standard default pipeline assignment',
+    pipeline_id: unclassifiedPipe?.id || 'unclassified',
+    pipeline_name: unclassifiedPipe?.name || 'Unclassified / Requirement Pending',
+    matched_rule_name: 'Requirement Pending Rule',
+    reason: 'Requirement or quantity not specified. Awaiting requirement collection.',
   };
 }

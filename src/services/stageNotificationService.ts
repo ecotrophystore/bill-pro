@@ -30,6 +30,17 @@ export interface StageMoveResult {
 }
 
 /**
+ * Opens WhatsApp Web with the prefilled stage message in a new browser tab.
+ */
+export function openWhatsAppWebDirect(phone: string, text: string): void {
+  if (!phone) return;
+  const digits = phone.replace(/\D/g, '');
+  const finalPhone = digits.length === 10 ? `91${digits}` : digits;
+  const url = `https://wa.me/${finalPhone}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/**
  * Checks whether a notification for a target stage was already sent to this lead
  */
 export function checkDuplicateStageNotification(lead: Partial<Lead>, targetStageId: string): {

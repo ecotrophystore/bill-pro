@@ -11,12 +11,14 @@ import {
   Loader2,
   ArrowRight,
   ShieldAlert,
+  ExternalLink,
 } from 'lucide-react';
 import type { Lead, PipelineStage, StageMessageConfig } from '../../types';
 import {
   checkDuplicateStageNotification,
   getStageMessageConfig,
   executeManualStageMove,
+  openWhatsAppWebDirect,
   type StageMoveResult,
 } from '../../services/stageNotificationService';
 import { buildTemplateContext, renderTemplateText } from '../../utils/templateVariables';
@@ -230,9 +232,21 @@ export function StageChangeConfirmModal({
                     <span className="flex items-center gap-1">
                       <Phone size={12} /> WhatsApp Message
                     </span>
-                    <span className="text-[10px] text-emerald-600 font-normal">
-                      To: {lead.phone || 'No phone'}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-emerald-600 font-normal">
+                        To: {lead.phone || 'No phone'}
+                      </span>
+                      {lead.phone && (
+                        <button
+                          type="button"
+                          onClick={() => openWhatsAppWebDirect(lead.phone || '', renderedWhatsApp)}
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-white/90 hover:bg-white px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
+                          title="Open prefilled message in WhatsApp Web directly"
+                        >
+                          <ExternalLink size={10} /> Open WhatsApp Web
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="text-slate-800 font-sans leading-relaxed whitespace-pre-wrap">
                     {renderedWhatsApp}

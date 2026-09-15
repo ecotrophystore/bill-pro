@@ -662,9 +662,31 @@ export default function PipelineBoard() {
                             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-red-400" />
                           )}
 
-                          {/* Customer Title & Phone */}
+                          {/* Customer Title, Status & Phone */}
                           <div className="flex items-start justify-between gap-2">
-                            <div>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
+                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200">
+                                    Repeat Customer
+                                  </span>
+                                ) : lead.customer_lifecycle === 'existing_customer' ? (
+                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                    Existing Customer
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                    New Customer
+                                  </span>
+                                )}
+
+                                {lead.source && (
+                                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                    {lead.source}
+                                  </span>
+                                )}
+                              </div>
+
                               <Link
                                 to={`/leads/${lead.id}`}
                                 className="font-bold text-sm text-primary-dark hover:text-primary transition-colors block"
@@ -672,12 +694,12 @@ export default function PipelineBoard() {
                                 {lead.name}
                               </Link>
                               {lead.company && (
-                                <div className="text-xs text-secondary flex items-center gap-1 mt-0.5">
+                                <div className="text-xs text-secondary flex items-center gap-1">
                                   <Building size={11} /> {lead.company}
                                 </div>
                               )}
                             </div>
-                            <GripVertical size={16} className="text-secondary/50 shrink-0 group-hover:text-primary" />
+                            <GripVertical size={16} className="text-secondary/50 shrink-0 group-hover:text-primary mt-1" />
                           </div>
 
                           {/* Phone & Contact */}
@@ -685,6 +707,13 @@ export default function PipelineBoard() {
                             <div className="text-xs text-slate-600 flex items-center gap-1.5 font-mono">
                               <Phone size={12} className="text-emerald-600" />
                               <span>{lead.phone}</span>
+                            </div>
+                          )}
+
+                          {/* Last Inbound Message Snippet (if available) */}
+                          {lead.last_message && (
+                            <div className="text-[11px] text-slate-600 bg-slate-50/80 p-2 rounded-lg border border-shadow-darker/5 line-clamp-2 italic">
+                              "{lead.last_message}"
                             </div>
                           )}
 
@@ -702,6 +731,12 @@ export default function PipelineBoard() {
                               </div>
                             ) : null}
 
+                            {lead.event_name ? (
+                              <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary truncate col-span-2" title={lead.event_name}>
+                                🏆 {lead.event_name}
+                              </div>
+                            ) : null}
+
                             {lead.event_date ? (
                               <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary">
                                 📅 {lead.event_date}
@@ -715,7 +750,7 @@ export default function PipelineBoard() {
                             ) : null}
                           </div>
 
-                          {/* Assigned Rep & Badges */}
+                          {/* Assigned Rep & Urgency */}
                           <div className="flex items-center justify-between gap-1 text-[10px] text-secondary pt-1 flex-wrap">
                             {lead.sales_person ? (
                               <span className="flex items-center gap-1 font-semibold text-slate-700">
