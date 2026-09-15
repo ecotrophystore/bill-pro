@@ -53,32 +53,75 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 return;
             }
 
+            // Extract message text
+            let textBody = "Unsupported message type";
+            if (message.type === "text") textBody = message.text.body;
+            else textBody = `[${message.type} message]`;
+
+            // Extract quantity from text
+            let qty = 0;
+            const qtyMatch = textBody.match(/(\d{1,5})\s*(?:trophies|trophy|pieces|piece|pcs|pc|nos|awards|award|medals|medal)?/i);
+            if (qtyMatch && qtyMatch[1]) {
+                const parsed = parseInt(qtyMatch[1], 10);
+                if (!isNaN(parsed) && parsed > 0) qty = parsed;
+            }
+
+            const pipelineId = qty >= 100 ? "bulk_order" : (qty >= 10 ? "regular_order" : (qty > 0 ? "small_order" : "unclassified"));
+
             let leadId = "";
             let conversationId = "";
             
-            const leadsQuery = await db.collection("leads").where("phone", "==", senderPhone).limit(1).get();
+            const cleanPhoneDigits = senderPhone.replace(/\D/g, "");
+            const searchPhones = [senderPhone, cleanPhoneDigits, cleanPhoneDigits.replace(/^91/, "")].filter(Boolean);
+
+            const leadsQuery = await db.collection("leads").where("phone", "in", searchPhones).limit(1).get();
             if (leadsQuery.empty) {
                 // Create Lead
                 const newLeadRef = db.collection("leads").doc();
                 leadId = newLeadRef.id;
-                const leadName = contact?.profile?.name || senderPhone;
+                const leadName = contact?.profile?.name || (cleanPhoneDigits ? `Lead +${cleanPhoneDigits}` : senderPhone);
+                
                 await newLeadRef.set({
                     id: leadId,
                     name: leadName,
                     phone: senderPhone,
-                    source: "whatsapp_inbound",
-                    status: "new",
+                    source: "WhatsApp",
+                    platform: "meta",
+                    pipeline_id: pipelineId,
+                    status: "new_enquiry",
+                    required_quantity: qty || "",
+                    last_message: textBody,
+                    last_message_channel: "whatsapp",
                     createdAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp()
+                    created_at: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    updated_at: FieldValue.serverTimestamp(),
+                    customer_lifecycle: "new_customer",
+                    stage_history: [
+                        {
+                            from_stage: "Initial Ingest",
+                            to_stage: "New Enquiry",
+                            changed_by: "system_meta_inbound",
+                            changed_by_name: "WhatsApp Auto-Capture",
+                            changed_at: new Date(),
+                            note: `WhatsApp message received: "${textBody}". Classified into ${pipelineId}.`
+                        }
+                    ],
+                    notification_history: [],
+                    notifications_sent: {}
                 });
+
                 // Create corresponding Customer record
                 const newCustomerRef = db.collection("customers").doc();
                 await newCustomerRef.set({
                     id: newCustomerRef.id,
                     name: leadName,
                     phone: senderPhone,
+                    whatsapp_number: senderPhone,
                     email: "",
                     type: "individual",
+                    customer_type: "new",
+                    total_enquiries_count: 1,
                     notes: "Created automatically from WhatsApp inbound message",
                     created_at: FieldValue.serverTimestamp()
                 });
@@ -86,7 +129,16 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 const leadDoc = leadsQuery.docs[0];
                 if (leadDoc) {
                     leadId = leadDoc.id;
-                    await leadDoc.ref.update({ updatedAt: FieldValue.serverTimestamp() });
+                    const updatePayload: any = {
+                        last_message: textBody,
+                        last_message_channel: "whatsapp",
+                        updatedAt: FieldValue.serverTimestamp(),
+                        updated_at: FieldValue.serverTimestamp()
+                    };
+                    if (qty > 0 && !leadDoc.data()?.required_quantity) {
+                        updatePayload.required_quantity = qty;
+                    }
+                    await leadDoc.ref.update(updatePayload);
                 }
             }
 
@@ -116,11 +168,6 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 }
             }
 
-            // Extract message text (simplistic approach for now)
-            let textBody = "Unsupported message type";
-            if (message.type === "text") textBody = message.text.body;
-            else textBody = `[${message.type} message]`;
-
             // Save Message
             const newMsgRef = db.collection("messages").doc();
             await newMsgRef.set({
@@ -133,7 +180,8 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 status: "delivered", // For inbound it's delivered to us
                 metaMessageId: messageId,
                 platform: "whatsapp",
-                timestamp: FieldValue.serverTimestamp()
+                timestamp: FieldValue.serverTimestamp(),
+                created_at: FieldValue.serverTimestamp()
             });
 
             // Log activity
