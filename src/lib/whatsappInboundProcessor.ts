@@ -86,13 +86,14 @@ export async function processInboundWhatsAppMessage(
   }
 
   const leadName = aiAnalysis.extracted_details.name || senderName || existingLeadData?.name || `Lead +${formattedPhone}`;
-  const stage = aiAnalysis.flag_for_review 
-    ? (existingLeadData?.status || 'needs_review') 
-    : (aiAnalysis.recommended_pipeline_stage || 'new');
+  const initialStage = 'new_enquiry';
 
   if (!leadId) {
-    // 4A. CREATE NEW LEAD
+    // 4A. CREATE NEW LEAD - Auto-assign pipeline based on quantity, start at initial stage
     isNewLead = true;
+    const qty = Number(aiAnalysis.extracted_details.quantity) || 0;
+    const initialPipelineId = qty >= 100 ? 'bulk_order' : qty >= 10 ? 'regular_order' : 'small_order';
+
     const leadRef = await addDoc(collection(db, 'leads'), {
       name: leadName,
       phone: formattedPhone,
@@ -105,8 +106,8 @@ export async function processInboundWhatsAppMessage(
       timeline: aiAnalysis.extracted_details.timeline || '',
       priority: aiAnalysis.extracted_details.urgency || 'medium',
       urgency: aiAnalysis.extracted_details.urgency || 'medium',
-      pipeline_id: 'default',
-      status: stage,
+      pipeline_id: initialPipelineId,
+      status: initialStage,
       source: 'whatsapp_inbound',
       sourceType: 'whatsapp',
       platform: 'meta',
@@ -123,6 +124,19 @@ export async function processInboundWhatsAppMessage(
       ai_summary: aiAnalysis.internal_audit_log,
       ai_suggested_reply: aiAnalysis.suggested_reply,
       ai_flag_for_review: aiAnalysis.flag_for_review,
+      stage_history: [
+        {
+          from_stage: 'Inbound Inquiry',
+          to_stage: 'New Enquiry',
+          changed_by: 'system',
+          changed_by_name: 'WhatsApp AI Inbound',
+          changed_at: new Date(),
+          note: `Inbound WhatsApp message captured from ${formattedPhone}`,
+          notification_triggered: false,
+        },
+      ],
+      notification_history: [],
+      notifications_sent: {},
       last_contacted_at: serverTimestamp(),
       created_at: serverTimestamp(),
       updated_at: serverTimestamp(),
@@ -144,7 +158,7 @@ export async function processInboundWhatsAppMessage(
       console.warn('[Inbound Processor] Could not create customer document:', e);
     }
   } else {
-    // 4B. UPDATE EXISTING LEAD
+    // 4B. UPDATE EXISTING LEAD - Update details and AI notes, but NEVER change existing lead stage automatically!
     isNewLead = false;
     const updatePayload: any = {
       updated_at: serverTimestamp(),
@@ -184,10 +198,6 @@ export async function processInboundWhatsAppMessage(
     if (aiAnalysis.extracted_details.urgency) {
       updatePayload.priority = aiAnalysis.extracted_details.urgency;
       updatePayload.urgency = aiAnalysis.extracted_details.urgency;
-    }
-    // Only update stage if lead is still in early/open stages
-    if (!['won', 'lost'].includes(existingLeadData?.status) && !aiAnalysis.flag_for_review) {
-      updatePayload.status = stage;
     }
 
     await updateDoc(doc(db, 'leads', leadId), updatePayload);
@@ -252,7 +262,7 @@ export async function processInboundWhatsAppMessage(
     leadId,
     isNewLead,
     leadName,
-    pipelineStage: stage,
+    pipelineStage: isNewLead ? initialStage : (existingLeadData?.status || initialStage),
     qualificationStatus: aiAnalysis.qualification_status,
     aiAnalysis,
   };

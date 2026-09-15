@@ -1,13 +1,58 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { Link } from 'react-router-dom';
-import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { ArrowDown, ArrowRight, ArrowUp, CircleAlert, GripVertical, Loader2, Pencil, Plus, Trash2, UserPlus, X, Download, ChevronLeft, ChevronRight, Bot, Sparkles, AlertTriangle } from 'lucide-react';
-import { auth, db, functions } from '../lib/firebase';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+} from 'firebase/firestore';
+import {
+  ArrowRight,
+  CircleAlert,
+  GripVertical,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  UserPlus,
+  X,
+  Download,
+  ChevronLeft,
+  ChevronRight,
+  Bot,
+  Sparkles,
+  Phone,
+  Building,
+  Calendar,
+  Clock,
+  DollarSign,
+  User,
+  Filter,
+  Search,
+  Truck,
+  Eye,
+  Send,
+  MessageSquare,
+} from 'lucide-react';
+import { auth, db } from '../lib/firebase';
 import * as XLSX from 'xlsx';
-import type { Lead, Pipeline, PipelineStage } from '../types';
+import {
+  type Lead,
+  type Pipeline,
+  type PipelineStage,
+  STANDARD_CRM_STAGES,
+  DEFAULT_QUANTITY_PIPELINES,
+} from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
-
+import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 
 type StageDraft = {
   id: string;
@@ -23,103 +68,64 @@ type PipelineDraft = {
 
 const STORAGE_KEY = 'billpro.activePipelineId';
 
-const DEFAULT_STAGES: StageDraft[] = [
-  { id: 'new', label: 'New', required_fields: [] },
-  { id: 'contacted', label: 'Contacted', required_fields: [] },
-  { id: 'qualified', label: 'Qualified', required_fields: ['phone'] },
-  { id: 'lost', label: 'Lost', required_fields: ['reason'] },
-];
-
-const DEFAULT_PIPELINE: Pipeline = {
-  id: 'default',
-  name: 'Default pipeline',
-  scenario: 'General',
-  is_default: true,
-  stages: DEFAULT_STAGES as PipelineStage[],
-  created_at: new Date() as any,
-};
-
 const TONES = [
-  'bg-secondary/10 text-secondary border-secondary/20',
-  'bg-warning/10 text-warning border-warning/20',
-  'bg-success/10 text-success border-success/20',
-  'bg-error/10 text-error border-error/20',
-  'bg-primary/10 text-primary-dark border-primary/20',
-  'bg-shadow-darker/10 text-primary-dark border-shadow-darker/20',
+  'bg-slate-500/10 text-slate-700 border-slate-500/20',
+  'bg-sky-500/10 text-sky-700 border-sky-500/20',
+  'bg-blue-500/10 text-blue-700 border-blue-500/20',
+  'bg-indigo-500/10 text-indigo-700 border-indigo-500/20',
+  'bg-purple-500/10 text-purple-700 border-purple-500/20',
+  'bg-amber-500/10 text-amber-700 border-amber-500/20',
+  'bg-orange-500/10 text-orange-700 border-orange-500/20',
+  'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
+  'bg-teal-500/10 text-teal-700 border-teal-500/20',
+  'bg-cyan-500/10 text-cyan-700 border-cyan-500/20',
+  'bg-violet-500/10 text-violet-700 border-violet-200',
+  'bg-rose-500/10 text-rose-700 border-rose-500/20',
 ];
 
 function stageTone(index: number) {
   return TONES[index % TONES.length];
 }
 
-function newStage(seed = 1): StageDraft {
-  return {
-    id: `stage_${Date.now()}_${seed}`,
-    label: 'New stage',
-    required_fields: [],
-  };
-}
-
 function formatDate(value: any) {
   if (!value) return '-';
-  if (typeof value.toDate === 'function') return value.toDate().toLocaleDateString();
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toLocaleDateString();
+  if (typeof value.toDate === 'function') return value.toDate().toLocaleDateString('en-IN');
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toLocaleDateString('en-IN');
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-IN');
 }
 
 function normalizePipeline(pipeline: any): Pipeline {
-  const stages: PipelineStage[] = Array.isArray(pipeline?.stages) && pipeline.stages.length > 0
-    ? pipeline.stages.map((stage: any, index: number) => ({
-        id: String(stage?.id || `stage_${index + 1}`),
-        label: String(stage?.label || `Stage ${index + 1}`),
-        required_fields: Array.isArray(stage?.required_fields) ? stage.required_fields : [],
-      }))
-    : DEFAULT_STAGES.map((stage) => ({ ...stage }));
+  const stages: PipelineStage[] =
+    Array.isArray(pipeline?.stages) && pipeline.stages.length > 0
+      ? pipeline.stages.map((stage: any, index: number) => ({
+          id: String(stage?.id || `stage_${index + 1}`),
+          label: String(stage?.label || `Stage ${index + 1}`),
+          required_fields: Array.isArray(stage?.required_fields) ? stage.required_fields : [],
+        }))
+      : STANDARD_CRM_STAGES.map((stage) => ({ ...stage }));
 
   return {
-    id: String(pipeline?.id || 'default'),
-    name: String(pipeline?.name || 'Default pipeline'),
-    scenario: String(pipeline?.scenario || 'General'),
-    is_default: pipeline?.is_default === true || pipeline?.id === 'default',
+    id: String(pipeline?.id || 'regular_order'),
+    name: String(pipeline?.name || 'Regular Order Pipeline'),
+    scenario: String(pipeline?.scenario || '10–99 Pieces'),
+    is_default: pipeline?.is_default === true || pipeline?.id === 'regular_order',
     stages,
     created_at: pipeline?.created_at || (new Date() as any),
     updated_at: pipeline?.updated_at,
   };
 }
 
-function pipelineLabel(pipeline: Pipeline) {
-  return pipeline.scenario ? `${pipeline.name} - ${pipeline.scenario}` : pipeline.name;
-}
-
-function validateMove(lead: Lead, nextStage: PipelineStage) {
-  const reqs = nextStage.required_fields || [];
-  if (reqs.includes('phone') && !lead.phone) {
-    return `Phone number is required for stage "${nextStage.label}".`;
-  }
-  if (reqs.includes('email') && !lead.email) {
-    return `Email is required for stage "${nextStage.label}".`;
-  }
-  if (reqs.includes('reason') && !(lead.reason || '').trim()) {
-    return `Lost reason is required for stage "${nextStage.label}".`;
-  }
-  // Default legacy fallback validations
-  if (nextStage.id === 'qualified' && !(lead.phone || lead.email)) {
-    return 'Need at least a phone number or email before qualifying.';
-  }
-  return '';
-}
-
-function chunk<T>(items: T[], size: number) {
-  const chunks: T[][] = [];
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
-  return chunks;
-}
-
 export default function PipelineBoard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const [selectedPipelineId, setSelectedPipelineId] = useState('default');
+  const [selectedPipelineId, setSelectedPipelineId] = useState(() => {
+    return localStorage.getItem(STORAGE_KEY) || 'regular_order';
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [urgencyFilter, setUrgencyFilter] = useState<string>('all');
+  const [qualificationFilter, setQualificationFilter] = useState<string>('all');
+
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadingPipelines, setLoadingPipelines] = useState(true);
   const [savingPipeline, setSavingPipeline] = useState(false);
@@ -129,11 +135,24 @@ export default function PipelineBoard() {
   const [pipelineDraft, setPipelineDraft] = useState<PipelineDraft>({
     name: '',
     scenario: '',
-    stages: DEFAULT_STAGES.map((stage) => ({ ...stage })),
+    stages: STANDARD_CRM_STAGES.map((stage) => ({ ...stage })),
   });
   const [dragId, setDragId] = useState('');
   const [message, setMessage] = useState('');
   const { hasPermission } = useCRMPermission();
+
+  // Stage Change Confirmation Modal State
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    lead: Lead | null;
+    fromStage: PipelineStage;
+    toStage: PipelineStage;
+  }>({
+    isOpen: false,
+    lead: null,
+    fromStage: { id: '', label: '' },
+    toStage: { id: '', label: '' },
+  });
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
@@ -147,14 +166,11 @@ export default function PipelineBoard() {
     }
   };
 
-
-
   const scrollPipeline = (direction: 'left' | 'right') => {
     if (scrollContainerRef.current) {
       const container = scrollContainerRef.current;
       const firstChild = container.firstElementChild as HTMLElement;
       if (firstChild) {
-        // Scroll by one stage column width + 16px gap
         const scrollAmount = firstChild.offsetWidth + 16;
         container.scrollBy({
           left: direction === 'left' ? -scrollAmount : scrollAmount,
@@ -178,53 +194,50 @@ export default function PipelineBoard() {
     }
   };
 
-  // Follow-up scheduling modal states
-  const [followUpModalOpen, setFollowUpModalOpen] = useState(false);
-  const [followUpLead, setFollowUpLead] = useState<Lead | null>(null);
-  const [followUpNextStageId, setFollowUpNextStageId] = useState('');
-  const [followUpTitle, setFollowUpTitle] = useState('');
-  const [followUpReason, setFollowUpReason] = useState('Asked to call back');
-  const [followUpDescription, setFollowUpDescription] = useState('');
-  const [followUpDate, setFollowUpDate] = useState('');
-  const [followUpTime, setFollowUpTime] = useState('');
-  const [followUpSaving, setFollowUpSaving] = useState(false);
-
-  // Lost reason modal states
-  const [lostModalOpen, setLostModalOpen] = useState(false);
-  const [lostLead, setLostLead] = useState<Lead | null>(null);
-  const [lostNextStageId, setLostNextStageId] = useState('');
-  const [lostReason, setLostReason] = useState('');
-  const [lostSaving, setLostSaving] = useState(false);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
-    if (saved) setSelectedPipelineId(saved);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, selectedPipelineId);
-  }, [selectedPipelineId]);
-
   useEffect(() => {
     if (!db) return;
 
-    const unsubPipelines = onSnapshot(query(collection(db, 'pipelines')), (snapshot) => {
-      const rows = snapshot.docs.map((item) => normalizePipeline({ id: item.id, ...item.data() }));
-      rows.sort((a, b) => a.name.localeCompare(b.name));
-      setPipelines(rows);
-      setLoadingPipelines(false);
-    }, (error) => {
-      console.error('Pipeline load failed', error);
-      setLoadingPipelines(false);
-    });
+    // Load pipelines
+    const unsubPipelines = onSnapshot(
+      collection(db, 'pipelines'),
+      (snap) => {
+        if (snap.empty) {
+          // Initialize with default quantity pipelines
+          setPipelines(DEFAULT_QUANTITY_PIPELINES);
+        } else {
+          const loaded = snap.docs.map((d) => normalizePipeline({ id: d.id, ...d.data() }));
+          // Merge with default quantity pipelines if not present
+          const existingIds = new Set(loaded.map((p) => p.id));
+          const merged = [...loaded];
+          DEFAULT_QUANTITY_PIPELINES.forEach((def) => {
+            if (!existingIds.has(def.id)) {
+              merged.push(def);
+            }
+          });
+          setPipelines(merged);
+        }
+        setLoadingPipelines(false);
+      },
+      (err) => {
+        console.error('Failed to load pipelines:', err);
+        setPipelines(DEFAULT_QUANTITY_PIPELINES);
+        setLoadingPipelines(false);
+      }
+    );
 
-    const unsubLeads = onSnapshot(query(collection(db, 'leads')), (snapshot) => {
-      setLeads(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as Lead)));
-      setLoadingLeads(false);
-    }, (error) => {
-      console.error('Lead load failed', error);
-      setLoadingLeads(false);
-    });
+    // Load leads
+    const unsubLeads = onSnapshot(
+      collection(db, 'leads'),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead));
+        setLeads(rows);
+        setLoadingLeads(false);
+      },
+      (err) => {
+        console.error('Failed to load leads:', err);
+        setLoadingLeads(false);
+      }
+    );
 
     return () => {
       unsubPipelines();
@@ -232,750 +245,324 @@ export default function PipelineBoard() {
     };
   }, []);
 
-  const pipelineList = useMemo(() => {
-    const rows = [DEFAULT_PIPELINE, ...pipelines.filter((item) => item.id !== 'default')];
-    const deduped = new Map<string, Pipeline>();
-    rows.forEach((pipeline) => deduped.set(pipeline.id, pipeline));
-    return Array.from(deduped.values()).sort((a, b) => (a.id === 'default' ? -1 : b.id === 'default' ? 1 : a.name.localeCompare(b.name)));
-  }, [pipelines]);
-
-  useEffect(() => {
-    if (!pipelineList.length) return;
-    if (!pipelineList.some((item) => item.id === selectedPipelineId)) {
-      setSelectedPipelineId(pipelineList[0].id);
-    }
-  }, [pipelineList, selectedPipelineId]);
-
   const activePipeline = useMemo(() => {
-    return pipelineList.find((item) => item.id === selectedPipelineId) || DEFAULT_PIPELINE;
-  }, [pipelineList, selectedPipelineId]);
+    const found = pipelines.find((p) => p.id === selectedPipelineId);
+    return found || pipelines[0] || DEFAULT_QUANTITY_PIPELINES[1];
+  }, [pipelines, selectedPipelineId]);
 
-  const activeStages = activePipeline.stages?.length ? activePipeline.stages : DEFAULT_STAGES;
-  const stageLabelMap = useMemo(() => new Map(activeStages.map((stage) => [stage.id, stage.label])), [activeStages]);
+  const activeStages = useMemo(() => {
+    return activePipeline?.stages?.length ? activePipeline.stages : STANDARD_CRM_STAGES;
+  }, [activePipeline]);
 
-  const grouped = useMemo(() => {
-    const rows = activeStages.reduce((acc, stage) => {
-      acc[stage.id] = leads.filter((lead) => (lead.pipeline_id || 'default') === activePipeline.id && lead.status === stage.id);
-      return acc;
-    }, {} as Record<string, Lead[]>);
-
-    const other = leads.filter((lead) => (lead.pipeline_id || 'default') === activePipeline.id && !activeStages.some((stage) => stage.id === lead.status));
-    if (other.length > 0) rows.other = other;
-    return rows;
-  }, [leads, activePipeline.id, activeStages]);
-
-  useEffect(() => {
-    // Initial check and on update
-    const timer = setTimeout(() => {
-      checkScroll();
-    }, 100);
-    window.addEventListener('resize', checkScroll);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', checkScroll);
-    };
-  }, [leads, activePipeline, activeStages]);
-
-  const openCreate = () => {
-    setEditingPipelineId('');
-    setPipelineDraft({
-      name: '',
-      scenario: '',
-      stages: DEFAULT_STAGES.map((stage) => ({ ...stage })),
+  // Group leads into stages
+  const groupedLeads = useMemo(() => {
+    const map: Record<string, Lead[]> = {};
+    activeStages.forEach((stage) => {
+      map[stage.id] = [];
     });
-    setEditorOpen(true);
-  };
+    map['other'] = [];
 
-  const openEdit = (pipeline: Pipeline) => {
-    setEditingPipelineId(pipeline.id);
-    setPipelineDraft({
-      name: pipeline.name,
-      scenario: pipeline.scenario || '',
-      stages: (pipeline.stages?.length ? pipeline.stages : DEFAULT_STAGES).map((stage) => ({
-        id: stage.id,
-        label: stage.label,
-        required_fields: stage.required_fields || [],
-      })),
-    });
-    setEditorOpen(true);
-  };
+    leads.forEach((lead) => {
+      // Filter by pipeline matching
+      const leadPipeId = lead.pipeline_id || 'regular_order';
+      const matchesPipeline =
+        leadPipeId === activePipeline.id ||
+        (activePipeline.id === 'regular_order' && (leadPipeId === 'default' || !leadPipeId));
 
-  const moveStageDraft = (index: number, direction: 'up' | 'down') => {
-    setPipelineDraft((current) => {
-      const targetIndex = direction === 'up' ? index - 1 : index + 1;
-      if (targetIndex < 0 || targetIndex >= current.stages.length) return current;
-      const stages = [...current.stages];
-      [stages[index], stages[targetIndex]] = [stages[targetIndex], stages[index]];
-      return { ...current, stages };
-    });
-  };
+      if (!matchesPipeline) return;
 
-  const savePipeline = async () => {
-    if (!db) return;
+      // Filter by Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const match =
+          (lead.name || '').toLowerCase().includes(q) ||
+          (lead.phone || '').includes(q) ||
+          (lead.company || '').toLowerCase().includes(q) ||
+          (lead.event_name || '').toLowerCase().includes(q) ||
+          (lead.sales_person || '').toLowerCase().includes(q);
+        if (!match) return;
+      }
 
-    const name = pipelineDraft.name.trim();
-    if (!name) {
-      setMessage('Enter a pipeline name.');
-      return;
-    }
-    if (pipelineDraft.stages.length === 0) {
-      setMessage('Add at least one stage.');
-      return;
-    }
+      // Filter by Urgency
+      if (urgencyFilter !== 'all' && lead.urgency !== urgencyFilter) {
+        return;
+      }
 
-    const payload = {
-      name,
-      scenario: pipelineDraft.scenario.trim() || 'General',
-      stages: pipelineDraft.stages
-        .map((stage) => ({
-          id: stage.id.trim() || `stage_${Date.now()}`,
-          label: stage.label.trim() || 'Stage',
-          required_fields: stage.required_fields || [],
-        }))
-        .filter((stage) => stage.label.length > 0),
-      is_default: editingPipelineId === 'default',
-      updated_at: serverTimestamp(),
-    };
+      // Filter by Qualification
+      if (qualificationFilter !== 'all' && lead.qualification_status !== qualificationFilter) {
+        return;
+      }
 
-    if (payload.stages.length === 0) {
-      setMessage('Add at least one stage label.');
-      return;
-    }
-
-    setSavingPipeline(true);
-    setMessage('');
-
-    try {
-      if (editingPipelineId) {
-        await setDoc(doc(db, 'pipelines', editingPipelineId), payload, { merge: true });
-        setSelectedPipelineId(editingPipelineId);
-        setMessage(`Updated pipeline ${name}.`);
+      const statusKey = lead.status || activeStages[0]?.id || 'new_enquiry';
+      if (map[statusKey]) {
+        map[statusKey].push(lead);
       } else {
-        const docRef = await addDoc(collection(db, 'pipelines'), {
-          ...payload,
-          created_at: serverTimestamp(),
-        });
-        setSelectedPipelineId(docRef.id);
-        setMessage(`Created pipeline ${name}.`);
+        map['other'].push(lead);
       }
-      setEditorOpen(false);
-      setEditingPipelineId('');
-    } catch (error: any) {
-      console.error('Pipeline save failed', error);
-      setMessage(error?.message || 'Failed to save pipeline');
-    } finally {
-      setSavingPipeline(false);
-    }
+    });
+
+    return map;
+  }, [leads, activePipeline, activeStages, searchQuery, urgencyFilter, qualificationFilter]);
+
+  const handleSelectPipeline = (id: string) => {
+    setSelectedPipelineId(id);
+    localStorage.setItem(STORAGE_KEY, id);
   };
 
-  const deletePipeline = async () => {
-    if (!db) return;
-    if (activePipeline.id === 'default') {
-      setMessage('Default pipeline cannot be deleted.');
+  // Intercept Drop Action to open confirmation modal
+  const handleCardDrop = (targetStageId: string) => {
+    if (!dragId) return;
+
+    const targetLead = leads.find((l) => l.id === dragId);
+    if (!targetLead) return;
+
+    const currentStageId = targetLead.status || activeStages[0]?.id || 'new_enquiry';
+    if (currentStageId === targetStageId) {
+      setDragId('');
       return;
     }
 
-    const confirmed = window.confirm(`Delete ${activePipeline.name}? Leads will be moved back to Default pipeline.`);
-    if (!confirmed) return;
+    const fromStage = activeStages.find((s) => s.id === currentStageId) || {
+      id: currentStageId,
+      label: currentStageId,
+    };
+    const toStage = activeStages.find((s) => s.id === targetStageId) || {
+      id: targetStageId,
+      label: targetStageId,
+    };
 
-    setDeletingPipeline(true);
-    setMessage('');
-
-    try {
-      const leadsQuery = query(collection(db, 'leads'), where('pipeline_id', '==', activePipeline.id));
-      const leadSnapshot = await getDocs(leadsQuery);
-      const fallbackStage = DEFAULT_STAGES[0]?.id || 'new';
-
-      for (const leadChunk of chunk(leadSnapshot.docs, 350)) {
-        const batch = writeBatch(db);
-        leadChunk.forEach((item) => {
-          const leadData = item.data() as Lead;
-          batch.update(item.ref, {
-            pipeline_id: 'default',
-            status: DEFAULT_STAGES.some((stage) => stage.id === leadData.status) ? leadData.status : fallbackStage,
-            updated_at: serverTimestamp(),
-          });
-        });
-        await batch.commit();
-      }
-
-      await deleteDoc(doc(db, 'pipelines', activePipeline.id));
-      setSelectedPipelineId('default');
-      setMessage(`Deleted pipeline ${activePipeline.name}.`);
-    } catch (error: any) {
-      console.error('Pipeline delete failed', error);
-      setMessage(error?.message || 'Failed to delete pipeline');
-    } finally {
-      setDeletingPipeline(false);
-    }
-  };
-
-  const handleSaveFollowUp = async () => {
-    if (!db || !functions || !followUpLead) return;
-
-    if (!followUpTitle.trim()) {
-      setMessage('Follow-up title is required.');
-      return;
-    }
-    if (!followUpDate) {
-      setMessage('Follow-up date is required.');
-      return;
-    }
-    if (!followUpTime) {
-      setMessage('Follow-up time is required.');
-      return;
-    }
-
-    setFollowUpSaving(true);
-    setMessage('');
-
-    try {
-      const combinedDateTime = new Date(`${followUpDate}T${followUpTime}`);
-      if (Number.isNaN(combinedDateTime.getTime())) {
-        setMessage('Invalid date or time selected.');
-        setFollowUpSaving(false);
-        return;
-      }
-
-      // Update lead details
-      await updateDoc(doc(db, 'leads', followUpLead.id), {
-        pipeline_id: activePipeline.id,
-        status: followUpNextStageId,
-        followup_reason: followUpReason,
-        next_follow_up_date: combinedDateTime.toISOString(),
-        stageEnteredAt: serverTimestamp(),
-        updated_at: serverTimestamp()
-      });
-
-      // Automatically add/save activities and queue message
-      const currentUserId = auth.currentUser?.uid || 'system';
-
-      // 1. Add activity entry
-      await addDoc(collection(db, 'activities'), {
-        lead_id: followUpLead.id,
-        type: 'lead.updated',
-        message: `Scheduled Follow-up: "${followUpTitle.trim()}" (Reason: ${followUpReason}) - ${followUpDescription.trim() || 'No description'} on ${followUpDate} at ${followUpTime}`,
-        actor: currentUserId,
-        created_at: serverTimestamp(),
-      });
-
-      // 2. Add message to message_queue
-      await addDoc(collection(db, 'message_queue'), {
-        lead_id: followUpLead.id,
-        pipeline_id: activePipeline.id,
-        channel: 'note',
-        subject: `Follow-up Scheduled: ${followUpTitle.trim()}`,
-        body: `Follow-up Scheduled:\nTitle: ${followUpTitle.trim()}\nReason: ${followUpReason}\nDescription: ${followUpDescription.trim() || 'No description'}\nTime: ${followUpDate} ${followUpTime}`,
-        status: 'queued',
-        created_by: currentUserId,
-        created_at: serverTimestamp(),
-        updated_at: serverTimestamp(),
-      });
-
-      setMessage(`Scheduled follow-up for ${followUpLead.name} in ${activePipeline.name}.`);
-      setFollowUpModalOpen(false);
-      setFollowUpLead(null);
-    } catch (error: any) {
-      console.error('Follow-up save failed', error);
-      setMessage(error?.message || 'Failed to save follow-up details');
-    } finally {
-      setFollowUpSaving(false);
-    }
-  };
-
-  const handleSaveLostReason = async () => {
-    if (!lostLead) return;
-    if (!lostReason.trim()) {
-      setMessage('Lost reason is required.');
-      return;
-    }
-
-    setLostSaving(true);
-    try {
-      await moveLead(lostLead, lostNextStageId, lostReason);
-      setLostModalOpen(false);
-      setLostLead(null);
-    } catch (error) {
-      console.error('Failed to save lost reason', error);
-    } finally {
-      setLostSaving(false);
-    }
-  };
-
-  const moveLead = async (lead: Lead, nextStageId: string, customReason?: string) => {
-    if (!db || !functions) return;
-
-    if (!hasPermission('move_stage')) {
-      setMessage('Error: You do not have permission to move leads between stages.');
-      return;
-    }
-
-    const nextStage = activeStages.find((s) => s.id === nextStageId) || { id: nextStageId, label: nextStageId };
-    
-    // If reason is needed and we don't have customReason, open modal
-    const requiresReason = (nextStage.required_fields || []).includes('reason');
-    if (requiresReason && customReason === undefined) {
-      setLostLead(lead);
-      setLostNextStageId(nextStageId);
-      setLostReason(lead.reason || '');
-      setLostModalOpen(true);
-      return;
-    }
-
-    // Now validate, including the customReason if provided
-    const validation = validateMove(customReason !== undefined ? { ...lead, reason: customReason } : lead, nextStage);
-    if (validation) {
-      setMessage(validation);
-      return;
-    }
-
-    const isFollowUpStage = nextStageId === 'followup' || nextStage.label.toLowerCase().includes('follow');
-    if (isFollowUpStage) {
-      setFollowUpLead(lead);
-      setFollowUpNextStageId(nextStageId);
-      setFollowUpTitle(`Follow up with ${lead.name}`);
-      setFollowUpDescription('');
-      
-      const today = new Date();
-      const pad = (num: number) => String(num).padStart(2, '0');
-      setFollowUpDate(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`);
-      setFollowUpTime('10:00');
-      
-      setFollowUpModalOpen(true);
-      return;
-    }
-
-    const nextReason = requiresReason ? customReason?.trim() : lead.reason;
-
-    try {
-      await updateDoc(doc(db, 'leads', lead.id), {
-        pipeline_id: activePipeline.id,
-        status: nextStageId,
-        reason: requiresReason ? nextReason : '',
-        stageEnteredAt: serverTimestamp(),
-        updated_at: serverTimestamp()
-      });
-      setMessage(`Moved ${lead.name} in ${activePipeline.name}.`);
-    } catch (error: any) {
-      console.error('Stage update failed', error);
-      setMessage(error?.message || 'Failed to move lead');
-    }
-  };
-
-  const nextStageIdFor = (index: number) => activeStages[(index + 1) % activeStages.length]?.id || activeStages[0]?.id || 'new';
-
-  const handleExportPipeline = () => {
-    try {
-      const exportData: any[] = [];
-      activeStages.forEach(stage => {
-        const stageLeads = grouped[stage.id] || [];
-        stageLeads.forEach(lead => {
-          exportData.push({
-            'Lead Name': lead.name,
-            'Phone': lead.phone || '',
-            'Email': lead.email || '',
-            'Stage': stage.label,
-            'Source': lead.source || '',
-            'Campaign': lead.campaign || '',
-            'Value': lead.value || 0,
-            'Follow-up Reason': lead.followup_reason || '',
-            'Created At': formatDate(lead.created_at)
-          });
-        });
-      });
-
-      if (grouped.other && grouped.other.length > 0) {
-        grouped.other.forEach(lead => {
-          exportData.push({
-            'Lead Name': lead.name,
-            'Phone': lead.phone || '',
-            'Email': lead.email || '',
-            'Stage': 'Other',
-            'Source': lead.source || '',
-            'Campaign': lead.campaign || '',
-            'Value': lead.value || 0,
-            'Follow-up Reason': lead.followup_reason || '',
-            'Created At': formatDate(lead.created_at)
-          });
-        });
-      }
-
-      if (exportData.length === 0) {
-        setMessage('No leads to export in this pipeline.');
-        return;
-      }
-
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      
-      const objectMaxLength: number[] = [];
-      exportData.forEach(row => {
-        Object.keys(row).forEach((key, i) => {
-          const value = row[key] ? row[key].toString() : '';
-          const length = Math.max(value.length, key.length);
-          objectMaxLength[i] = Math.max(objectMaxLength[i] || 0, length);
-        });
-      });
-      ws['!cols'] = objectMaxLength.map(w => ({ width: w + 2 }));
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Pipeline Leads");
-      XLSX.writeFile(wb, `${activePipeline.name.replace(/\s+/g, '_')}_Leads.xlsx`);
-      setMessage(`Exported ${exportData.length} leads successfully.`);
-    } catch (error) {
-      console.error('Export failed', error);
-      setMessage('Failed to export pipeline leads.');
-    }
-  };
-
-  const handleDrop = async (stageId: string) => {
-    const lead = leads.find((item) => item.id === dragId);
     setDragId('');
-    if (lead && lead.status !== stageId) {
-      await moveLead(lead, stageId);
+    setConfirmModalState({
+      isOpen: true,
+      lead: targetLead,
+      fromStage,
+      toStage,
+    });
+  };
+
+  const handleQuickMove = (lead: Lead, targetStageId: string) => {
+    const currentStageId = lead.status || activeStages[0]?.id || 'new_enquiry';
+    if (currentStageId === targetStageId) return;
+
+    const fromStage = activeStages.find((s) => s.id === currentStageId) || {
+      id: currentStageId,
+      label: currentStageId,
+    };
+    const toStage = activeStages.find((s) => s.id === targetStageId) || {
+      id: targetStageId,
+      label: targetStageId,
+    };
+
+    setConfirmModalState({
+      isOpen: true,
+      lead,
+      fromStage,
+      toStage,
+    });
+  };
+
+  const handleExportExcel = () => {
+    try {
+      const rows: any[] = [];
+      activeStages.forEach((stage) => {
+        const stageLeads = groupedLeads[stage.id] || [];
+        stageLeads.forEach((lead) => {
+          rows.push({
+            'Customer Name': lead.name,
+            Company: lead.company || lead.organization || '',
+            Phone: lead.phone || '',
+            Email: lead.email || '',
+            Quantity: lead.required_quantity || '',
+            'Order Value': lead.value || 0,
+            'Event Name': lead.event_name || '',
+            'Event Date': lead.event_date || '',
+            'Delivery Date': lead.delivery_date || '',
+            'Sales Person': lead.sales_person || '',
+            Stage: stage.label,
+            Pipeline: activePipeline.name,
+            Urgency: lead.urgency || '',
+            Qualification: lead.qualification_status || '',
+            'Created Date': formatDate(lead.created_at),
+          });
+        });
+      });
+
+      if (rows.length === 0) {
+        setMessage('No leads found in this pipeline to export.');
+        return;
+      }
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Pipeline Leads');
+      XLSX.writeFile(wb, `${activePipeline.name.replace(/\s+/g, '_')}_Leads.xlsx`);
+      setMessage('Exported pipeline leads to Excel successfully.');
+    } catch (err: any) {
+      console.error('Export failed:', err);
+      setMessage('Failed to export to Excel.');
     }
   };
 
-  const isLoading = loadingLeads || loadingPipelines;
-  const totalLeadsInPipeline = useMemo(() => activeStages.reduce((total, stage) => total + (grouped[stage.id]?.length || 0), 0) + (grouped.other?.length || 0), [activeStages, grouped]);
-  const hasUnmapped = Boolean(grouped.other?.length);
+  const totalPipelineLeads = useMemo(() => {
+    return Object.values(groupedLeads).reduce((sum, arr) => sum + arr.length, 0);
+  }, [groupedLeads]);
+
+  const totalPipelineValue = useMemo(() => {
+    let val = 0;
+    Object.values(groupedLeads).forEach((arr) => {
+      arr.forEach((l) => {
+        if (l.value && typeof l.value === 'number') val += l.value;
+      });
+    });
+    return val;
+  }, [groupedLeads]);
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="space-y-2">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Pipeline Board</h1>
-            <p className="text-secondary mt-1">Create separate pipelines for different scenarios and define their own stages.</p>
+    <div className="space-y-6 animate-fade-in max-w-full">
+      {/* Header & Pipeline Selectors */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-primary">CRM Kanban</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200">
+              Manual Stage Control
+            </span>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs text-secondary">
-            <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Active: {activePipeline.name}</span>
-            <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Scenario: {activePipeline.scenario || 'General'}</span>
-            <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Stages: {activeStages.length}</span>
-            <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Leads: {totalLeadsInPipeline}</span>
-          </div>
+          <h1 className="text-3xl font-bold tracking-tight text-primary-dark mt-1">Pipeline Board</h1>
+          <p className="text-secondary text-sm">
+            Drag and drop customer cards to manually update stages. Automated notification preview will confirm before sending.
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <select className="neo-input min-w-72" value={selectedPipelineId} onChange={(e) => setSelectedPipelineId(e.target.value)}>
-            {pipelineList.map((pipeline) => (
-              <option key={pipeline.id} value={pipeline.id}>{pipelineLabel(pipeline)}</option>
-            ))}
-          </select>
-          {hasPermission('manage_automation') && (
-            <>
-              <button onClick={openCreate} className="neo-btn inline-flex items-center gap-2"><Plus size={16} /> Create Pipeline</button>
-              <button onClick={() => openEdit(activePipeline)} className="neo-btn inline-flex items-center gap-2"><Pencil size={16} /> Edit</button>
-              <button disabled={deletingPipeline || activePipeline.id === 'default'} onClick={deletePipeline} className="neo-btn inline-flex items-center gap-2 disabled:opacity-40"><Trash2 size={16} /> Delete</button>
-            </>
-          )}
-          {hasPermission('create_lead') && (
-            <Link to="/leads/new" className="neo-btn-primary inline-flex items-center gap-2"><UserPlus size={16} /> Add Lead</Link>
-          )}
-          <button onClick={handleExportPipeline} className="neo-btn inline-flex items-center gap-2"><Download size={16} /> Export</button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={handleExportExcel}
+            className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold"
+          >
+            <Download size={14} /> Export Excel
+          </button>
+          <Link
+            to="/leads/new"
+            className="neo-btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5 font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+          >
+            <UserPlus size={14} /> Add Customer Lead
+          </Link>
         </div>
       </div>
 
-      {editorOpen && (
-        <div className="neo-card space-y-4">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-lg font-bold text-primary-dark">{editingPipelineId ? 'Edit Pipeline' : 'Create Pipeline'}</h2>
-              <p className="text-sm text-secondary">Add, rename, or remove stages for this scenario.</p>
-            </div>
-            <button onClick={() => setEditorOpen(false)} className="neo-btn inline-flex items-center gap-2"><X size={16} /> Close</button>
-          </div>
+      {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom) */}
+      <div className="flex items-center justify-between gap-4 p-2 bg-slate-100/80 rounded-2xl border border-shadow-darker/10 flex-wrap">
+        <div className="flex items-center gap-2 overflow-x-auto py-1">
+          {pipelines.map((pipe) => {
+            const isSelected = pipe.id === activePipeline.id;
+            return (
+              <button
+                key={pipe.id}
+                onClick={() => handleSelectPipeline(pipe.id)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
+                  isSelected
+                    ? 'bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
+                    : 'text-secondary hover:text-primary-dark hover:bg-white/60'
+                }`}
+              >
+                <span>{pipe.name}</span>
+                {pipe.scenario && (
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                      isSelected ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {pipe.scenario}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-semibold text-primary-dark mb-2">Pipeline Name</label>
-              <input className="neo-input w-full" value={pipelineDraft.name} onChange={(e) => setPipelineDraft((current) => ({ ...current, name: e.target.value }))} placeholder="Sales - Meta Leads" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-primary-dark mb-2">Scenario</label>
-              <input className="neo-input w-full" value={pipelineDraft.scenario} onChange={(e) => setPipelineDraft((current) => ({ ...current, scenario: e.target.value }))} placeholder="Meta Ads / Google Ads / Referral" />
-            </div>
-          </div>
+        {/* Pipeline Quick Summary */}
+        <div className="flex items-center gap-4 text-xs font-semibold px-3 py-1 text-secondary ml-auto">
+          <span>
+            Total Customers: <strong className="text-primary-dark">{totalPipelineLeads}</strong>
+          </span>
+          {totalPipelineValue > 0 && (
+            <span>
+              Pipeline Value:{' '}
+              <strong className="text-emerald-700">₹{totalPipelineValue.toLocaleString('en-IN')}</strong>
+            </span>
+          )}
+        </div>
+      </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <h3 className="text-sm font-bold text-primary-dark">Stages</h3>
-            </div>
-
-            <div className="space-y-3">
-              {pipelineDraft.stages.map((stage, index) => (
-                <div key={stage.id} className="border border-shadow-darker/10 rounded-2xl p-4 space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 items-end">
-                    <div>
-                      <label className="block text-xs uppercase tracking-[0.2em] text-secondary mb-2">Stage Label</label>
-                      <input className="neo-input w-full" value={stage.label} onChange={(e) => setPipelineDraft((current) => ({
-                        ...current,
-                        stages: current.stages.map((item, itemIndex) => itemIndex === index ? { ...item, label: e.target.value } : item),
-                      }))} placeholder="Stage label" />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => moveStageDraft(index, 'up')}
-                        disabled={index === 0}
-                        className="neo-btn inline-flex items-center gap-2 disabled:opacity-40"
-                      >
-                        <ArrowUp size={14} /> Up
-                      </button>
-                      <button
-                        onClick={() => moveStageDraft(index, 'down')}
-                        disabled={index === pipelineDraft.stages.length - 1}
-                        className="neo-btn inline-flex items-center gap-2 disabled:opacity-40"
-                      >
-                        <ArrowDown size={14} /> Down
-                      </button>
-                      <button
-                        disabled={pipelineDraft.stages.length === 1}
-                        onClick={() => setPipelineDraft((current) => ({ ...current, stages: current.stages.filter((_, itemIndex) => itemIndex !== index) }))}
-                        className="neo-btn inline-flex items-center gap-2 disabled:opacity-40"
-                      >
-                        <Trash2 size={14} /> Remove
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-4 text-xs">
-                    <span className="text-secondary font-semibold">Stage Requirements:</span>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={(stage.required_fields || []).includes('phone')}
-                        onChange={() => {
-                          const currentReqs = stage.required_fields || [];
-                          const nextReqs = currentReqs.includes('phone') ? currentReqs.filter(f => f !== 'phone') : [...currentReqs, 'phone'];
-                          setPipelineDraft(curr => ({
-                            ...curr,
-                            stages: curr.stages.map((item, i) => i === index ? { ...item, required_fields: nextReqs } : item)
-                          }));
-                        }}
-                      />
-                      Phone Number
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={(stage.required_fields || []).includes('email')}
-                        onChange={() => {
-                          const currentReqs = stage.required_fields || [];
-                          const nextReqs = currentReqs.includes('email') ? currentReqs.filter(f => f !== 'email') : [...currentReqs, 'email'];
-                          setPipelineDraft(curr => ({
-                            ...curr,
-                            stages: curr.stages.map((item, i) => i === index ? { ...item, required_fields: nextReqs } : item)
-                          }));
-                        }}
-                      />
-                      Email
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={(stage.required_fields || []).includes('reason')}
-                        onChange={() => {
-                          const currentReqs = stage.required_fields || [];
-                          const nextReqs = currentReqs.includes('reason') ? currentReqs.filter(f => f !== 'reason') : [...currentReqs, 'reason'];
-                          setPipelineDraft(curr => ({
-                            ...curr,
-                            stages: curr.stages.map((item, i) => i === index ? { ...item, required_fields: nextReqs } : item)
-                          }));
-                        }}
-                      />
-                      Lost/Drop Reason
-                    </label>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-start pt-2">
-              <button onClick={() => setPipelineDraft((current) => ({ ...current, stages: [...current.stages, newStage(current.stages.length + 1)] }))} className="neo-btn inline-flex items-center gap-2"><Plus size={14} /> Add stage</button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 flex-wrap">
-            <button disabled={savingPipeline} onClick={savePipeline} className="neo-btn-primary inline-flex items-center gap-2">
-              {savingPipeline ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
-              Save Pipeline
+      {/* Search & Filter Bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-secondary" />
+          <input
+            type="text"
+            className="neo-input w-full pl-10 text-xs"
+            placeholder="Search by customer name, phone, company, event, sales person..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary-dark"
+            >
+              <X size={14} />
             </button>
-            <button onClick={() => setEditorOpen(false)} className="neo-btn inline-flex items-center gap-2">Cancel</button>
-          </div>
+          )}
         </div>
-      )}
-      {followUpModalOpen && followUpLead && (
-        <div className="fixed inset-0 bg-shadow-darker/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="neo-card max-w-lg w-full space-y-4 animate-scale-up bg-surface">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-primary-dark">Schedule Follow-up</h2>
-                <p className="text-sm text-secondary">Set follow-up details for {followUpLead.name}</p>
-              </div>
-              <button
-                onClick={() => {
-                  setFollowUpModalOpen(false);
-                  setFollowUpLead(null);
-                }}
-                className="neo-btn !p-1.5"
-              >
-                <X size={16} />
-              </button>
-            </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1.5">Follow-up Title</label>
-                <input
-                  className="neo-input w-full"
-                  value={followUpTitle}
-                  onChange={(e) => setFollowUpTitle(e.target.value)}
-                  placeholder="e.g. Discuss Quotation details"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1.5">Customer Response / Reason</label>
-                <select
-                  className="neo-input w-full"
-                  value={followUpReason}
-                  onChange={(e) => setFollowUpReason(e.target.value)}
-                >
-                  <option value="Asked to call back">Asked to call back</option>
-                  <option value="Needs more time">Needs more time</option>
-                  <option value="Send quotation/info">Send quotation/info</option>
-                  <option value="Not picking up">Not picking up</option>
-                  <option value="Busy/In a meeting">Busy/In a meeting</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1.5">Description / Notes</label>
-                <textarea
-                  className="neo-input w-full min-h-24 resize-y"
-                  value={followUpDescription}
-                  onChange={(e) => setFollowUpDescription(e.target.value)}
-                  placeholder="Details about the follow-up task..."
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-primary-dark mb-1.5">Date</label>
-                  <input
-                    type="date"
-                    className="neo-input w-full"
-                    value={followUpDate}
-                    onChange={(e) => setFollowUpDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-primary-dark mb-1.5">Time</label>
-                  <input
-                    type="time"
-                    className="neo-input w-full"
-                    value={followUpTime}
-                    onChange={(e) => setFollowUpTime(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setFollowUpModalOpen(false);
-                  setFollowUpLead(null);
-                }}
-                className="neo-btn"
-                disabled={followUpSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveFollowUp}
-                className="neo-btn-primary flex items-center gap-2"
-                disabled={followUpSaving}
-              >
-                {followUpSaving ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
-                Schedule Follow-up
-              </button>
-            </div>
-          </div>
+        {/* Urgency Filter */}
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-secondary font-bold">Urgency:</span>
+          <select
+            className="neo-input !py-1.5 !text-xs"
+            value={urgencyFilter}
+            onChange={(e) => setUrgencyFilter(e.target.value)}
+          >
+            <option value="all">All Urgencies</option>
+            <option value="high">🔥 High Urgency</option>
+            <option value="medium">⚡ Medium Urgency</option>
+            <option value="low">🌱 Low Urgency</option>
+          </select>
         </div>
-      )}
 
-      {lostModalOpen && lostLead && (
-        <div className="fixed inset-0 bg-shadow-darker/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="neo-card max-w-lg w-full space-y-4 animate-scale-up bg-surface">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-primary-dark">Enter Reason</h2>
-                <p className="text-sm text-secondary">Please provide a reason for moving {lostLead.name} to the {activeStages.find(s => s.id === lostNextStageId)?.label || 'selected'} stage</p>
-              </div>
-              <button
-                onClick={() => {
-                  setLostModalOpen(false);
-                  setLostLead(null);
-                }}
-                className="neo-btn !p-1.5"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1.5">Lost Reason</label>
-                <textarea
-                  className="neo-input w-full min-h-28 resize-y"
-                  value={lostReason}
-                  onChange={(e) => setLostReason(e.target.value)}
-                  placeholder="Required. e.g. Price too high / Went with a competitor / No response"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setLostModalOpen(false);
-                  setLostLead(null);
-                }}
-                className="neo-btn"
-                disabled={lostSaving}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveLostReason}
-                className="neo-btn-primary flex items-center gap-2"
-                disabled={lostSaving}
-              >
-                {lostSaving ? <Loader2 className="animate-spin" size={16} /> : null}
-                Save & Move
-              </button>
-            </div>
-          </div>
+        {/* AI Qualification Filter */}
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-secondary font-bold">AI Status:</span>
+          <select
+            className="neo-input !py-1.5 !text-xs"
+            value={qualificationFilter}
+            onChange={(e) => setQualificationFilter(e.target.value)}
+          >
+            <option value="all">All Qualifications</option>
+            <option value="Qualified">✨ Qualified</option>
+            <option value="Needs Follow-up">⏳ Needs Follow-up</option>
+            <option value="Not Qualified">❌ Not Qualified</option>
+          </select>
         </div>
-      )}
+      </div>
 
       {message && (
-        <div className="neo-card !p-3 bg-primary/5 border border-primary/20 text-sm text-primary-dark flex items-start gap-2">
-          <CircleAlert size={16} className="mt-0.5 text-primary-dark" />
-          <span>{message}</span>
+        <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs text-primary-dark flex items-start justify-between gap-2 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CircleAlert size={16} className="text-primary shrink-0" />
+            <span>{message}</span>
+          </div>
+          <button onClick={() => setMessage('')} className="text-secondary hover:text-primary-dark">
+            <X size={14} />
+          </button>
         </div>
       )}
 
-      {isLoading ? (
-        <div className="py-16 text-center text-secondary">
-          <Loader2 className="animate-spin mx-auto mb-3" size={20} />
-          Loading pipelines...
+      {/* Horizontal Scrollable Stages Container */}
+      {loadingLeads || loadingPipelines ? (
+        <div className="py-24 text-center text-secondary">
+          <Loader2 size={24} className="animate-spin mx-auto mb-2 text-primary" />
+          Loading pipeline board...
         </div>
       ) : (
         <div className="relative group/pipeline">
@@ -1005,147 +592,203 @@ export default function PipelineBoard() {
             <ChevronRight size={22} className="stroke-[2.5]" />
           </button>
 
-          {/* Horizontal Scrollable Stages Container */}
           <div
             ref={scrollContainerRef}
             onScroll={checkScroll}
             onDragOver={handleContainerDragOver}
-            className="flex flex-nowrap items-start gap-4 overflow-x-auto snap-x snap-mandatory pb-4 pt-1 px-1 pipeline-scrollbar scroll-smooth"
+            className="flex flex-nowrap items-start gap-4 overflow-x-auto pb-6 pt-1 px-1 pipeline-scrollbar scroll-smooth"
             style={{ WebkitOverflowScrolling: 'touch' }}
           >
-            {activeStages.map((stage, index) => (
-              <div
-                key={stage.id}
-                className={`flex-shrink-0 flex-grow-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] xl:w-[calc((100%-3rem)/4)] snap-start neo-card space-y-4 border ${stageTone(index)}`}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onDrop={() => handleDrop(stage.id)}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-primary-dark">{stage.label}</h2>
-                  </div>
-                  <div className="text-sm font-black text-primary-dark">{grouped[stage.id]?.length || 0}</div>
-                </div>
+            {activeStages.map((stage, index) => {
+              const stageLeads = groupedLeads[stage.id] || [];
+              const stageVal = stageLeads.reduce((s, l) => s + (Number(l.value) || 0), 0);
 
-                <div className="space-y-3 min-h-[120px]">
-                  {(grouped[stage.id] || []).length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-shadow-darker/20 p-4 text-sm text-secondary text-center">Drop leads here</div>
-                  ) : (
-                    (grouped[stage.id] || []).map((lead) => (
-                      <div 
-                        key={lead.id} 
-                        draggable 
-                        onDragStart={(e) => {
-                          e.dataTransfer.effectAllowed = 'move';
-                          e.dataTransfer.setData('text/plain', lead.id);
-                          setDragId(lead.id);
-                        }} 
-                        onDragEnd={() => setDragId('')} 
-                        className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow relative overflow-hidden"
-                      >
-                        {/* AI Qualification Indicator Bar */}
-                        {lead.qualification_status === 'Qualified' && (
-                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400" />
-                        )}
-                        {lead.qualification_status === 'Needs Follow-up' && (
-                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-400" />
-                        )}
-                        {lead.qualification_status === 'Not Qualified' && (
-                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-red-400" />
-                        )}
-
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-semibold text-primary-dark">{lead.name}</div>
-                            <div className="text-xs text-secondary mt-0.5">{lead.phone || lead.email || 'No contact yet'}</div>
-                          </div>
-                          <GripVertical size={16} className="text-secondary shrink-0" />
-                        </div>
-
-                        {/* AI Badges & Qualification Tags */}
-                        {(lead.qualification_status || lead.urgency || lead.flag_for_review) && (
-                          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                            {lead.qualification_status === 'Qualified' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                                <Sparkles size={10} /> Qualified
-                              </span>
-                            )}
-                            {lead.qualification_status === 'Needs Follow-up' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                                <Bot size={10} /> Needs Follow-up
-                              </span>
-                            )}
-                            {lead.qualification_status === 'Not Qualified' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20">
-                                Not Qualified
-                              </span>
-                            )}
-                            {lead.urgency === 'high' && (
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-red-500/10 text-red-600 border border-red-500/20">
-                                Urgent
-                              </span>
-                            )}
-                            {lead.flag_for_review && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-yellow-500/10 text-yellow-700 border border-yellow-500/20" title="Low confidence or ambiguous">
-                                <AlertTriangle size={10} /> Review
-                              </span>
-                            )}
-                          </div>
-                        )}
-
-                        {lead.requirement && (
-                          <div className="mt-2 text-xs bg-shadow-darker/5 p-2 rounded-xl text-primary-dark line-clamp-2 border border-shadow-darker/10">
-                            <span className="text-secondary font-medium">Req: </span>{lead.requirement}
-                          </div>
-                        )}
-
-                        <div className="mt-3 space-y-1 text-xs text-secondary">
-                          <div>{lead.source}</div>
-                          <div>{lead.campaign || 'No campaign'}</div>
-                          <div>{formatDate(lead.created_at)}</div>
-                        </div>
-
-                        <div className="mt-4 flex items-center justify-between gap-2 pt-2 border-t border-shadow-darker/10">
-                          <Link to={`/leads/${lead.id}`} className="inline-flex items-center gap-1 text-primary-dark font-semibold text-sm hover:underline">
-                            Open <ArrowRight size={13} />
-                          </Link>
-                          <button onClick={() => moveLead(lead, nextStageIdFor(index))} className="text-xs font-semibold text-secondary hover:text-primary-dark">Next stage</button>
-                        </div>
+              return (
+                <div
+                  key={stage.id}
+                  className={`flex-shrink-0 flex-grow-0 w-80 neo-card space-y-3.5 border ${stageTone(index)} bg-slate-50/40 rounded-2xl`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={() => handleCardDrop(stage.id)}
+                >
+                  {/* Column Header */}
+                  <div className="flex items-start justify-between gap-2 border-b border-shadow-darker/10 pb-2.5">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-black text-primary-dark">
+                          {index + 1}. {stage.label}
+                        </span>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {hasUnmapped && (
-              <div className="flex-shrink-0 flex-grow-0 w-full sm:w-[calc((100%-1rem)/2)] lg:w-[calc((100%-2rem)/3)] xl:w-[calc((100%-3rem)/4)] snap-start neo-card space-y-4 border bg-shadow-darker/5 border-shadow-darker/20">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-lg font-bold text-primary-dark">Other</h2>
-                    <p className="text-xs text-secondary mt-1">Leads whose status is not mapped to this pipeline.</p>
-                  </div>
-                  <div className="text-sm font-black text-primary-dark">{grouped.other?.length || 0}</div>
-                </div>
-                <div className="space-y-3 min-h-[120px]">
-                  {(grouped.other || []).map((lead) => (
-                    <div key={lead.id} className="rounded-2xl bg-surface border border-shadow-darker/10 p-4 shadow-sm">
-                      <div className="font-semibold text-primary-dark">{lead.name}</div>
-                      <div className="text-xs text-secondary mt-1">{lead.status}</div>
+                      {stageVal > 0 && (
+                        <div className="text-[11px] font-bold text-emerald-700 mt-0.5">
+                          ₹{stageVal.toLocaleString('en-IN')}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-surface border border-shadow-darker/15 text-primary-dark shadow-xs">
+                      {stageLeads.length}
+                    </span>
+                  </div>
+
+                  {/* Customer Cards List */}
+                  <div className="space-y-3 min-h-[160px]">
+                    {stageLeads.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-shadow-darker/20 p-5 text-xs text-secondary text-center">
+                        Drop customer card here to move to {stage.label}
+                      </div>
+                    ) : (
+                      stageLeads.map((lead) => (
+                        <div
+                          key={lead.id}
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            e.dataTransfer.setData('text/plain', lead.id);
+                            setDragId(lead.id);
+                          }}
+                          onDragEnd={() => setDragId('')}
+                          className="rounded-2xl bg-surface border border-shadow-darker/10 p-3.5 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all relative overflow-hidden group space-y-2.5"
+                        >
+                          {/* AI Qualification Bar */}
+                          {lead.qualification_status === 'Qualified' && (
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400" />
+                          )}
+                          {lead.qualification_status === 'Needs Follow-up' && (
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-400" />
+                          )}
+                          {lead.qualification_status === 'Not Qualified' && (
+                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-red-400" />
+                          )}
+
+                          {/* Customer Title & Phone */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <Link
+                                to={`/leads/${lead.id}`}
+                                className="font-bold text-sm text-primary-dark hover:text-primary transition-colors block"
+                              >
+                                {lead.name}
+                              </Link>
+                              {lead.company && (
+                                <div className="text-xs text-secondary flex items-center gap-1 mt-0.5">
+                                  <Building size={11} /> {lead.company}
+                                </div>
+                              )}
+                            </div>
+                            <GripVertical size={16} className="text-secondary/50 shrink-0 group-hover:text-primary" />
+                          </div>
+
+                          {/* Phone & Contact */}
+                          {lead.phone && (
+                            <div className="text-xs text-slate-600 flex items-center gap-1.5 font-mono">
+                              <Phone size={12} className="text-emerald-600" />
+                              <span>{lead.phone}</span>
+                            </div>
+                          )}
+
+                          {/* Order Specs Matrix (Quantity, Value, Event Date, Delivery) */}
+                          <div className="grid grid-cols-2 gap-1.5 text-[11px] pt-1 border-t border-shadow-darker/5">
+                            {lead.required_quantity ? (
+                              <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 font-semibold text-primary-dark">
+                                🎯 {lead.required_quantity} pcs
+                              </div>
+                            ) : null}
+
+                            {lead.value ? (
+                              <div className="bg-emerald-50/70 px-2 py-1 rounded-md border border-emerald-100 font-bold text-emerald-800">
+                                ₹{Number(lead.value).toLocaleString('en-IN')}
+                              </div>
+                            ) : null}
+
+                            {lead.event_date ? (
+                              <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary">
+                                📅 {lead.event_date}
+                              </div>
+                            ) : null}
+
+                            {lead.delivery_date ? (
+                              <div className="bg-amber-50 px-2 py-1 rounded-md border border-amber-100 text-amber-900 font-medium">
+                                🚚 {lead.delivery_date}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {/* Assigned Rep & Badges */}
+                          <div className="flex items-center justify-between gap-1 text-[10px] text-secondary pt-1 flex-wrap">
+                            {lead.sales_person ? (
+                              <span className="flex items-center gap-1 font-semibold text-slate-700">
+                                <User size={10} /> {lead.sales_person}
+                              </span>
+                            ) : (
+                              <span>EcoTrophy Team</span>
+                            )}
+
+                            {lead.urgency === 'high' && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">
+                                High Urgency
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Card Footer Actions */}
+                          <div className="flex items-center justify-between pt-2 border-t border-shadow-darker/10">
+                            <Link
+                              to={`/leads/${lead.id}`}
+                              className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1"
+                            >
+                              <Eye size={12} /> View 360°
+                            </Link>
+
+                            {/* Quick Stage Move Dropdown */}
+                            <select
+                              aria-label={`Move stage for ${lead.name}`}
+                              className="text-[11px] font-semibold bg-slate-100 rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
+                              value={lead.status || stage.id}
+                              onChange={(e) => handleQuickMove(lead, e.target.value)}
+                            >
+                              <option value="" disabled>
+                                Move stage...
+                              </option>
+                              {activeStages.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  ➔ {s.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })}
           </div>
         </div>
       )}
+
+      {/* Confirmation & Notification Dispatch Modal */}
+      <StageChangeConfirmModal
+        isOpen={confirmModalState.isOpen}
+        lead={confirmModalState.lead}
+        fromStage={confirmModalState.fromStage}
+        toStage={confirmModalState.toStage}
+        pipelineId={activePipeline.id}
+        pipelineName={activePipeline.name}
+        onClose={() =>
+          setConfirmModalState({
+            isOpen: false,
+            lead: null,
+            fromStage: { id: '', label: '' },
+            toStage: { id: '', label: '' },
+          })
+        }
+        onSuccess={(res) => {
+          setMessage(res.message);
+        }}
+      />
     </div>
   );
 }
-
-
-

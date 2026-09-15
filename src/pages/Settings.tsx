@@ -23,7 +23,8 @@ import {
   KeyRound,
   ExternalLink,
   ShieldAlert,
-  Users
+  Users,
+  MessageSquare
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
@@ -35,6 +36,7 @@ import React, { lazy, Suspense } from 'react';
 import { getDocumentPreview, getFinancialYearInfo, syncExistingDocumentNumbers } from '../utils/numberGenerator';
 
 const MetaIntegrationPanel = lazy(() => import('../components/settings/MetaIntegrationPanel'));
+const PipelineSettingsTab = lazy(() => import('../components/settings/PipelineSettingsTab'));
 
 export default function Settings() {
   const { settings, updateSettings } = useSettings();
@@ -301,6 +303,10 @@ export default function Settings() {
           <button onClick={() => setActiveTab('security')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'security' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
              <ShieldIcon size={18} className={activeTab === 'security' ? "text-primary" : "text-secondary"} />
              <span className={clsx("font-bold", activeTab === 'security' ? "text-primary-dark" : "text-secondary")}>Security & Audits</span>
+          </button>
+          <button onClick={() => setActiveTab('pipeline_automation')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'pipeline_automation' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+             <MessageSquare size={18} className={activeTab === 'pipeline_automation' ? "text-primary" : "text-secondary"} />
+             <span className={clsx("font-bold", activeTab === 'pipeline_automation' ? "text-primary-dark" : "text-secondary")}>Pipeline Automation / Stage Messages</span>
           </button>
           <button onClick={() => setActiveTab('integrations')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'integrations' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
              <Database size={18} className={activeTab === 'integrations' ? "text-primary" : "text-secondary"} />
@@ -1112,6 +1118,17 @@ export default function Settings() {
                 </div>
               </div>
             </section>
+          )}
+
+          {activeTab === 'pipeline_automation' && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center p-12 text-secondary">
+                <Loader2 className="animate-spin mr-2" size={24} />
+                <span>Loading Pipeline Automation Settings...</span>
+              </div>
+            }>
+              <PipelineSettingsTab />
+            </Suspense>
           )}
 
           {activeTab === 'integrations' && (

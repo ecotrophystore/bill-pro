@@ -1,16 +1,67 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { httpsCallable } from 'firebase/functions';
-import { collection, doc, onSnapshot, query, where, updateDoc, addDoc } from 'firebase/firestore';
-import { ArrowLeft, BadgeCheck, CalendarDays, Loader2, Mail, MessageSquare, Phone, Save, Send, Sparkles, Bot, AlertTriangle, CheckCircle2, DollarSign, Clock, MapPin, Target } from 'lucide-react';
-import { db, functions } from '../lib/firebase';
-import type { Lead, LeadActivity, MessageTemplate, Pipeline, User } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useParams, useNavigate } from 'react-router-dom';
+import { collection, doc, onSnapshot, query, where, updateDoc, addDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BadgeCheck,
+  CalendarDays,
+  Loader2,
+  Mail,
+  MessageSquare,
+  Phone,
+  Save,
+  Send,
+  Sparkles,
+  Bot,
+  AlertTriangle,
+  CheckCircle2,
+  DollarSign,
+  Clock,
+  MapPin,
+  Target,
+  Building,
+  Truck,
+  FileText,
+  User,
+  History,
+  ShieldCheck,
+  Check,
+  X,
+} from 'lucide-react';
+import { db, auth } from '../lib/firebase';
+import {
+  type Lead,
+  type LeadActivity,
+  type MessageTemplate,
+  type Pipeline,
+  type PipelineStage,
+  type User as DBUser,
+  type StageHistoryEntry,
+  type NotificationHistoryEntry,
+  STANDARD_CRM_STAGES,
+  DEFAULT_QUANTITY_PIPELINES,
+} from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
+import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
+import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner';
+import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 
 type LeadFormState = {
   name: string;
+  company: string;
   phone: string;
   email: string;
+  location: string;
+  required_quantity: string;
+  value: string;
+  event_name: string;
+  event_date: string;
+  delivery_date: string;
+  trophy_size: string;
+  sales_person: string;
+  design_person: string;
+  tracking_number: string;
   source: string;
   campaign: string;
   owner_id: string;
@@ -19,50 +70,20 @@ type LeadFormState = {
   next_follow_up_date: string;
 };
 
-type StageDraft = {
-  id: string;
-  label: string;
-};
-
-const DEFAULT_STAGES: StageDraft[] = [
-  { id: 'new', label: 'New' },
-  { id: 'contacted', label: 'Contacted' },
-  { id: 'qualified', label: 'Qualified' },
-  { id: 'lost', label: 'Lost' },
-];
-
-function normalizePipeline(pipeline: any): Pipeline {
-  const stages = Array.isArray(pipeline?.stages) && pipeline.stages.length > 0
-    ? pipeline.stages.map((stage: any, index: number) => ({
-        id: String(stage?.id || `stage_${index + 1}`),
-        label: String(stage?.label || `Stage ${index + 1}`),
-      }))
-    : DEFAULT_STAGES.map((stage) => ({ ...stage }));
-
-  return {
-    id: String(pipeline?.id || 'default'),
-    name: String(pipeline?.name || 'Default pipeline'),
-    scenario: String(pipeline?.scenario || 'General'),
-    is_default: pipeline?.is_default === true || pipeline?.id === 'default',
-    stages,
-    created_at: pipeline?.created_at || (new Date() as any),
-    updated_at: pipeline?.updated_at,
-  };
-}
-
 function formatDate(value: any) {
   if (!value) return '-';
-  if (typeof value.toDate === 'function') return value.toDate().toLocaleString();
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toLocaleString();
+  if (typeof value.toDate === 'function') return value.toDate().toLocaleString('en-IN');
+  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000).toLocaleString('en-IN');
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-IN');
 }
 
 function toDateInputValue(value: any) {
   if (!value) return '';
-  const date = typeof value.toDate === 'function'
-    ? value.toDate()
-    : typeof value.seconds === 'number'
+  const date =
+    typeof value.toDate === 'function'
+      ? value.toDate()
+      : typeof value.seconds === 'number'
       ? new Date(value.seconds * 1000)
       : new Date(value);
 
@@ -72,32 +93,50 @@ function toDateInputValue(value: any) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-function renderTemplateText(template: string, values: Record<string, string>) {
-  return String(template || '').replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, key) => values[key] || '');
-}
-
 export default function LeadDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [lead, setLead] = useState<Lead | null>(null);
-  const [pipeline, setPipeline] = useState<Pipeline>(normalizePipeline({ id: 'default' }));
-  const [users, setUsers] = useState<User[]>([]);
+  const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
+  const [users, setUsers] = useState<DBUser[]>([]);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
-  const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  const [selectedTemplateId, setSelectedTemplateId] = useState('');
-  const [queueing, setQueueing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [templateFeedback, setTemplateFeedback] = useState('');
+  const [activeTab, setActiveTab] = useState<'details' | 'history' | 'quotation'>('details');
+  const [dismissedReassign, setDismissedReassign] = useState(false);
   const { hasPermission } = useCRMPermission();
+
+  // Stage change modal state
+  const [stageModalState, setStageModalState] = useState<{
+    isOpen: boolean;
+    fromStage: PipelineStage;
+    toStage: PipelineStage;
+  }>({
+    isOpen: false,
+    fromStage: { id: '', label: '' },
+    toStage: { id: '', label: '' },
+  });
+
   const [form, setForm] = useState<LeadFormState>({
     name: '',
+    company: '',
     phone: '',
     email: '',
+    location: '',
+    required_quantity: '',
+    value: '',
+    event_name: '',
+    event_date: '',
+    delivery_date: '',
+    trophy_size: '',
+    sales_person: '',
+    design_person: '',
+    tracking_number: '',
     source: '',
     campaign: '',
     owner_id: '',
-    status: 'new',
+    status: 'new_enquiry',
     reason: '',
     next_follow_up_date: '',
   });
@@ -105,36 +144,62 @@ export default function LeadDetail() {
   useEffect(() => {
     if (!db || !id) return;
 
-    const unsubLead = onSnapshot(doc(db, 'leads', id), (snapshot) => {
-      setLead(snapshot.exists() ? ({ id: snapshot.id, ...snapshot.data() } as Lead) : null);
-      setLoading(false);
-    }, (error) => {
-      console.error('Lead detail failed', error);
-      setLoading(false);
+    // Load lead doc
+    const unsubLead = onSnapshot(
+      doc(db, 'leads', id),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          setLead({ id: snapshot.id, ...snapshot.data() } as Lead);
+        } else {
+          setLead(null);
+        }
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Lead load failed', error);
+        setLoading(false);
+      }
+    );
+
+    // Load pipelines
+    const unsubPipelines = onSnapshot(collection(db, 'pipelines'), (snap) => {
+      if (!snap.empty) {
+        setPipelines(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pipeline)));
+      }
     });
 
-    const usersQuery = query(collection(db, 'users'));
-    const unsubUsers = onSnapshot(usersQuery, (snapshot) => {
-      const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as User));
-      rows.sort((a, b) => a.name.localeCompare(b.name));
-      setUsers(rows.filter((user) => user.is_active !== false));
-    }, (error) => {
-      console.error('Lead users load failed', error);
+    // Load users
+    const unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
+      setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DBUser)));
     });
 
-    const activityQuery = query(collection(db, 'activities'), where('lead_id', '==', id));
-    const unsubActivities = onSnapshot(activityQuery, (snapshot) => {
-      const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as LeadActivity));
-      rows.sort((a, b) => {
-        const at = typeof a.created_at?.toDate === 'function' ? a.created_at.toDate().getTime() : new Date((a.created_at as any)?.seconds ? (a.created_at as any).seconds * 1000 : a.created_at as any).getTime();
-        const bt = typeof b.created_at?.toDate === 'function' ? b.created_at.toDate().getTime() : new Date((b.created_at as any)?.seconds ? (b.created_at as any).seconds * 1000 : b.created_at as any).getTime();
-        return bt - at;
-      });
-      setActivities(rows);
-    });
+    // Load activities
+    const unsubActivities = onSnapshot(
+      query(collection(db, 'activities'), where('lead_id', '==', id)),
+      (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeadActivity));
+        rows.sort((a, b) => {
+          const at =
+            typeof a.created_at?.toDate === 'function'
+              ? a.created_at.toDate().getTime()
+              : (a.created_at as any)?.seconds
+              ? (a.created_at as any).seconds * 1000
+              : 0;
+          const bt =
+            typeof b.created_at?.toDate === 'function'
+              ? b.created_at.toDate().getTime()
+              : (b.created_at as any)?.seconds
+              ? (b.created_at as any).seconds * 1000
+              : 0;
+          return bt - at;
+        });
+        setActivities(rows);
+      }
+    );
 
     return () => {
       unsubLead();
+      unsubPipelines();
       unsubUsers();
       unsubActivities();
     };
@@ -143,573 +208,654 @@ export default function LeadDetail() {
   useEffect(() => {
     if (!lead) return;
 
-    const pipelineId = lead.pipeline_id || 'default';
-    if (!db) return;
-
-    const unsubPipeline = onSnapshot(doc(db, 'pipelines', pipelineId), (snapshot) => {
-      setPipeline(snapshot.exists() ? normalizePipeline({ id: snapshot.id, ...snapshot.data() }) : normalizePipeline({ id: pipelineId }));
-    }, (error) => {
-      console.error('Pipeline load failed', error);
-      setPipeline(normalizePipeline({ id: pipelineId }));
-    });
-
-    return () => unsubPipeline();
-  }, [lead?.pipeline_id]);
-
-  useEffect(() => {
-    if (!lead || !db) return;
-
-    const templateQuery = query(collection(db, 'message_templates'));
-    const unsubTemplates = onSnapshot(templateQuery, (snapshot) => {
-      const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as MessageTemplate));
-      rows.sort((a, b) => a.name.localeCompare(b.name));
-      setTemplates(rows);
-    }, (error) => {
-      console.error('Message templates load failed', error);
-    });
-
-    return () => unsubTemplates();
-  }, [lead, pipeline.id]);
-
-  useEffect(() => {
-    if (!templates.length) {
-      setSelectedTemplateId('');
-      return;
-    }
-
-    if (!templates.some((template) => template.id === selectedTemplateId)) {
-      setSelectedTemplateId(templates[0].id);
-    }
-  }, [templates, selectedTemplateId]);
-
-  useEffect(() => {
-    if (!lead) return;
-
     setForm({
       name: lead.name || '',
+      company: lead.company || lead.organization || '',
       phone: lead.phone || '',
       email: lead.email || '',
+      location: lead.location || '',
+      required_quantity: lead.required_quantity ? String(lead.required_quantity) : '',
+      value: lead.value ? String(lead.value) : '',
+      event_name: lead.event_name || '',
+      event_date: lead.event_date || '',
+      delivery_date: lead.delivery_date || '',
+      trophy_size: lead.trophy_size || '',
+      sales_person: lead.sales_person || '',
+      design_person: lead.design_person || '',
+      tracking_number: lead.tracking_number || '',
       source: lead.source || '',
       campaign: lead.campaign || '',
       owner_id: lead.owner_id || '',
-      status: lead.status || 'new',
+      status: lead.status || 'new_enquiry',
       reason: lead.reason || '',
       next_follow_up_date: toDateInputValue(lead.next_follow_up_date),
     });
   }, [lead]);
 
-  const handleSave = async () => {
-    if (!functions || !id) {
-      setFeedback('Firebase Functions is not initialized.');
-      return;
-    }
+  const activePipeline = useMemo(() => {
+    if (!lead) return DEFAULT_QUANTITY_PIPELINES[1];
+    const found = pipelines.find((p) => p.id === lead.pipeline_id);
+    return found || DEFAULT_QUANTITY_PIPELINES[1];
+  }, [lead, pipelines]);
 
-    const ownerChanged = form.owner_id !== (lead?.owner_id || '');
-    if (ownerChanged && !hasPermission('assign_lead')) {
-      setFeedback('Error: You do not have permission to assign leads.');
-      return;
-    }
-    const statusChanged = form.status !== (lead?.status || '');
-    if (statusChanged && !hasPermission('move_stage')) {
-      setFeedback('Error: You do not have permission to move lead stage.');
-      return;
-    }
-    const otherFieldsChanged = form.name !== (lead?.name || '') ||
-                               form.phone !== (lead?.phone || '') ||
-                               form.email !== (lead?.email || '') ||
-                               form.source !== (lead?.source || '') ||
-                               form.campaign !== (lead?.campaign || '') ||
-                               form.reason !== (lead?.reason || '') ||
-                               form.next_follow_up_date !== toDateInputValue(lead?.next_follow_up_date);
+  const activeStages = useMemo(() => {
+    return activePipeline?.stages?.length ? activePipeline.stages : STANDARD_CRM_STAGES;
+  }, [activePipeline]);
 
-    if (otherFieldsChanged && !hasPermission('edit_lead')) {
-      setFeedback('Error: You do not have permission to edit lead details.');
-      return;
-    }
+  // Check if quantity/value qualifies for a different pipeline
+  const recommendedPipeline = useMemo(() => {
+    if (!lead || dismissedReassign) return null;
+    const qty = Number(form.required_quantity);
+    if (isNaN(qty) || qty <= 0) return null;
 
-    // Configurable validation check
-    const nextStage = pipeline.stages?.find(s => s.id === form.status) || { id: form.status, label: form.status, required_fields: [] };
-    const reqs = nextStage.required_fields || [];
-    if (reqs.includes('phone') && !form.phone.trim()) {
-      setFeedback(`Phone number is required for stage "${nextStage.label}".`);
-      return;
-    }
-    if (reqs.includes('email') && !form.email.trim()) {
-      setFeedback(`Email is required for stage "${nextStage.label}".`);
-      return;
-    }
-    if (reqs.includes('reason') && !form.reason.trim()) {
-      setFeedback(`Reason is required for stage "${nextStage.label}".`);
-      return;
-    }
+    const classification = classifyLeadPipeline(
+      { ...lead, required_quantity: qty, value: Number(form.value) || undefined },
+      [],
+      pipelines
+    );
 
+    const currentPipeId = lead.pipeline_id || 'regular_order';
+    if (classification.pipeline_id !== currentPipeId) {
+      return {
+        id: classification.pipeline_id,
+        name: classification.pipeline_name,
+        reason: classification.reason,
+      };
+    }
+    return null;
+  }, [lead, form.required_quantity, form.value, pipelines, dismissedReassign]);
+
+  const handleStageSelectChange = (newStageId: string) => {
+    if (!lead || newStageId === lead.status) return;
+
+    const fromStage = activeStages.find((s) => s.id === lead.status) || {
+      id: lead.status || 'new_enquiry',
+      label: lead.status || 'New Enquiry',
+    };
+    const toStage = activeStages.find((s) => s.id === newStageId) || {
+      id: newStageId,
+      label: newStageId,
+    };
+
+    setStageModalState({
+      isOpen: true,
+      fromStage,
+      toStage,
+    });
+  };
+
+  const handleReassignPipeline = async (targetPipelineId: string) => {
+    if (!db || !id) return;
+    try {
+      await updateDoc(doc(db, 'leads', id), {
+        pipeline_id: targetPipelineId,
+        updated_at: serverTimestamp(),
+      });
+      setFeedback(`Moved customer to ${pipelines.find((p) => p.id === targetPipelineId)?.name || 'Pipeline'}.`);
+      setDismissedReassign(true);
+    } catch (err: any) {
+      console.error('Failed to reassign pipeline:', err);
+      setFeedback('Error updating pipeline.');
+    }
+  };
+
+  const handleSaveDetails = async () => {
+    if (!db || !id) return;
     setSaving(true);
     setFeedback('');
 
     try {
-      const updateLeadDetails = httpsCallable(functions, 'updateLeadDetails');
-      const result = await updateLeadDetails({
-        leadId: id,
-        name: form.name,
-        phone: form.phone,
-        email: form.email,
-        source: form.source,
-        campaign: form.campaign,
-        owner_id: form.owner_id,
-        status: form.status,
-        reason: form.reason,
-        next_follow_up_date: form.next_follow_up_date,
+      const payload: any = {
+        name: form.name.trim(),
+        company: form.company.trim(),
+        phone: form.phone.trim(),
+        email: form.email.trim(),
+        location: form.location.trim(),
+        required_quantity: form.required_quantity ? Number(form.required_quantity) || form.required_quantity : '',
+        value: form.value ? Number(form.value) || 0 : 0,
+        event_name: form.event_name.trim(),
+        event_date: form.event_date.trim(),
+        delivery_date: form.delivery_date.trim(),
+        trophy_size: form.trophy_size.trim(),
+        sales_person: form.sales_person.trim(),
+        design_person: form.design_person.trim(),
+        tracking_number: form.tracking_number.trim(),
+        source: form.source.trim(),
+        campaign: form.campaign.trim(),
+        owner_id: form.owner_id.trim(),
+        reason: form.reason.trim(),
+        updated_at: serverTimestamp(),
+      };
+
+      if (form.next_follow_up_date) {
+        payload.next_follow_up_date = new Date(form.next_follow_up_date);
+      }
+
+      await updateDoc(doc(db, 'leads', id), payload);
+
+      // Record activity
+      await addDoc(collection(db, 'activities'), {
+        lead_id: id,
+        type: 'lead.updated',
+        message: `Lead details updated by ${auth?.currentUser?.displayName || auth?.currentUser?.email || 'User'}.`,
+        actor: auth?.currentUser?.uid || 'user',
+        created_at: serverTimestamp(),
       });
 
-      const data = result.data as { success?: boolean; changedFields?: string[] };
-      setFeedback(data.changedFields?.length ? `Saved changes: ${data.changedFields.join(', ')}` : 'Nothing changed.');
-    } catch (error: any) {
-      console.warn("Cloud function failed, attempting client-side save fallback:", error);
-      try {
-        await updateDoc(doc(db, 'leads', id), {
-          name: form.name,
-          phone: form.phone,
-          email: form.email,
-          source: form.source,
-          campaign: form.campaign,
-          owner_id: form.owner_id,
-          status: form.status,
-          reason: form.reason,
-          next_follow_up_date: form.next_follow_up_date,
-          updated_at: new Date()
-        });
-        setFeedback('Saved changes (fallback mode).');
-      } catch (fallbackError: any) {
-        console.error("Client-side fallback also failed:", fallbackError);
-        setFeedback(fallbackError?.message || 'Failed to save lead');
-      }
+      setFeedback('Customer details saved successfully.');
+    } catch (err: any) {
+      console.error('Save failed:', err);
+      setFeedback(err?.message || 'Failed to save changes.');
     } finally {
       setSaving(false);
     }
   };
 
+  const handleConvertToCustomer = async () => {
+    if (!db || !lead) return;
+    try {
+      const custRef = await addDoc(collection(db, 'customers'), {
+        name: lead.name,
+        phone: lead.phone || '',
+        email: lead.email || '',
+        company: lead.company || lead.organization || '',
+        type: 'business',
+        notes: `Converted from lead. Quantity: ${lead.required_quantity || '-'}, Event: ${lead.event_name || '-'}`,
+        created_at: serverTimestamp(),
+      });
+      setFeedback(`Converted to Customer record (${custRef.id}) in Customer Library!`);
+    } catch (e: any) {
+      console.error('Customer conversion failed:', e);
+      setFeedback('Failed to create customer record.');
+    }
+  };
+
   if (loading) {
-    return <div className="py-16 text-center text-secondary">Loading lead...</div>;
+    return (
+      <div className="py-24 text-center text-secondary">
+        <Loader2 size={24} className="animate-spin mx-auto mb-2 text-primary" />
+        Loading customer profile...
+      </div>
+    );
   }
 
   if (!lead) {
     return (
       <div className="space-y-4">
-        <Link to="/leads" className="inline-flex items-center gap-2 text-primary-dark font-semibold">
-          <ArrowLeft size={16} /> Back to leads
+        <Link to="/pipeline" className="inline-flex items-center gap-2 text-primary-dark font-semibold">
+          <ArrowLeft size={16} /> Back to pipeline
         </Link>
-        <div className="neo-card text-center py-16 text-secondary">Lead not found.</div>
+        <div className="neo-card text-center py-16 text-secondary">Customer record not found.</div>
       </div>
     );
   }
 
-  const stageLookup = new Map((pipeline.stages || DEFAULT_STAGES).map((stage) => [stage.id, stage.label]));
-  const statusLabel = stageLookup.get(lead.status) || lead.status;
-  const stageClass = lead.status === 'new'
-    ? 'bg-secondary/10 text-secondary'
-    : lead.status === 'contacted'
-      ? 'bg-warning/10 text-warning'
-      : lead.status === 'qualified'
-        ? 'bg-success/10 text-success'
-        : lead.status === 'lost'
-          ? 'bg-error/10 text-error'
-          : 'bg-primary/10 text-primary-dark';
-
-  const statusOptions = [...(pipeline.stages || DEFAULT_STAGES)];
-  if (!statusOptions.some((stage) => stage.id === lead.status)) {
-    statusOptions.unshift({ id: lead.status, label: lead.status });
-  }
-
-  const activeTemplate = templates.find((template) => template.id === selectedTemplateId) || templates[0] || null;
-  const templateContext = {
-    name: lead.name || '',
-    phone: lead.phone || '',
-    email: lead.email || '',
-    source: lead.source || '',
-    campaign: lead.campaign || '',
-    pipeline: pipeline.name || 'Default pipeline',
-    stage: statusLabel,
-    reason: lead.reason || '',
-  };
-  const renderedSubject = activeTemplate?.subject ? renderTemplateText(activeTemplate.subject, templateContext) : 'No subject';
-  const renderedBody = activeTemplate ? renderTemplateText(activeTemplate.body, templateContext) : 'No template selected.';
-
-  const handleQueueTemplate = async () => {
-    if (!functions || !id || !activeTemplate) {
-      setTemplateFeedback('Select a template first.');
-      return;
-    }
-
-    if (!hasPermission('send_message')) {
-      setTemplateFeedback('Error: You do not have permission to send template messages.');
-      return;
-    }
-
-    setQueueing(true);
-    setTemplateFeedback('');
-    try {
-      const queueLeadTemplateMessage = httpsCallable(functions, 'queueLeadTemplateMessage');
-      const result = await queueLeadTemplateMessage({ leadId: id, templateId: activeTemplate.id });
-      const data = result.data as { success?: boolean; queueId?: string; subject?: string; channel?: string };
-      setTemplateFeedback(`Queued ${activeTemplate.name}${data.channel ? ` via ${data.channel}` : ''}${data.queueId ? ` | ${data.queueId}` : ''}`);
-    } catch (error: any) {
-      console.warn("Cloud function failed, attempting client-side save fallback:", error);
-      try {
-        const queueRef = await addDoc(collection(db, 'message_queue'), {
-          lead_id: id,
-          template_id: activeTemplate.id,
-          pipeline_id: pipeline.id || "default",
-          channel: activeTemplate.channel || "note",
-          subject: renderedSubject,
-          body: renderedBody,
-          status: "queued",
-          created_by: "client-fallback",
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
-        
-        await addDoc(collection(db, 'activities'), {
-          lead_id: id,
-          type: "message.template.queued",
-          message: `${activeTemplate.name}${renderedSubject ? ` | ${renderedSubject}` : ""}: ${renderedBody}`,
-          actor: "system",
-          created_at: new Date(),
-        });
-        
-        setTemplateFeedback(`Queued ${activeTemplate.name} via ${activeTemplate.channel || 'note'} (fallback mode).`);
-      } catch (fallbackError: any) {
-        console.error("Client-side fallback also failed:", fallbackError);
-        setTemplateFeedback(fallbackError?.message || 'Failed to queue message');
-      }
-    } finally {
-      setQueueing(false);
-    }
-  };
+  const currentStageLabel = activeStages.find((s) => s.id === lead.status)?.label || lead.status;
+  const stageHistoryList = lead.stage_history || [];
+  const notificationHistoryList = lead.notification_history || [];
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      <Link to="/leads" className="inline-flex items-center gap-2 text-primary-dark font-semibold hover:underline">
-        <ArrowLeft size={16} /> Back to leads
-      </Link>
+    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
+      {/* Top Breadcrumb & Actions */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <Link
+          to="/pipeline"
+          className="inline-flex items-center gap-2 text-xs font-bold text-secondary hover:text-primary-dark transition-colors"
+        >
+          <ArrowLeft size={14} /> Back to Pipeline Board
+        </Link>
 
-      <div className="neo-card space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={handleConvertToCustomer}
+            className="neo-btn text-xs px-3.5 py-1.5 font-bold flex items-center gap-1.5 text-secondary hover:text-primary-dark"
+          >
+            <Building size={14} /> Save to Customer Library
+          </button>
+
+          <Link
+            to={`/quotations/new?lead_id=${lead.id}&name=${encodeURIComponent(lead.name)}&phone=${encodeURIComponent(
+              lead.phone || ''
+            )}&company=${encodeURIComponent(lead.company || '')}`}
+            className="neo-btn-primary text-xs px-4 py-1.5 font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex items-center gap-1.5 shadow-md"
+          >
+            <FileText size={14} /> Create Quotation
+          </Link>
+        </div>
+      </div>
+
+      {/* Pipeline Reassignment Recommendation Banner */}
+      <PipelineReassignBanner
+        currentPipelineName={activePipeline.name}
+        recommendedPipeline={recommendedPipeline}
+        onConfirmReassign={handleReassignPipeline}
+        onDismiss={() => setDismissedReassign(true)}
+      />
+
+      {/* Profile Header Card */}
+      <div className="neo-card space-y-4 border border-shadow-darker/10">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">{lead.name}</h1>
-            <div className="mt-2 flex flex-wrap gap-2 text-sm text-secondary">
-              <span>{lead.source}</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-primary tracking-wide uppercase">
+                {activePipeline.name}
+              </span>
               <span>•</span>
-              <span className="capitalize">{lead.platform}</span>
-              <span>•</span>
-              <span>{pipeline.name}</span>
-              <span>•</span>
-              <span>{formatDate(lead.created_at)}</span>
+              <span className="text-xs text-secondary">Created {formatDate(lead.created_at)}</span>
+            </div>
+            <h1 className="text-3xl font-extrabold text-primary-dark mt-1">{lead.name}</h1>
+            {lead.company && (
+              <div className="text-sm font-semibold text-secondary flex items-center gap-1.5 mt-0.5">
+                <Building size={14} /> {lead.company}
+              </div>
+            )}
+          </div>
+
+          {/* Manual Stage Selector */}
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">
+              Current Stage (Click to Change)
+            </span>
+            <div className="relative">
+              <select
+                className="neo-btn-primary text-xs font-bold py-2 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md cursor-pointer"
+                value={lead.status || 'new_enquiry'}
+                onChange={(e) => handleStageSelectChange(e.target.value)}
+              >
+                {activeStages.map((s, idx) => (
+                  <option key={s.id} value={s.id} className="bg-surface text-primary-dark font-medium">
+                    {idx + 1}. {s.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <span className={`inline-flex px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest ${stageClass}`}>
-            {statusLabel}
-          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-          <div className="neo-input flex items-center gap-3">
-            <Phone size={16} className="text-secondary" />
-            <span>{lead.phone || 'No phone'}</span>
+        {/* Quick Contact & Metrics Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-shadow-darker/10 text-xs">
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
+            <span className="text-secondary font-medium block">Phone</span>
+            <span className="font-bold text-primary-dark">{lead.phone || 'No phone'}</span>
           </div>
-          <div className="neo-input flex items-center gap-3">
-            <Mail size={16} className="text-secondary" />
-            <span>{lead.email || 'No email'}</span>
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
+            <span className="text-secondary font-medium block">Quantity</span>
+            <span className="font-bold text-primary-dark">
+              {lead.required_quantity ? `${lead.required_quantity} pieces` : 'Not specified'}
+            </span>
           </div>
-          <div className="neo-input flex items-center gap-3">
-            <BadgeCheck size={16} className="text-secondary" />
-            <span>Owner: {lead.owner_id || 'Unassigned'}</span>
+          <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100">
+            <span className="text-emerald-800 font-medium block">Order Value</span>
+            <span className="font-bold text-emerald-900">
+              {lead.value ? `₹${Number(lead.value).toLocaleString('en-IN')}` : '₹0'}
+            </span>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-secondary">Campaign</div>
-            <div className="font-semibold text-primary-dark">{lead.campaign || '-'}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-secondary">Pipeline</div>
-            <div className="font-semibold text-primary-dark">{pipeline.name}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-secondary">Scenario</div>
-            <div className="font-semibold text-primary-dark">{pipeline.scenario || '-'}</div>
-          </div>
-          <div>
-            <div className="text-xs uppercase tracking-[0.2em] text-secondary">Lead ID</div>
-            <div className="font-semibold text-primary-dark">{lead.id}</div>
+          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
+            <span className="text-secondary font-medium block">Delivery Deadline</span>
+            <span className="font-bold text-primary-dark">{lead.delivery_date || 'TBD'}</span>
           </div>
         </div>
       </div>
 
-      {/* AI Qualification & Intelligence Card */}
-      {(lead.qualification_status || lead.requirement || lead.suggested_reply || lead.flag_for_review) && (
-        <div className="neo-card space-y-4 border border-primary/20 bg-gradient-to-br from-surface via-surface to-primary/5 relative overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-shadow-darker/10 pb-3">
+      {/* AI Intelligence Card (if available) */}
+      {(lead.qualification_status || lead.requirement || lead.suggested_reply) && (
+        <div className="neo-card space-y-3 bg-gradient-to-br from-emerald-500/5 via-teal-500/5 to-surface border border-emerald-500/20">
+          <div className="flex items-center justify-between gap-3 border-b border-shadow-darker/10 pb-2.5">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-primary/10 text-primary-dark">
-                <Sparkles size={18} />
-              </div>
-              <div>
-                <h2 className="text-base font-bold text-primary-dark">AI Sales Qualification & Intelligence</h2>
-                <p className="text-xs text-secondary">Extracted automatically from incoming WhatsApp conversation</p>
-              </div>
+              <Sparkles size={16} className="text-emerald-600" />
+              <h2 className="text-sm font-bold text-primary-dark">AI Sales Intelligence</h2>
             </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {lead.qualification_status === 'Qualified' && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
-                  <CheckCircle2 size={13} /> Qualified
-                </span>
-              )}
-              {lead.qualification_status === 'Needs Follow-up' && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20">
-                  <Bot size={13} /> Needs Follow-up
-                </span>
-              )}
-              {lead.qualification_status === 'Not Qualified' && (
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/20">
-                  Not Qualified
-                </span>
-              )}
-
-              {lead.urgency && (
-                <span className={`px-2.5 py-1 rounded-full text-xs font-bold capitalize border ${
-                  lead.urgency === 'high'
-                    ? 'bg-rose-500/10 text-rose-700 border-rose-500/20'
-                    : lead.urgency === 'medium'
-                    ? 'bg-amber-500/10 text-amber-700 border-amber-500/20'
-                    : 'bg-secondary/10 text-secondary border-secondary/20'
-                }`}>
-                  Urgency: {lead.urgency}
-                </span>
-              )}
-
-              {typeof lead.confidence_score === 'number' && (
-                <span className="text-xs text-secondary font-medium px-2.5 py-1 rounded-full bg-shadow-darker/5 border border-shadow-darker/10">
-                  Confidence: {Math.round(lead.confidence_score * 100)}%
-                </span>
-              )}
-            </div>
-          </div>
-
-          {lead.flag_for_review && (
-            <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-800 dark:text-yellow-300 text-xs flex items-center gap-2">
-              <AlertTriangle size={16} className="shrink-0" />
-              <span><strong>Flagged for Review:</strong> Ambiguous intent or low AI confidence score. Review conversation carefully before proceeding.</span>
-            </div>
-          )}
-
-          {lead.qualification_reason && (
-            <div className="text-xs text-secondary bg-shadow-darker/5 p-3 rounded-xl border border-shadow-darker/10">
-              <span className="font-semibold text-primary-dark">Qualification Analysis: </span>
-              {lead.qualification_reason}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            {lead.requirement && (
-              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
-                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
-                  <Target size={12} /> Requirement
-                </div>
-                <div className="font-semibold text-primary-dark text-sm">{lead.requirement}</div>
-              </div>
-            )}
-            {lead.budget && (
-              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
-                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
-                  <DollarSign size={12} /> Budget
-                </div>
-                <div className="font-semibold text-primary-dark text-sm">{lead.budget}</div>
-              </div>
-            )}
-            {lead.timeline && (
-              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
-                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
-                  <Clock size={12} /> Timeline
-                </div>
-                <div className="font-semibold text-primary-dark text-sm">{lead.timeline}</div>
-              </div>
-            )}
-            {lead.location && (
-              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 space-y-1">
-                <div className="text-secondary uppercase tracking-wider text-[10px] font-semibold flex items-center gap-1">
-                  <MapPin size={12} /> Location
-                </div>
-                <div className="font-semibold text-primary-dark text-sm">{lead.location}</div>
-              </div>
+            {lead.qualification_status && (
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                {lead.qualification_status}
+              </span>
             )}
           </div>
 
-          {lead.next_action && (
-            <div className="text-xs bg-primary/5 p-3 rounded-xl border border-primary/15 text-primary-dark">
-              <strong>Recommended Next Action:</strong> {lead.next_action}
+          {lead.requirement && (
+            <div className="text-xs leading-relaxed text-slate-800">
+              <strong>Requirement:</strong> {lead.requirement}
             </div>
           )}
 
           {lead.suggested_reply && (
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-primary-dark">AI Drafted Reply (Awaiting Approval):</span>
-                <Link to="/whatsapp-automation" className="text-xs text-primary font-semibold hover:underline">
-                  Open in WhatsApp Inbox →
-                </Link>
-              </div>
-              <div className="p-3 rounded-xl bg-surface border border-shadow-darker/10 text-xs text-secondary whitespace-pre-wrap font-sans">
-                {lead.suggested_reply}
-              </div>
+            <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs text-slate-800">
+              <span className="font-bold text-emerald-900 block mb-1">AI Drafted Reply Context:</span>
+              <p className="whitespace-pre-wrap">{lead.suggested_reply}</p>
             </div>
           )}
         </div>
       )}
 
-      <div className="neo-card space-y-5">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="text-lg font-bold text-primary-dark">Edit Lead</h2>
-            <p className="text-sm text-secondary">Update status, owner, and follow-up date from one place.</p>
-          </div>
-          <button disabled={saving} onClick={handleSave} className="neo-btn-primary flex items-center gap-2">
-            {saving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-            Save Changes
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Name</label>
-            <input className="neo-input w-full" value={form.name} onChange={(e) => setForm((current) => ({ ...current, name: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Phone</label>
-            <input className="neo-input w-full" value={form.phone} onChange={(e) => setForm((current) => ({ ...current, phone: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Email</label>
-            <input className="neo-input w-full" value={form.email} onChange={(e) => setForm((current) => ({ ...current, email: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Source</label>
-            <input className="neo-input w-full" value={form.source} onChange={(e) => setForm((current) => ({ ...current, source: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Campaign</label>
-            <input className="neo-input w-full" value={form.campaign} onChange={(e) => setForm((current) => ({ ...current, campaign: e.target.value }))} />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Owner</label>
-            <select className="neo-input w-full" value={form.owner_id} onChange={(e) => setForm((current) => ({ ...current, owner_id: e.target.value }))}>
-              <option value="">Unassigned</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.name} ({user.role})
-                </option>
-              ))}
-            </select>
-            <div className="mt-2 text-xs text-secondary">
-              {users.length === 0 ? 'No active users found.' : 'Pick a team member to assign this lead.'}
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Status</label>
-            <select className="neo-input w-full" value={form.status} onChange={(e) => setForm((current) => ({ ...current, status: e.target.value }))}>
-              {statusOptions.map((stage) => (
-                <option key={stage.id} value={stage.id}>{stage.label}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Follow-up Date</label>
-            <div className="neo-input flex items-center gap-3">
-              <CalendarDays size={16} className="text-secondary" />
-              <input type="date" className="w-full bg-transparent outline-none" value={form.next_follow_up_date} onChange={(e) => setForm((current) => ({ ...current, next_follow_up_date: e.target.value }))} />
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-sm font-semibold text-primary-dark mb-2">Lost Reason</label>
-          <textarea className="neo-input w-full min-h-28 resize-y" value={form.reason} onChange={(e) => setForm((current) => ({ ...current, reason: e.target.value }))} placeholder="Required if status is Lost" />
-        </div>
-
-        {feedback && (
-          <div className="neo-card !p-3 bg-success/5 border border-success/20 text-sm text-primary-dark flex items-start gap-2">
-            <BadgeCheck size={16} className="mt-0.5 text-success" />
-            <span>{feedback}</span>
-          </div>
-        )}
+      {/* Tab Navigation (Details Form vs Activity & History) */}
+      <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+        <button
+          onClick={() => setActiveTab('details')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            activeTab === 'details'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+          }`}
+        >
+          Customer & Order Details
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            activeTab === 'history'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+          }`}
+        >
+          <History size={14} /> Stage History & Notifications ({stageHistoryList.length + notificationHistoryList.length})
+        </button>
       </div>
 
-      <div className="neo-card space-y-5">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="text-lg font-bold text-primary-dark flex items-center gap-2"><MessageSquare size={18} /> Message Template</h2>
-            <p className="text-sm text-secondary">Pick a template for this pipeline and queue a rendered message.</p>
-          </div>
-          <button disabled={queueing || !activeTemplate} onClick={handleQueueTemplate} className="neo-btn-primary flex items-center gap-2">
-            {queueing ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-            Queue Message
+      {feedback && (
+        <div className="p-3 rounded-xl bg-primary/10 border border-primary/20 text-xs text-primary-dark flex items-center justify-between gap-2 animate-fade-in">
+          <span>{feedback}</span>
+          <button onClick={() => setFeedback('')} className="text-secondary hover:text-primary-dark">
+            <X size={14} />
           </button>
         </div>
+      )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Template</label>
-            <select className="neo-input w-full" value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
-              <option value="">Select a template</option>
-              {templates.map((template) => (
-                <option key={template.id} value={template.id}>{template.name} ({template.channel})</option>
-              ))}
-            </select>
+      {/* TAB 1: Customer & Order Details Form */}
+      {activeTab === 'details' && (
+        <div className="neo-card space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+            {/* Customer Info */}
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Customer Name</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Company / Organization</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                value={form.company}
+                onChange={(e) => setForm({ ...form, company: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Phone Number</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                value={form.phone}
+                onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Email Address</label>
+              <input
+                type="email"
+                className="neo-input w-full"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Location / City</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                value={form.location}
+                onChange={(e) => setForm({ ...form, location: e.target.value })}
+              />
+            </div>
+
+            {/* Order Specs */}
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Required Quantity (Pieces)</label>
+              <input
+                type="number"
+                className="neo-input w-full font-bold text-emerald-800"
+                value={form.required_quantity}
+                onChange={(e) => setForm({ ...form, required_quantity: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Estimated Order Value (₹)</label>
+              <input
+                type="number"
+                className="neo-input w-full font-bold text-emerald-800"
+                value={form.value}
+                onChange={(e) => setForm({ ...form, value: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Event Name</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="e.g. Annual Award Function"
+                value={form.event_name}
+                onChange={(e) => setForm({ ...form, event_name: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Event Date</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="e.g. 24 Oct 2026"
+                value={form.event_date}
+                onChange={(e) => setForm({ ...form, event_date: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Delivery Deadline</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="e.g. 20 Oct 2026"
+                value={form.delivery_date}
+                onChange={(e) => setForm({ ...form, delivery_date: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Trophy Size / Material</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="e.g. 8 inch Wooden / Crystal"
+                value={form.trophy_size}
+                onChange={(e) => setForm({ ...form, trophy_size: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Shipment Tracking Number</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="e.g. ST49201928"
+                value={form.tracking_number}
+                onChange={(e) => setForm({ ...form, tracking_number: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Assigned Sales Person</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="Sales rep name"
+                value={form.sales_person}
+                onChange={(e) => setForm({ ...form, sales_person: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Assigned Design Person</label>
+              <input
+                type="text"
+                className="neo-input w-full"
+                placeholder="Designer name"
+                value={form.design_person}
+                onChange={(e) => setForm({ ...form, design_person: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="font-bold text-primary-dark block">Next Follow-up Date</label>
+              <input
+                type="date"
+                className="neo-input w-full"
+                value={form.next_follow_up_date}
+                onChange={(e) => setForm({ ...form, next_follow_up_date: e.target.value })}
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-semibold text-primary-dark mb-2">Channel</label>
-            <div className="neo-input w-full">{activeTemplate?.channel || 'No channel selected'}</div>
+
+          <div className="flex items-center justify-end gap-3 pt-4 border-t border-shadow-darker/10">
+            <button
+              type="button"
+              onClick={handleSaveDetails}
+              disabled={saving}
+              className="neo-btn-primary text-xs px-6 py-2.5 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+            >
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save All Details
+            </button>
           </div>
         </div>
+      )}
 
-        <div className="rounded-2xl border border-shadow-darker/10 bg-surface p-4 space-y-3">
-          <div className="text-xs uppercase tracking-[0.2em] text-secondary">Subject</div>
-          <div className="font-semibold text-primary-dark">{renderedSubject}</div>
-          <div className="text-xs uppercase tracking-[0.2em] text-secondary pt-2">Message</div>
-          <pre className="whitespace-pre-wrap text-sm text-primary-dark leading-6">{renderedBody}</pre>
-        </div>
+      {/* TAB 2: Stage Transition & Notification History Stream */}
+      {activeTab === 'history' && (
+        <div className="space-y-6">
+          {/* Stage Move History */}
+          <div className="neo-card space-y-4">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
+              <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+                <History size={16} className="text-primary" />
+                Stage Transition Timeline (Manual Changes)
+              </h2>
+              <span className="text-xs text-secondary">{stageHistoryList.length} stage transitions</span>
+            </div>
 
-        <div className="text-xs text-secondary">
-          Placeholders: {`{name}, {phone}, {email}, {source}, {campaign}, {pipeline}, {stage}, {reason}`}
-        </div>
-
-        {templateFeedback && (
-          <div className="neo-card !p-3 bg-success/5 border border-success/20 text-sm text-primary-dark flex items-start gap-2">
-            <BadgeCheck size={16} className="mt-0.5 text-success" />
-            <span>{templateFeedback}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="neo-card space-y-4">
-        <h2 className="text-lg font-bold text-primary-dark">Activity</h2>
-        {activities.length === 0 ? (
-          <div className="text-secondary py-10 text-center border border-dashed border-shadow-darker/20 rounded-xl">No activity yet.</div>
-        ) : (
-          <div className="space-y-3">
-            {activities.map((activity) => (
-              <div key={activity.id} className="neo-input flex items-start justify-between gap-4">
-                <div>
-                  <div className="font-semibold text-primary-dark">{activity.type}</div>
-                  <div className="text-sm text-secondary">{activity.message}</div>
-                </div>
-                <div className="text-xs text-secondary whitespace-nowrap">{formatDate(activity.created_at)}</div>
+            {stageHistoryList.length === 0 ? (
+              <div className="py-8 text-center text-xs text-secondary">
+                No manual stage transitions recorded yet.
               </div>
-            ))}
+            ) : (
+              <div className="space-y-3">
+                {stageHistoryList.map((entry, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl bg-slate-50 border border-shadow-darker/10 flex items-start justify-between gap-4 text-xs"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 font-bold text-primary-dark">
+                        <span className="text-slate-600">{entry.from_stage}</span>
+                        <ArrowRight size={12} className="text-emerald-600" />
+                        <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          {entry.to_stage}
+                        </span>
+                      </div>
+                      {entry.note && <div className="text-secondary italic">"{entry.note}"</div>}
+                    </div>
+
+                    <div className="text-right text-[11px] text-secondary shrink-0">
+                      <div>By: {entry.changed_by_name || 'CRM User'}</div>
+                      <div>{formatDate(entry.changed_at)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+
+          {/* Automated Notification History */}
+          <div className="neo-card space-y-4">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
+              <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+                <MessageSquare size={16} className="text-emerald-600" />
+                Automated Customer Notifications Log
+              </h2>
+              <span className="text-xs text-secondary">{notificationHistoryList.length} notifications</span>
+            </div>
+
+            {notificationHistoryList.length === 0 ? (
+              <div className="py-8 text-center text-xs text-secondary">
+                No automated stage notifications recorded yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {notificationHistoryList.map((n) => (
+                  <div
+                    key={n.id}
+                    className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-200 text-xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-emerald-900 uppercase tracking-wider text-[10px] bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                          {n.channel}
+                        </span>
+                        <span className="font-semibold text-slate-800">Stage: {n.stage_name}</span>
+                      </div>
+                      <span className="text-[11px] text-secondary">{formatDate(n.sent_at)}</span>
+                    </div>
+
+                    <p className="text-slate-800 leading-relaxed font-sans bg-white/80 p-2.5 rounded-lg border border-shadow-darker/5 whitespace-pre-wrap">
+                      {n.message}
+                    </p>
+
+                    <div className="flex items-center justify-between text-[11px] text-secondary pt-1">
+                      <span>Recipient: {n.recipient}</span>
+                      <span
+                        className={`font-semibold ${
+                          n.status === 'sent' ? 'text-emerald-700' : 'text-amber-700'
+                        }`}
+                      >
+                        Status: {n.status} {n.error ? `(${n.error})` : ''}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation & Notification Dispatch Modal */}
+      <StageChangeConfirmModal
+        isOpen={stageModalState.isOpen}
+        lead={lead}
+        fromStage={stageModalState.fromStage}
+        toStage={stageModalState.toStage}
+        pipelineId={activePipeline.id}
+        pipelineName={activePipeline.name}
+        onClose={() =>
+          setStageModalState({
+            isOpen: false,
+            fromStage: { id: '', label: '' },
+            toStage: { id: '', label: '' },
+          })
+        }
+        onSuccess={(res) => {
+          setFeedback(res.message);
+        }}
+      />
     </div>
   );
 }

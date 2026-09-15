@@ -328,15 +328,74 @@ export interface ExpenseRecord {
 export type LeadPlatform = 'meta' | 'google' | 'manual' | 'test';
 export type LeadIngestStatus = 'received' | 'created' | 'matched' | 'duplicate' | 'failed';
 
+export interface StageHistoryEntry {
+  from_stage: string;
+  to_stage: string;
+  changed_by: string;
+  changed_by_name?: string;
+  changed_at: any;
+  note?: string;
+  notification_triggered?: boolean;
+}
+
+export interface NotificationHistoryEntry {
+  id: string;
+  stage_id: string;
+  stage_name: string;
+  channel: 'whatsapp' | 'sms' | 'email';
+  recipient: string;
+  message: string;
+  status: 'sent' | 'pending' | 'failed' | 'skipped';
+  sent_at: any;
+  sent_by: string;
+  error?: string;
+}
+
+export interface PipelineRule {
+  id: string;
+  pipeline_id: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  priority: number;
+  field: 'required_quantity' | 'value' | 'customer_type' | 'source' | 'event_type' | 'category' | 'location' | 'urgency' | 'is_repeat_customer';
+  operator: 'equals' | 'greater_than_or_equal' | 'less_than_or_equal' | 'between' | 'in' | 'contains';
+  value: any;
+  secondary_value?: any;
+}
+
+export interface StageMessageConfig {
+  id: string;
+  stage_id: string;
+  stage_name: string;
+  pipeline_id?: string;
+  whatsapp_enabled: boolean;
+  whatsapp_template: string;
+  sms_enabled: boolean;
+  sms_template: string;
+  email_enabled: boolean;
+  email_subject?: string;
+  email_template: string;
+  delay_minutes?: number;
+  is_active: boolean;
+}
+
 export interface Lead {
   id: string;
   name: string;
+  company?: string;
+  organization?: string;
   phone?: string;
   email?: string;
   location?: string;
   required_quantity?: string | number;
+  event_name?: string;
   event_date?: string;
   delivery_date?: string;
+  trophy_size?: string;
+  sales_person?: string;
+  design_person?: string;
+  tracking_number?: string;
   source: string;
   platform: LeadPlatform;
   campaign?: string;
@@ -356,6 +415,10 @@ export interface Lead {
   updated_at?: Timestamp;
   value?: number;
   cost?: number;
+  // History & audit trail
+  stage_history?: StageHistoryEntry[];
+  notification_history?: NotificationHistoryEntry[];
+  notifications_sent?: Record<string, boolean>;
   // WhatsApp automation fields
   stageEnteredAt?: Timestamp;
   lastCustomerReplyAt?: Timestamp;
@@ -462,6 +525,52 @@ export interface Pipeline {
   welcome_stage_id?: string;
   welcome_template_id?: string;
 }
+
+export const STANDARD_CRM_STAGES: PipelineStage[] = [
+  { id: 'new_enquiry', label: 'New Enquiry' },
+  { id: 'requirement_collection', label: 'Requirement Collection' },
+  { id: 'requirement_confirmed', label: 'Requirement Confirmed' },
+  { id: 'design_stage', label: 'Design Stage' },
+  { id: 'design_approval', label: 'Design Approval' },
+  { id: 'quotation_sent', label: 'Quotation Sent' },
+  { id: 'follow_up', label: 'Follow Up' },
+  { id: 'advance_payment', label: 'Advance Payment' },
+  { id: 'production', label: 'Production' },
+  { id: 'quality_check', label: 'Quality Check' },
+  { id: 'ready_for_dispatch', label: 'Ready for Dispatch' },
+  { id: 'dispatch', label: 'Dispatch' },
+  { id: 'delivered', label: 'Delivered' },
+  { id: 'full_payment', label: 'Full Payment' },
+  { id: 'completed', label: 'Completed' },
+  { id: 'lost_cancelled', label: 'Lost / Cancelled', required_fields: ['reason'] },
+];
+
+export const DEFAULT_QUANTITY_PIPELINES: Pipeline[] = [
+  {
+    id: 'small_order',
+    name: 'Small Order Pipeline',
+    scenario: '1–9 Pieces',
+    is_default: false,
+    stages: STANDARD_CRM_STAGES,
+    created_at: new Date() as any,
+  },
+  {
+    id: 'regular_order',
+    name: 'Regular Order Pipeline',
+    scenario: '10–99 Pieces',
+    is_default: true,
+    stages: STANDARD_CRM_STAGES,
+    created_at: new Date() as any,
+  },
+  {
+    id: 'bulk_order',
+    name: 'Bulk Order Pipeline',
+    scenario: '100+ Pieces',
+    is_default: false,
+    stages: STANDARD_CRM_STAGES,
+    created_at: new Date() as any,
+  },
+];
 
 export interface Contact {
   id: string;
