@@ -1,0 +1,1 @@
+import{A as e}from"./index-DtcIHcIl.js";import{t}from"./types-DfGZqtE9.js";function n(){let{dbUser:n}=e();return{hasPermission:e=>n?(t[n.role]||[]).includes(e):!1,role:n?.role||null}}export{n as t};
