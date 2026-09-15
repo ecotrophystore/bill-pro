@@ -60,7 +60,29 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 if (!isNaN(parsed) && parsed > 0)
                     qty = parsed;
             }
-            const pipelineId = qty >= 100 ? "bulk_order" : (qty >= 10 ? "regular_order" : (qty > 0 ? "small_order" : "unclassified"));
+            // Dynamically resolve the correct pipeline ID and first stage from Firestore
+            let pipelineId = "";
+            let firstStageId = "new";
+            const pipelinesSnap = await db.collection("pipelines").get();
+            const allPipelines = pipelinesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Try to find a WhatsApp-specific pipeline first
+            const whatsappPipeline = allPipelines.find(p => (p.name || "").toLowerCase().includes("whatsapp") ||
+                (p.name || "").toLowerCase().includes("website wealth"));
+            // Then try Facebook pipeline
+            const facebookPipeline = allPipelines.find(p => (p.name || "").toLowerCase().includes("facebook"));
+            // Then default pipeline
+            const defaultPipeline = allPipelines.find(p => p.id === "default");
+            // Pick the best matching pipeline
+            const targetPipeline = whatsappPipeline || facebookPipeline || defaultPipeline || allPipelines[0];
+            if (targetPipeline) {
+                pipelineId = targetPipeline.id;
+                firstStageId = targetPipeline.stages?.[0]?.id || "new";
+            }
+            else {
+                // Absolute fallback if no pipelines exist at all
+                pipelineId = "default";
+                firstStageId = "new";
+            }
             let leadId = "";
             let conversationId = "";
             const cleanPhoneDigits = senderPhone.replace(/\D/g, "");
@@ -78,7 +100,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                     source: "WhatsApp",
                     platform: "meta",
                     pipeline_id: pipelineId,
-                    status: "new_enquiry",
+                    status: firstStageId,
                     required_quantity: qty || "",
                     last_message: textBody,
                     last_message_channel: "whatsapp",
@@ -90,11 +112,11 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                     stage_history: [
                         {
                             from_stage: "Initial Ingest",
-                            to_stage: "New Enquiry",
+                            to_stage: targetPipeline?.stages?.[0]?.label || "New",
                             changed_by: "system_meta_inbound",
                             changed_by_name: "WhatsApp Auto-Capture",
                             changed_at: new Date(),
-                            note: `WhatsApp message received: "${textBody}". Classified into ${pipelineId}.`
+                            note: `WhatsApp message received: "${textBody}". Assigned to pipeline "${targetPipeline?.name || pipelineId}".`
                         }
                     ],
                     notification_history: [],
