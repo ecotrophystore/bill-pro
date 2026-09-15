@@ -447,32 +447,34 @@ export const metaWebhook = onRequest(
       const body = req.body;
       
       try {
-        // Store minimal event data and defer async processing
-        if (body.object) {
+        // Normalize event payload (supports both standard live webhooks and Meta Console Test tool)
+        let entries: any[] = body.entry || [];
+        const platform = body.object || (body.field === "messages" || body.value?.messaging_product === "whatsapp" ? "whatsapp_business_account" : "unknown");
+
+        if ((!body.entry || body.entry.length === 0) && body.field && body.value) {
+          entries = [
+            {
+              id: "console_test_" + Date.now(),
+              changes: [
+                {
+                  field: body.field,
+                  value: body.value
+                }
+              ]
+            }
+          ];
+        }
+
+        if (entries.length > 0 || body.object) {
           await db.collection("meta_integrations").doc("default").set({
               lastWebhookReceivedAt: new Date().toISOString()
           }, { merge: true });
 
-          // Call our async processor in the background
-          // We can't await it here as it would block the response if we hadn't already sent res.status().send()
-          // But since we did send the response, Firebase might terminate the function. 
-          // Best practice for v2 is to use Cloud Tasks or PubSub, but for lightweight approach, 
-          // we can just await it since we already flushed the response, OR use PubSub if strictly needed.
-          // In Node.js, asynchronous operations started before the response ends might finish, but Firebase 
-          // can freeze the instance. We will store it in firestore and use a Firestore trigger for processing,
-          // or just await it here but Firebase functions allow awaiting after send IF the promise is returned.
-          // The safest lightweight way without PubSub is to write to Firestore, and have a Firestore trigger process it.
-          // OR, simply await it here and then resolve the function. Wait, we already sent the response!
-          // Correct Firebase V2 way to return fast but keep alive: you can't. You must await the promise before resolving the function.
-          // But the requirement says "Return HTTP 200 quickly. Process it asynchronously."
-          // We will save to meta_webhook_events, and a firestore trigger will pick it up.
-          
           const batch = db.batch();
-          body.entry?.forEach((entry: any) => {
-             const eventId = entry.id + "_" + new Date().getTime();
+          entries.forEach((entry: any) => {
+             const eventId = (entry.id || "evt") + "_" + new Date().getTime();
              const docRef = db.collection("meta_webhook_events").doc(eventId);
              
-             // Extract stable idempotency key and determine event type
              let idempotencyKey = eventId;
              let eventType = "unknown";
              
@@ -482,15 +484,15 @@ export const metaWebhook = onRequest(
                  
                  // WhatsApp
                  if (value?.messages) {
-                     idempotencyKey = value.messages[0].id;
+                     idempotencyKey = value.messages[0].id || eventId;
                      eventType = "whatsapp_message";
                  } else if (value?.statuses) {
-                     idempotencyKey = value.statuses[0].id + "_" + value.statuses[0].status;
+                     idempotencyKey = (value.statuses[0].id || "st") + "_" + (value.statuses[0].status || "status");
                      eventType = "whatsapp_status";
                  }
                  // Facebook Lead Ads
                  else if (change.field === "leadgen") {
-                     idempotencyKey = value.leadgen_id;
+                     idempotencyKey = value.leadgen_id || eventId;
                      eventType = "leadgen";
                  }
              }
@@ -503,14 +505,14 @@ export const metaWebhook = onRequest(
 
              batch.set(docRef, {
                  idempotencyKey,
-                 platform: body.object, // 'whatsapp_business_account', 'page', 'instagram'
+                 platform,
                  eventType,
                  receivedAt: FieldValue.serverTimestamp(),
                  processingStatus: "pending",
                  retryCount: 0,
                  payloadSummary: {
                     entry: entry
-                 } // Storing the entry here so the trigger can parse it
+                 }
              });
           });
           await batch.commit();
