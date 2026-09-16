@@ -1,0 +1,542 @@
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { FieldValue } from "firebase-admin/firestore";
+import { defineSecret } from "firebase-functions/params";
+import { graphGet } from "./meta/graphApi.js";
+import { db } from "./config.js";
+const fbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
+
+/**
+ * Background processor for incoming Meta Webhook events
+ */
+export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webhook_events/{eventId}", secrets: [fbToken] }, async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    
+    const data = snapshot.data();
+    if (data.processingStatus !== "pending") return; // Already processed or processing
+
+    const eventId = event.params.eventId;
+    const { payloadSummary, platform, eventType } = data;
+
+    try {
+        // Mark as processing
+        await snapshot.ref.set({ processingStatus: "processing" }, { merge: true });
+
+        const entry = payloadSummary.entry;
+        if (!entry || !entry.changes || entry.changes.length === 0) {
+            await snapshot.ref.set({ 
+                processingStatus: "failed", 
+                processingError: "Empty entry or changes",
+                processedAt: FieldValue.serverTimestamp()
+            }, { merge: true });
+            return;
+        }
+
+        const change = entry.changes[0];
+        const value = change.value;
+
+        // --- 1. PROCESS WHATSAPP MESSAGES ---
+        if (eventType === "whatsapp_message" && value.messages && value.messages.length > 0) {
+            const message = value.messages[0];
+            const contact = value.contacts ? value.contacts[0] : null;
+            const senderPhone = message.from;
+            const messageId = message.id;
+
+            // Prevent duplicate processing based on messageId
+            const existingMsgDocs = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
+            if (!existingMsgDocs.empty) {
+                await snapshot.ref.set({ 
+                    processingStatus: "completed", 
+                    note: "Duplicate message ignored",
+                    processedAt: FieldValue.serverTimestamp() 
+                }, { merge: true });
+                return;
+            }
+
+            // Extract message text
+            let textBody = "Unsupported message type";
+            if (message.type === "text") textBody = message.text.body;
+            else textBody = `[${message.type} message]`;
+
+            // Extract quantity from text
+            let qty = 0;
+            const qtyMatch = textBody.match(/(\d{1,5})\s*(?:trophies|trophy|pieces|piece|pcs|pc|nos|awards|award|medals|medal)?/i);
+            if (qtyMatch && qtyMatch[1]) {
+                const parsed = parseInt(qtyMatch[1], 10);
+                if (!isNaN(parsed) && parsed > 0) qty = parsed;
+            }
+
+            // Dynamically resolve the correct pipeline ID and first stage from Firestore
+            let pipelineId = "";
+            let firstStageId = "new";
+            
+            const pipelinesSnap = await db.collection("pipelines").get();
+            const allPipelines = pipelinesSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+            
+            // Try to find a WhatsApp-specific pipeline first
+            const whatsappPipeline = allPipelines.find(p => 
+                (p.name || "").toLowerCase().includes("whatsapp") ||
+                (p.name || "").toLowerCase().includes("website wealth")
+            );
+            // Then try Facebook pipeline
+            const facebookPipeline = allPipelines.find(p => 
+                (p.name || "").toLowerCase().includes("facebook")
+            );
+            // Then default pipeline
+            const defaultPipeline = allPipelines.find(p => p.id === "regular_order" || p.id === "default");
+            
+            // Pick the best matching pipeline
+            const targetPipeline = whatsappPipeline || facebookPipeline || defaultPipeline || allPipelines[0];
+            
+            if (targetPipeline) {
+                pipelineId = targetPipeline.id;
+                firstStageId = targetPipeline.stages?.[0]?.id || "new";
+            } else {
+                // Absolute fallback if no pipelines exist at all
+                pipelineId = "regular_order";
+                firstStageId = "new";
+            }
+
+            let leadId = "";
+            let conversationId = "";
+            
+            const cleanPhoneDigits = senderPhone.replace(/\D/g, "");
+            const searchPhones = [senderPhone, cleanPhoneDigits, cleanPhoneDigits.replace(/^91/, "")].filter(Boolean);
+
+            const leadsQuery = await db.collection("leads").where("phone", "in", searchPhones).limit(1).get();
+            if (leadsQuery.empty) {
+                // Create Lead
+                const newLeadRef = db.collection("leads").doc();
+                leadId = newLeadRef.id;
+                const leadName = contact?.profile?.name || (cleanPhoneDigits ? `Lead +${cleanPhoneDigits}` : senderPhone);
+                
+                await newLeadRef.set({
+                    id: leadId,
+                    name: leadName,
+                    phone: senderPhone,
+                    source: "WhatsApp",
+                    platform: "meta",
+                    pipeline_id: pipelineId,
+                    status: firstStageId,
+                    required_quantity: qty || "",
+                    last_message: textBody,
+                    last_message_channel: "whatsapp",
+                    createdAt: FieldValue.serverTimestamp(),
+                    created_at: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    updated_at: FieldValue.serverTimestamp(),
+                    customer_lifecycle: "new_customer",
+                    stage_history: [
+                        {
+                            from_stage: "Initial Ingest",
+                            to_stage: targetPipeline?.stages?.[0]?.label || "New",
+                            changed_by: "system_meta_inbound",
+                            changed_by_name: "WhatsApp Auto-Capture",
+                            changed_at: new Date(),
+                            note: `WhatsApp message received: "${textBody}". Assigned to pipeline "${targetPipeline?.name || pipelineId}".`
+                        }
+                    ],
+                    notification_history: [],
+                    notifications_sent: {}
+                });
+
+                // Create corresponding Customer record
+                const newCustomerRef = db.collection("customers").doc();
+                await newCustomerRef.set({
+                    id: newCustomerRef.id,
+                    name: leadName,
+                    phone: senderPhone,
+                    whatsapp_number: senderPhone,
+                    email: "",
+                    type: "individual",
+                    customer_type: "new",
+                    total_enquiries_count: 1,
+                    notes: "Created automatically from WhatsApp inbound message",
+                    created_at: FieldValue.serverTimestamp()
+                });
+            } else {
+                const leadDoc = leadsQuery.docs[0];
+                if (leadDoc) {
+                    leadId = leadDoc.id;
+                    const updatePayload: any = {
+                        last_message: textBody,
+                        last_message_channel: "whatsapp",
+                        updatedAt: FieldValue.serverTimestamp(),
+                        updated_at: FieldValue.serverTimestamp()
+                    };
+                    if (qty > 0 && !leadDoc.data()?.required_quantity) {
+                        updatePayload.required_quantity = qty;
+                    }
+                    await leadDoc.ref.update(updatePayload);
+                }
+            }
+
+            // Find or create Conversation
+            const convQuery = await db.collection("conversations").where("leadId", "==", leadId).where("platform", "==", "whatsapp").limit(1).get();
+            if (convQuery.empty) {
+                const newConvRef = db.collection("conversations").doc();
+                conversationId = newConvRef.id;
+                await newConvRef.set({
+                    id: conversationId,
+                    leadId,
+                    platform: "whatsapp",
+                    status: "open",
+                    participantPhone: senderPhone,
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    lastCustomerReplyAt: FieldValue.serverTimestamp()
+                });
+            } else {
+                const convDoc = convQuery.docs[0];
+                if (convDoc) {
+                    conversationId = convDoc.id;
+                    await convDoc.ref.update({ 
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastCustomerReplyAt: FieldValue.serverTimestamp()
+                    });
+                }
+            }
+
+            // Save Message
+            const newMsgRef = db.collection("messages").doc();
+            await newMsgRef.set({
+                id: newMsgRef.id,
+                conversationId,
+                leadId,
+                direction: "inbound",
+                type: message.type,
+                content: textBody,
+                status: "delivered", // For inbound it's delivered to us
+                metaMessageId: messageId,
+                platform: "whatsapp",
+                timestamp: FieldValue.serverTimestamp(),
+                created_at: FieldValue.serverTimestamp()
+            });
+
+            // Log activity
+            await db.collection("activities").add({
+                leadId,
+                type: "whatsapp_message_received",
+                description: `Received WhatsApp message from ${senderPhone}`,
+                date: new Date().toISOString()
+            });
+
+            // Pause automations for this lead
+            const enrollments = await db.collection("automation_enrollments").where("leadId", "==", leadId).where("status", "==", "active").get();
+            const batchUpdate = db.batch();
+            enrollments.forEach(doc => {
+                batchUpdate.set(doc.ref, { status: "paused_due_to_reply", updatedBy: "system" }, { merge: true });
+            });
+            await batchUpdate.commit();
+
+            await snapshot.ref.set({ 
+                processingStatus: "completed", 
+                relatedConversationId: conversationId,
+                relatedLeadId: leadId,
+                relatedMessageId: newMsgRef.id,
+                processedAt: FieldValue.serverTimestamp() 
+            }, { merge: true });
+
+            return;
+        }
+
+        // --- 2. PROCESS MESSAGE STATUSES (WhatsApp) ---
+        if (eventType === "whatsapp_status" && value.statuses && value.statuses.length > 0) {
+            const statusUpdate = value.statuses[0];
+            const messageId = statusUpdate.id;
+            const newStatus = statusUpdate.status; // sent, delivered, read, failed
+
+            // Update in messages collection
+            const msgQuery = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
+            if (!msgQuery.empty && msgQuery.docs[0]) {
+                const msgDoc = msgQuery.docs[0];
+                const updateData: any = { status: newStatus };
+                
+                if (newStatus === "delivered") updateData.deliveredAt = FieldValue.serverTimestamp();
+                if (newStatus === "read") updateData.readAt = FieldValue.serverTimestamp();
+                if (newStatus === "failed") {
+                    updateData.failedAt = FieldValue.serverTimestamp();
+                    updateData.errorCode = statusUpdate.errors?.[0]?.code || "";
+                    updateData.errorMessage = statusUpdate.errors?.[0]?.message || "Unknown error";
+                }
+
+                await msgDoc.ref.set(updateData, { merge: true });
+            }
+
+            // Also check message_queue (if we use it for outbounds)
+            const queueQuery = await db.collection("message_queue").where("metaMessageId", "==", messageId).limit(1).get();
+            if (!queueQuery.empty && queueQuery.docs[0]) {
+                const qDoc = queueQuery.docs[0];
+                const updateData: any = { status: newStatus };
+                if (newStatus === "failed") {
+                    updateData.errorMessage = statusUpdate.errors?.[0]?.message || "Unknown error";
+                }
+                await qDoc.ref.set(updateData, { merge: true });
+            }
+
+            await snapshot.ref.set({ 
+                processingStatus: "completed", 
+                processedAt: FieldValue.serverTimestamp() 
+            }, { merge: true });
+
+            return;
+        }
+
+        // --- 3. PROCESS FACEBOOK LEAD ADS ---
+        if (eventType === "leadgen") {
+            const leadgenId = value.leadgen_id;
+            const formId = value.form_id;
+            const pageId = value.page_id;
+
+            // Check duplicate
+            const existingLeadDocs = await db.collection("leads").where("leadgenId", "==", leadgenId).limit(1).get();
+            if (!existingLeadDocs.empty) {
+                await snapshot.ref.set({ processingStatus: "completed", note: "Duplicate leadgen ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                return;
+            }
+
+            let token = "";
+            try { token = fbToken.value(); } catch { }
+            if (!token) throw new Error("META_FACEBOOK_SYSTEM_USER_TOKEN not configured.");
+
+            // Fetch config to know default pipeline/stage
+            const configDoc = await db.collection("meta_integrations").doc("default").get();
+            const config = configDoc.data() || {};
+            const version = config.graphApiVersion || "v18.0";
+
+            // Fetch lead details from Meta
+            const leadData = await graphGet<any>(`/${version}/${leadgenId}`, token);
+            
+            // Map fields - handle all phone field variations
+            const fields: Record<string, string> = {};
+            leadData.field_data?.forEach((f: any) => {
+                const key = (f.name || "").toLowerCase().trim();
+                fields[key] = f.values?.[0] || "";
+                fields[f.name] = f.values?.[0] || ""; // also keep original key
+            });
+
+            const email = fields.email || "";
+            // Normalize phone: handle phone_number, phone, mobile_number, mobile, whatsapp_number
+            const rawPhone = fields.phone_number || fields.phone || fields.mobile_number || fields.mobile || fields.whatsapp_number || "";
+            const phone = rawPhone.replace(/\D/g, "").slice(-10);
+            const name = fields.full_name || fields["full name"] || fields.first_name || "Facebook Lead";
+            const location = fields.location || fields.city || fields.address || "";
+            const required_quantity = fields.required_quantity || fields["require quantity"] || fields.quantity || "";
+            const event_date = fields.event_date || fields["event date"] || "";
+            const delivery_date = fields.delivery_date || fields["delivery date"] || fields["when the delivery want"] || fields.when_the_delivery_want || "";
+
+            const newLeadRef = db.collection("leads").doc();
+            const leadId = newLeadRef.id;
+
+            const newLeadData: Record<string, any> = {
+                id: leadId,
+                name,
+                email,
+                phone,
+                source: "facebook_lead_ads",
+                platform: "meta",
+                status: "new",
+                pipelineId: config.defaultPipelineId || "",
+                stageId: config.defaultStageId || "",
+                ownerId: config.defaultLeadOwnerId || "",
+                leadgenId,
+                pageId,
+                formId,
+                campaignId: leadData.campaign_id || "",
+                adSetId: leadData.adset_id || "",
+                adId: leadData.ad_id || "",
+                createdAt: FieldValue.serverTimestamp(),
+                updatedAt: FieldValue.serverTimestamp(),
+                stageEnteredAt: FieldValue.serverTimestamp()
+            };
+            if (location) newLeadData.location = location;
+            if (required_quantity) newLeadData.required_quantity = required_quantity;
+            if (event_date) newLeadData.event_date = event_date;
+            if (delivery_date) newLeadData.delivery_date = delivery_date;
+
+            await newLeadRef.set(newLeadData);
+
+            // Create corresponding Customer record
+            const newCustomerRef = db.collection("customers").doc();
+            await newCustomerRef.set({
+                id: newCustomerRef.id,
+                name,
+                phone,
+                email,
+                location,
+                type: "individual",
+                notes: `Created automatically from Facebook Lead Ads (Form: ${formId})`,
+                created_at: FieldValue.serverTimestamp()
+            });
+
+            await db.collection("lead_intake_events").add({
+                leadId,
+                source: "facebook_lead_ads",
+                platform: "meta",
+                leadgenId,
+                pageId,
+                formId,
+                campaignId: leadData.campaign_id || "",
+                adSetId: leadData.adset_id || "",
+                adId: leadData.ad_id || "",
+                receivedAt: FieldValue.serverTimestamp()
+            });
+
+            await db.collection("activities").add({
+                leadId,
+                type: "facebook_lead_received",
+                description: `Received Facebook Lead from form ${formId}`,
+                date: new Date().toISOString()
+            });
+
+            await db.collection("meta_integrations").doc("default").set({ lastFacebookLeadAt: new Date().toISOString() }, { merge: true });
+
+            await snapshot.ref.set({ processingStatus: "completed", relatedLeadId: leadId, processedAt: FieldValue.serverTimestamp() }, { merge: true });
+            return;
+        }
+
+        // --- 4. PROCESS FACEBOOK / INSTAGRAM MESSAGES ---
+        if (eventType === "messages" && entry.messaging && entry.messaging.length > 0) {
+            const msgEvent = entry.messaging[0];
+            const senderId = msgEvent.sender?.id;
+            const recipientId = msgEvent.recipient?.id;
+            const messageObj = msgEvent.message;
+            const messageId = messageObj?.mid;
+            
+            if (!senderId || !messageObj || !messageId) {
+                await snapshot.ref.set({ processingStatus: "completed", note: "Not a valid message event", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                return;
+            }
+
+            const existingMsgDocs = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
+            if (!existingMsgDocs.empty) {
+                await snapshot.ref.set({ processingStatus: "completed", note: "Duplicate message ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                return;
+            }
+
+            let leadId = "";
+            let conversationId = "";
+            
+            // Search for existing lead with this sender ID
+            const leadsQuery = await db.collection("leads").where("metaSenderId", "==", senderId).where("platform", "==", platform).limit(1).get();
+            if (leadsQuery.empty) {
+                const newLeadRef = db.collection("leads").doc();
+                leadId = newLeadRef.id;
+                const leadName = `${platform === 'instagram' ? 'Instagram' : 'Facebook'} User (${senderId})`;
+                await newLeadRef.set({
+                    id: leadId,
+                    name: leadName,
+                    metaSenderId: senderId,
+                    platform,
+                    source: `${platform}_inbound`,
+                    status: "new",
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp()
+                });
+                // Create corresponding Customer record
+                const newCustomerRef = db.collection("customers").doc();
+                await newCustomerRef.set({
+                    id: newCustomerRef.id,
+                    name: leadName,
+                    phone: "",
+                    email: "",
+                    type: "individual",
+                    notes: `Created automatically from ${platform === 'instagram' ? 'Instagram' : 'Facebook'} DM message`,
+                    created_at: FieldValue.serverTimestamp()
+                });
+            } else {
+                const leadDoc = leadsQuery.docs[0];
+                if (leadDoc) {
+                    leadId = leadDoc.id;
+                    await leadDoc.ref.update({ updatedAt: FieldValue.serverTimestamp() });
+                }
+            }
+
+            const convQuery = await db.collection("conversations").where("leadId", "==", leadId).where("platform", "==", platform).limit(1).get();
+            if (convQuery.empty) {
+                const newConvRef = db.collection("conversations").doc();
+                conversationId = newConvRef.id;
+                await newConvRef.set({
+                    id: conversationId,
+                    leadId,
+                    platform,
+                    status: "open",
+                    participantId: senderId,
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                    lastCustomerReplyAt: FieldValue.serverTimestamp()
+                });
+            } else {
+                const convDoc = convQuery.docs[0];
+                if (convDoc) {
+                    conversationId = convDoc.id;
+                    await convDoc.ref.update({ 
+                        updatedAt: FieldValue.serverTimestamp(),
+                        lastCustomerReplyAt: FieldValue.serverTimestamp()
+                    });
+                }
+            }
+
+            let textBody = messageObj.text || "[Attachment/Media]";
+
+            const newMsgRef = db.collection("messages").doc();
+            await newMsgRef.set({
+                id: newMsgRef.id,
+                conversationId,
+                leadId,
+                direction: "inbound",
+                type: messageObj.text ? "text" : "media",
+                content: textBody,
+                status: "delivered",
+                metaMessageId: messageId,
+                platform,
+                timestamp: FieldValue.serverTimestamp()
+            });
+
+            await db.collection("activities").add({
+                leadId,
+                type: `${platform}_message_received`,
+                description: `Received ${platform} message`,
+                date: new Date().toISOString()
+            });
+
+            const enrollments = await db.collection("automation_enrollments").where("leadId", "==", leadId).where("status", "==", "active").get();
+            const batchUpdate = db.batch();
+            enrollments.forEach(doc => {
+                batchUpdate.set(doc.ref, { status: "paused_due_to_reply", updatedBy: "system" }, { merge: true });
+            });
+            await batchUpdate.commit();
+
+            if (platform === "instagram") {
+                await db.collection("meta_integrations").doc("default").set({ lastInstagramMessageAt: new Date().toISOString() }, { merge: true });
+            } else if (platform === "page") {
+                await db.collection("meta_integrations").doc("default").set({ lastFacebookMessageAt: new Date().toISOString() }, { merge: true });
+            }
+
+            await snapshot.ref.set({ 
+                processingStatus: "completed", 
+                relatedConversationId: conversationId,
+                relatedLeadId: leadId,
+                relatedMessageId: newMsgRef.id,
+                processedAt: FieldValue.serverTimestamp() 
+            }, { merge: true });
+
+            return;
+        }
+
+        // Ignored event type
+        await snapshot.ref.set({ 
+            processingStatus: "ignored", 
+            note: "Event type not handled",
+            processedAt: FieldValue.serverTimestamp() 
+        }, { merge: true });
+
+    } catch (error: any) {
+        console.error(`Error processing webhook event ${eventId}:`, error);
+        await snapshot.ref.set({ 
+            processingStatus: "failed", 
+            processingError: error.message,
+            processedAt: FieldValue.serverTimestamp() 
+        }, { merge: true });
+    }
+});

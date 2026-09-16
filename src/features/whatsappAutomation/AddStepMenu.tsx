@@ -1,0 +1,8 @@
+﻿// @ts-nocheck
+import type { WorkflowNodeType } from '../../types';
+
+interface Props { open: boolean; anchorLabel: string; allowedTypes: WorkflowNodeType[]; onChoose: (type: WorkflowNodeType) => void; onClose: () => void; }
+const labels: Record<WorkflowNodeType, string> = { trigger: 'Add Trigger', condition: 'Add Condition', delay: 'Add Delay', whatsapp: 'Add WhatsApp Message', payment_condition: 'Add Payment Check', production_condition: 'Add Production Check', dispatch_condition: 'Add Dispatch Check', review_delay: 'Add Repeat Follow-up', stop_condition: 'Add Stop Condition', end: 'End Workflow', add: 'Add Step' };
+export function AddStepMenu({ open, anchorLabel, allowedTypes, onChoose, onClose }: Props) { if (!open) return null; return <div className="fixed inset-0 z-50 bg-black/20 backdrop-blur-[2px]" onClick={onClose}><div className="absolute z-50 w-[320px] rounded-3xl border border-shadow-darker/10 bg-surface shadow-2xl p-3" style={{ left: '50%', top: '30%', transform: 'translate(-50%, -50%)' }} onClick={(event) => event.stopPropagation()}><div className="px-2 pb-3 border-b border-shadow-darker/10"><p className="text-xs uppercase tracking-[0.2em] text-secondary">Add step after</p><p className="font-semibold text-primary-dark">{anchorLabel}</p></div><div className="mt-3 space-y-2">{allowedTypes.map((type) => <button key={type} type="button" onClick={() => onChoose(type)} className="w-full rounded-2xl border border-shadow-darker/10 bg-surface px-4 py-3 text-left text-sm font-medium text-primary-dark hover:border-primary/20 hover:bg-primary/5 transition-all">{labels[type]}</button>)}</div></div></div>;
+}
+

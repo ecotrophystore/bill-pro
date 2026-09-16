@@ -1,0 +1,385 @@
+import { useEffect, useState } from 'react';
+import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown, Sparkles } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { db, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
+import type { ProformaInvoice, Customer } from '../types';
+import { downloadPDF } from '../utils/pdfGenerator';
+import PaymentModal from '../components/Billing/PaymentModal';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import { useSettings } from '../contexts/SettingsContext';
+import autoTable from 'jspdf-autotable';
+
+export default function ProformaInvoices() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const queryParams = new URLSearchParams(location.search);
+  const initialSearch = queryParams.get('customer') || '';
+  
+  const [proformaInvoices, setProformaInvoices] = useState<ProformaInvoice[]>([]);
+  const [customers, setCustomers] = useState<Record<string, Customer>>({});
+  const [searchTerm, setSearchTerm] = useState(initialSearch);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [loading, setLoading] = useState(true);
+  const [selectedInvoice, setSelectedInvoice] = useState<ProformaInvoice | null>(null);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [convertingId, setConvertingId] = useState<string | null>(null);
+  const { settings } = useSettings();
+
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, 'proforma_invoices'));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      try {
+        const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProformaInvoice));
+        invs.sort((a, b) => (b.number || '').localeCompare(a.number || ''));
+        setProformaInvoices(invs);
+        
+        // Fetch missing customer objects
+        const newCustomerIds = invs
+          .map(i => i.customer_id)
+          .filter(id => id && !customers[id]);
+        
+        if (newCustomerIds.length > 0 && db) {
+          const loaded = { ...customers };
+          for (const id of newCustomerIds) {
+            try {
+              const cDoc = await getDoc(doc(db, 'customers', id));
+              if (cDoc.exists()) {
+                loaded[id] = { id, ...cDoc.data() } as Customer;
+              }
+            } catch (err) {
+              console.error("Error fetching customer", id, err);
+            }
+          }
+          setCustomers(loaded);
+        }
+      } catch (err) {
+        console.error("Firestore Mapping Error:", err);
+      } finally {
+        setLoading(false);
+      }
+    }, (error) => {
+      console.error("Proforma Invoices onSnapshot error:", error);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [customers]);
+
+  const openPaymentModal = (inv: ProformaInvoice) => {
+    setSelectedInvoice(inv);
+    setIsPaymentModalOpen(true);
+  };
+
+  const deleteInvoice = async (id: string) => {
+    if (window.confirm("Are you sure you want to delete this proforma invoice?")) {
+      try {
+        const piRef = doc(db, 'proforma_invoices', id);
+        const piSnap = await getDoc(piRef);
+        if (piSnap.exists()) {
+          const piData = piSnap.data();
+          const linkedQId = piData.linked_quotation_id || piData.sourceQuotationId;
+          if (linkedQId) {
+            try {
+              const qRef = doc(db, 'quotations', linkedQId);
+              const qSnap = await getDoc(qRef);
+              if (qSnap.exists()) {
+                await updateDoc(qRef, {
+                  conversion_status: null,
+                  convertedToProforma: null,
+                  linked_proforma_id: null,
+                  proformaInvoiceId: null,
+                  proformaInvoiceNumber: null,
+                  status: 'draft'
+                });
+              }
+            } catch (unlinkQErr) {
+              console.warn("Could not unlink quotation from proforma invoice:", unlinkQErr);
+            }
+          }
+
+          const linkedInvId = piData.linked_invoice_id || piData.invoiceId || piData.tax_invoice_id;
+          if (linkedInvId) {
+            try {
+              const invRef = doc(db, 'invoices', linkedInvId);
+              const invSnap = await getDoc(invRef);
+              if (invSnap.exists()) {
+                await updateDoc(invRef, {
+                  linked_proforma_id: null,
+                  sourceProformaId: null,
+                  sourceProformaNumber: null
+                });
+              }
+            } catch (unlinkInvErr) {
+              console.warn("Could not unlink tax invoice from proforma invoice:", unlinkInvErr);
+            }
+          }
+        }
+        await deleteDoc(piRef);
+
+        try {
+          const d = new Date();
+          let fyYear = d.getFullYear();
+          if (d.getMonth() < 3) fyYear -= 1;
+          const { syncSequenceAfterDelete } = await import('../utils/clientBillingCreator');
+          await syncSequenceAfterDelete("proforma_invoices", `proforma_sequence_${fyYear}`, `PI/${fyYear}/`);
+        } catch (seqError) {
+          console.warn("Sequence sync failed after delete:", seqError);
+        }
+      } catch (err: any) {
+        console.error("Error deleting proforma invoice", err);
+        alert(`Failed to delete proforma invoice: ${err?.message || "Unknown error"}`);
+      }
+    }
+  };
+
+  const handleConvertToInvoice = async (inv: ProformaInvoice) => {
+    if (inv.payment_status !== 'paid') {
+      alert("Proforma Invoice can only be converted to a Tax Invoice when it is FULLY PAID.");
+      return;
+    }
+    const confirm = window.confirm(`Convert Proforma "${inv.number}" to a Tax Invoice? This cannot be undone.`);
+    if (!confirm) return;
+    setConvertingId(inv.id);
+    try {
+      const { clientConvertProformaToInvoice, deriveInvoiceNumberFromProforma } = await import('../utils/clientBillingCreator');
+      const result = await clientConvertProformaToInvoice(inv.id);
+      const invoiceNumber = (result as any).invoiceNumber || deriveInvoiceNumberFromProforma(inv.number);
+      alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
+      navigate('/invoices');
+    } catch (fallbackErr: any) {
+      console.error("Conversion failed:", fallbackErr);
+      alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
+    } finally {
+      setConvertingId(null);
+    }
+  };
+
+  const handleDownloadReport = (format: 'excel' | 'pdf') => {
+    const filteredInvoices = proformaInvoices
+      .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+      .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
+    if (format === 'excel') {
+      const reportData = filteredInvoices.map(inv => ({
+        'Proforma Invoice Number': inv.number,
+        'Customer': customers[inv.customer_id]?.name || 'Unknown Customer',
+        'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+        'Subtotal (₹)': inv.subtotal || 0,
+        'Tax Amount (₹)': inv.tax_total || 0,
+        'Grand Total (₹)': inv.grand_total || 0,
+        'Payment Status': (inv.payment_status || 'unpaid').toUpperCase()
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(reportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Proforma Invoices");
+      XLSX.writeFile(wb, "Proforma_Invoices_Report.xlsx");
+    } else {
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text("Proforma Invoices Report", 14, 22);
+      doc.setFontSize(11);
+      doc.setTextColor(100);
+      doc.text(`Generated on ${new Date().toLocaleDateString('en-IN')}`, 14, 30);
+
+      autoTable(doc, {
+        startY: 40,
+        head: [['Proforma Number', 'Customer', 'Date', 'Grand Total', 'Status']],
+        body: filteredInvoices.map(inv => [
+          inv.number,
+          customers[inv.customer_id]?.name || 'Unknown Customer',
+          inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+          `Rs. ${inv.grand_total?.toLocaleString() || '0'}`,
+          (inv.payment_status || 'unpaid').toUpperCase()
+        ]),
+        theme: 'striped',
+      });
+      doc.save("Proforma_Invoices_Report.pdf");
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Proforma Invoices</h1>
+          <p className="text-secondary mt-1">Manage proforma invoices, tracked by separate sequence.</p>
+        </div>
+        <div className="flex gap-4 items-center w-full sm:w-auto">
+          <div className="relative">
+            <button 
+              onClick={() => setShowReportDropdown(!showReportDropdown)} 
+              className="neo-btn flex items-center gap-2"
+            >
+              <Download size={18} /> Report <ChevronDown size={14} />
+            </button>
+            {showReportDropdown && (
+              <div 
+                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                onMouseLeave={() => setShowReportDropdown(false)}
+              >
+                <button 
+                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
+                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
+                >
+                  Excel (.xlsx)
+                </button>
+                <button 
+                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
+                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
+                >
+                  PDF (.pdf)
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => navigate('/proforma-invoices/new')} className="neo-btn-primary flex items-center gap-2">
+            <Plus size={18} /> New Proforma Invoice
+          </button>
+        </div>
+      </div>
+
+      <div className="neo-card p-4 flex flex-col sm:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={18} />
+          <input 
+            type="text" 
+            placeholder="Search by proforma number or customer..." 
+            className="neo-input w-full pl-10"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="relative">
+          <select 
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All Statuses</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+            <option value="unpaid">Unpaid</option>
+          </select>
+          <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none" />
+        </div>
+      </div>
+
+      <div className="neo-card overflow-hidden !p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-surface border-b border-shadow-darker/10">
+                <th className="p-4 font-semibold text-primary-dark">Proforma Number</th>
+                <th className="p-4 font-semibold text-primary-dark">Customer</th>
+                <th className="p-4 font-semibold text-primary-dark">Date</th>
+                <th className="p-4 font-semibold text-primary-dark text-right">Total</th>
+                <th className="p-4 font-semibold text-primary-dark text-center">Status</th>
+                <th className="p-4 font-semibold text-primary-dark text-center">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-shadow-darker/5">
+              {loading ? (
+                <tr><td colSpan={6} className="p-8 text-center text-secondary">
+                  <Loader2 className="animate-spin mx-auto mb-2" /> Loading proforma invoices...
+                </td></tr>
+              ) : proformaInvoices.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
+              ) : proformaInvoices
+                  .filter(inv => (inv.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || (inv as any).customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+                  .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
+                  .map((inv) => (
+                <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
+                  <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
+                  <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</td>
+                  <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
+                  <td className="p-4 text-right font-medium text-primary-dark">
+                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-semibold mt-0.5">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </td>
+                  <td className="p-4 text-center">
+                    {(inv as any).conversion_status === 'converted' ? (
+                      <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+                    ) : (
+                      <button 
+                        onClick={() => openPaymentModal(inv)}
+                        className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors cursor-pointer ${
+                        inv.payment_status === 'paid' ? 'bg-green-100 text-green-700 hover:bg-green-200' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200' : 'bg-red-100 text-red-700 hover:bg-red-200'
+                      }`}>
+                        {inv.payment_status?.toUpperCase() || 'UNPAID'}
+                      </button>
+                    )}
+                  </td>
+                  <td className="p-4 text-center">
+                    <div className="flex justify-center gap-2">
+                      {(inv as any).conversion_status !== 'converted' && inv.payment_status === 'paid' && (
+                        <button 
+                          onClick={() => handleConvertToInvoice(inv)}
+                          disabled={convertingId === inv.id}
+                          className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold"
+                          title="Convert to Tax Invoice"
+                        >
+                          {convertingId === inv.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                          Convert
+                        </button>
+                      )}
+                      <button 
+                        onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)}
+                        className="p-2 text-secondary hover:text-primary transition-colors" 
+                        title="Edit Proforma Invoice"
+                      >
+                        <Edit size={18} />
+                      </button>
+                      <button 
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)}
+                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
+                        title="View PDF"
+                      >
+                        <FileText size={18} />
+                      </button>
+                      <button 
+                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)}
+                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
+                        title="Download"
+                      >
+                        <Download size={18} />
+                      </button>
+                      <button 
+                        onClick={() => deleteInvoice(inv.id)}
+                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
+                        title="Delete Proforma Invoice"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {selectedInvoice && (
+        <PaymentModal
+          isOpen={isPaymentModalOpen}
+          onClose={() => {
+            setIsPaymentModalOpen(false);
+            setSelectedInvoice(null);
+          }}
+          document={selectedInvoice}
+          documentType="proforma_invoice"
+          onPaymentUpdated={() => {}}
+        />
+      )}
+    </div>
+  );
+}
