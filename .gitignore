@@ -38,3 +38,5 @@ list_models*.js
 remove_ai.mjs
 users.json
 
+# Agents
+.agents/
