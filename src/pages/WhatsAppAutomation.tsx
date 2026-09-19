@@ -4,16 +4,17 @@ import {
   collection, query, orderBy, onSnapshot, addDoc, doc, setDoc, updateDoc, serverTimestamp
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { Bot, Plus, Loader2, Play, Pause, Edit2, Check, AlertCircle, X, Sparkles, Workflow } from 'lucide-react';
+import { Bot, Plus, Loader2, Play, Pause, Edit2, Check, AlertCircle, X, Sparkles, Workflow, MessageSquare } from 'lucide-react';
 import { db, functions, auth } from '../lib/firebase';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import type { WhatsAppAutomation, Pipeline } from '../types';
 import { WorkflowBuilder } from '../components/WhatsAppAutomation/WorkflowBuilder';
 import { WhatsAppAiInbox } from '../components/WhatsAppAutomation/WhatsAppAiInbox';
+import { WhatsAppLiveChat } from '../components/WhatsAppAutomation/WhatsAppLiveChat';
 
 export default function WhatsAppAutomation() {
   const { hasPermission } = useCRMPermission();
-  const [activeTab, setActiveTab] = useState<'inbox' | 'workflows'>('inbox');
+  const [activeTab, setActiveTab] = useState<'chat' | 'inbox' | 'workflows'>('chat');
   const [view, setView] = useState<'list' | 'form' | 'detail'>('list');
   const [automations, setAutomations] = useState<WhatsAppAutomation[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -160,34 +161,50 @@ export default function WhatsAppAutomation() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
+    <div className={activeTab === 'chat' ? 'w-full h-[calc(100vh-7rem)] flex flex-col min-h-0' : 'space-y-6 animate-fade-in max-w-6xl mx-auto'}>
       {/* Header & Tabs */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap pb-1 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shrink-0">
-            <Bot size={20} className="text-white" />
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shrink-0">
+            <Bot size={18} className="text-white" />
           </div>
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">WhatsApp Command Center</h1>
-            <p className="text-secondary mt-0.5 text-sm">Automated AI lead qualification, inbound parsing & sequence workflows.</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold tracking-tight text-primary-dark">WhatsApp Command Center</h1>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Meta Cloud API Active
+              </span>
+            </div>
+            <p className="text-secondary text-xs hidden sm:block">Automated AI lead qualification, 2-way live chat & sequence workflows.</p>
           </div>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center p-1 bg-slate-100/80 rounded-xl border border-shadow-darker/10">
+        <div className="flex items-center p-1 bg-slate-100/90 rounded-xl border border-shadow-darker/20 shadow-xs">
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'chat'
+                ? 'bg-white text-emerald-700 shadow-sm'
+                : 'text-secondary hover:text-primary-dark'
+            }`}
+          >
+            <MessageSquare size={14} className="text-emerald-500" /> WhatsApp Live Chat
+          </button>
           <button
             onClick={() => setActiveTab('inbox')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'inbox'
                 ? 'bg-white text-primary shadow-sm'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
-            <Sparkles size={14} className="text-emerald-500" /> AI Lead Inbox & Qualification
+            <Sparkles size={14} className="text-amber-500" /> AI Qualification Hub
           </button>
           <button
             onClick={() => setActiveTab('workflows')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'workflows'
                 ? 'bg-white text-primary shadow-sm'
                 : 'text-secondary hover:text-primary-dark'
@@ -198,7 +215,11 @@ export default function WhatsAppAutomation() {
         </div>
       </div>
 
-      {activeTab === 'inbox' ? (
+      {activeTab === 'chat' ? (
+        <div className="flex-1 min-h-0 w-full pt-1">
+          <WhatsAppLiveChat />
+        </div>
+      ) : activeTab === 'inbox' ? (
         <WhatsAppAiInbox />
       ) : (
         <div className="space-y-6">

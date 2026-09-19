@@ -3,25 +3,19 @@ import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { graphGet } from "./meta/graphApi.js";
 import { db } from "./config.js";
+import { extractMetaRequirements } from "./utils/metaRequirementExtractor.js";
+import { classifyLeadPipeline } from "./utils/pipelineClassifier.js";
 const fbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
-/**
- * Background processor for incoming Meta Webhook events
- */
-export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webhook_events/{eventId}", secrets: [fbToken] }, async (event) => {
-    const snapshot = event.data;
-    if (!snapshot)
-        return;
-    const data = snapshot.data();
+export async function processWebhookPayload(eventId, data) {
     if (data.processingStatus !== "pending")
         return; // Already processed or processing
-    const eventId = event.params.eventId;
     const { payloadSummary, platform, eventType } = data;
     try {
         // Mark as processing
-        await snapshot.ref.set({ processingStatus: "processing" }, { merge: true });
+        await db.collection("meta_webhook_events").doc(eventId).set({ processingStatus: "processing" }, { merge: true });
         const entry = payloadSummary.entry;
         if (!entry || !entry.changes || entry.changes.length === 0) {
-            await snapshot.ref.set({
+            await db.collection("meta_webhook_events").doc(eventId).set({
                 processingStatus: "failed",
                 processingError: "Empty entry or changes",
                 processedAt: FieldValue.serverTimestamp()
@@ -36,10 +30,12 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             const contact = value.contacts ? value.contacts[0] : null;
             const senderPhone = message.from;
             const messageId = message.id;
+            const businessPhoneId = value.metadata?.phone_number_id || "1263075550230396";
+            const businessDisplayPhone = value.metadata?.display_phone_number || "919344309369";
             // Prevent duplicate processing based on messageId
             const existingMsgDocs = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
             if (!existingMsgDocs.empty) {
-                await snapshot.ref.set({
+                await db.collection("meta_webhook_events").doc(eventId).set({
                     processingStatus: "completed",
                     note: "Duplicate message ignored",
                     processedAt: FieldValue.serverTimestamp()
@@ -52,56 +48,63 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 textBody = message.text.body;
             else
                 textBody = `[${message.type} message]`;
-            // Extract quantity from text
-            let qty = 0;
-            const qtyMatch = textBody.match(/(\d{1,5})\s*(?:trophies|trophy|pieces|piece|pcs|pc|nos|awards|award|medals|medal)?/i);
-            if (qtyMatch && qtyMatch[1]) {
-                const parsed = parseInt(qtyMatch[1], 10);
-                if (!isNaN(parsed) && parsed > 0)
-                    qty = parsed;
-            }
             // Dynamically resolve the correct pipeline ID and first stage from Firestore
-            let pipelineId = "";
-            let firstStageId = "new";
             const pipelinesSnap = await db.collection("pipelines").get();
             const allPipelines = pipelinesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-            // Try to find a WhatsApp-specific pipeline first
-            const whatsappPipeline = allPipelines.find(p => (p.name || "").toLowerCase().includes("whatsapp") ||
-                (p.name || "").toLowerCase().includes("website wealth"));
-            // Then try Facebook pipeline
-            const facebookPipeline = allPipelines.find(p => (p.name || "").toLowerCase().includes("facebook"));
-            // Then default pipeline
-            const defaultPipeline = allPipelines.find(p => p.id === "default");
-            // Pick the best matching pipeline
-            const targetPipeline = whatsappPipeline || facebookPipeline || defaultPipeline || allPipelines[0];
-            if (targetPipeline) {
-                pipelineId = targetPipeline.id;
-                firstStageId = targetPipeline.stages?.[0]?.id || "new";
-            }
-            else {
-                // Absolute fallback if no pipelines exist at all
-                pipelineId = "default";
-                firstStageId = "new";
-            }
+            const rulesSnap = await db.collection("pipeline_rules").get();
+            const allRules = rulesSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+            // Check if existing customer (for repeat customer logic)
+            const cleanPhoneDigits = senderPhone.replace(/\D/g, "");
+            const searchPhones = [...new Set([senderPhone, cleanPhoneDigits, cleanPhoneDigits.replace(/^91/, "")].filter(Boolean))];
+            const leadsQuery = await db.collection("leads").where("phone", "in", searchPhones).limit(1).get();
+            const isRepeat = !leadsQuery.empty;
+            // Extract requirements from text
+            const requirements = extractMetaRequirements(textBody);
+            // Build the lead snapshot for classification
+            const leadSnapshot = {
+                is_repeat_customer: isRepeat,
+                source: "WhatsApp"
+            };
+            if (requirements.required_quantity)
+                leadSnapshot.required_quantity = requirements.required_quantity;
+            if (requirements.urgency)
+                leadSnapshot.urgency = requirements.urgency;
+            if (requirements.customer_type)
+                leadSnapshot.customer_type = requirements.customer_type;
+            if (requirements.location)
+                leadSnapshot.location = requirements.location;
+            const classification = classifyLeadPipeline(leadSnapshot, allRules, allPipelines);
+            const pipelineId = classification.pipeline_id;
+            // Prevent duplicate rule mismatch if pipeline is hardcoded
+            const defaultPipelines = [
+                { id: "small_order", stages: [{ id: "new_enquiry" }] },
+                { id: "regular_order", stages: [{ id: "new_enquiry" }] },
+                { id: "bulk_order", stages: [{ id: "new_enquiry" }] },
+                { id: "unclassified", stages: [{ id: "new_enquiry" }] }
+            ];
+            // Get the pipeline object to find the first stage
+            const targetPipeline = allPipelines.find(p => p.id === pipelineId) || defaultPipelines.find(p => p.id === pipelineId) || allPipelines[0];
+            const firstStageId = targetPipeline?.stages?.[0]?.id || "new_enquiry";
             let leadId = "";
             let conversationId = "";
-            const cleanPhoneDigits = senderPhone.replace(/\D/g, "");
-            const searchPhones = [senderPhone, cleanPhoneDigits, cleanPhoneDigits.replace(/^91/, "")].filter(Boolean);
-            const leadsQuery = await db.collection("leads").where("phone", "in", searchPhones).limit(1).get();
-            if (leadsQuery.empty) {
+            if (!isRepeat) {
                 // Create Lead
                 const newLeadRef = db.collection("leads").doc();
                 leadId = newLeadRef.id;
-                const leadName = contact?.profile?.name || (cleanPhoneDigits ? `Lead +${cleanPhoneDigits}` : senderPhone);
-                await newLeadRef.set({
+                // Prioritize name explicitly mentioned in the text message
+                const extractedName = requirements.customer_name;
+                const profileName = contact?.profile?.name;
+                const leadName = extractedName || profileName || (cleanPhoneDigits ? `Lead +${cleanPhoneDigits}` : senderPhone);
+                const newLeadData = {
                     id: leadId,
                     name: leadName,
                     phone: senderPhone,
+                    whatsapp_business_phone_id: businessPhoneId,
+                    whatsapp_business_phone: businessDisplayPhone,
                     source: "WhatsApp",
                     platform: "meta",
                     pipeline_id: pipelineId,
                     status: firstStageId,
-                    required_quantity: qty || "",
                     last_message: textBody,
                     last_message_channel: "whatsapp",
                     createdAt: FieldValue.serverTimestamp(),
@@ -116,11 +119,52 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                             changed_by: "system_meta_inbound",
                             changed_by_name: "WhatsApp Auto-Capture",
                             changed_at: new Date(),
-                            note: `WhatsApp message received: "${textBody}". Assigned to pipeline "${targetPipeline?.name || pipelineId}".`
+                            note: `WhatsApp message received: "${textBody}". Assigned to pipeline "${targetPipeline?.name || pipelineId}" via rules (${classification.matched_rule_name}).`
                         }
                     ],
                     notification_history: [],
                     notifications_sent: {}
+                };
+                // Add extracted requirements
+                if (requirements.required_quantity)
+                    newLeadData.required_quantity = requirements.required_quantity;
+                if (requirements.event_name)
+                    newLeadData.event_name = requirements.event_name;
+                if (requirements.event_type)
+                    newLeadData.event_type = requirements.event_type;
+                if (requirements.event_date)
+                    newLeadData.event_date = requirements.event_date;
+                if (requirements.delivery_date)
+                    newLeadData.delivery_date = requirements.delivery_date;
+                if (requirements.trophy_type)
+                    newLeadData.trophy_type = requirements.trophy_type;
+                if (requirements.trophy_size)
+                    newLeadData.trophy_size = requirements.trophy_size;
+                if (requirements.budget)
+                    newLeadData.budget = requirements.budget;
+                if (requirements.value)
+                    newLeadData.value = requirements.value;
+                if (requirements.email)
+                    newLeadData.email = requirements.email;
+                if (requirements.notes)
+                    newLeadData.reason = requirements.notes;
+                if (requirements.organization)
+                    newLeadData.company = requirements.organization;
+                if (requirements.customer_type)
+                    newLeadData.customer_type = requirements.customer_type;
+                if (requirements.urgency)
+                    newLeadData.urgency = requirements.urgency;
+                if (requirements.location)
+                    newLeadData.location = requirements.location;
+                await newLeadRef.set(newLeadData);
+                // Create in-app notification
+                await db.collection("notifications").add({
+                    title: `New Lead: ${leadName}`,
+                    message: `Assigned to: ${targetPipeline?.name || pipelineId}`,
+                    type: "lead",
+                    link: `/leads/${leadId}`,
+                    is_read: false,
+                    created_at: FieldValue.serverTimestamp()
                 });
                 // Create corresponding Customer record
                 const newCustomerRef = db.collection("customers").doc();
@@ -129,8 +173,10 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                     name: leadName,
                     phone: senderPhone,
                     whatsapp_number: senderPhone,
-                    email: "",
-                    type: "individual",
+                    email: requirements.email || "",
+                    company: requirements.organization || "",
+                    location: requirements.location || "",
+                    type: requirements.customer_type === "Corporate" ? "business" : "individual",
                     customer_type: "new",
                     total_enquiries_count: 1,
                     notes: "Created automatically from WhatsApp inbound message",
@@ -141,16 +187,74 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 const leadDoc = leadsQuery.docs[0];
                 if (leadDoc) {
                     leadId = leadDoc.id;
-                    const updatePayload = {
+                    const existingData = leadDoc.data();
+                    // We only want to move an existing lead's pipeline if:
+                    // 1. The new message explicitly specifies a quantity/requirement, AND
+                    // 2. The existing lead is currently in 'unclassified' (meaning it's finally getting classified)
+                    // OR if the lead is already closed/won/lost (so they are starting a new journey).
+                    const isClosed = existingData.status === "won" || existingData.status === "lost" || existingData.status === "completed" || existingData.status === "lost_cancelled";
+                    const isCurrentlyUnclassified = existingData.pipeline_id === "unclassified";
+                    const hasNewClassification = pipelineId !== "unclassified";
+                    const shouldMovePipeline = isClosed || (isCurrentlyUnclassified && hasNewClassification);
+                    const updates = {
                         last_message: textBody,
                         last_message_channel: "whatsapp",
+                        whatsapp_business_phone_id: businessPhoneId,
+                        whatsapp_business_phone: businessDisplayPhone,
                         updatedAt: FieldValue.serverTimestamp(),
-                        updated_at: FieldValue.serverTimestamp()
+                        updated_at: FieldValue.serverTimestamp(),
+                        customer_lifecycle: "existing_customer",
+                        is_repeat_customer: true,
                     };
-                    if (qty > 0 && !leadDoc.data()?.required_quantity) {
-                        updatePayload.required_quantity = qty;
+                    if (shouldMovePipeline) {
+                        updates.pipeline_id = pipelineId;
+                        updates.status = firstStageId;
                     }
-                    await leadDoc.ref.update(updatePayload);
+                    if (requirements.customer_name && (!existingData.name || existingData.name.startsWith("Lead +") || existingData.name.toLowerCase().includes("event")))
+                        updates.name = requirements.customer_name;
+                    if (requirements.organization && !existingData.company)
+                        updates.company = requirements.organization;
+                    if (requirements.email && !existingData.email)
+                        updates.email = requirements.email;
+                    if (requirements.budget && !existingData.budget)
+                        updates.budget = requirements.budget;
+                    if (requirements.value && !existingData.value)
+                        updates.value = requirements.value;
+                    if (requirements.location && !existingData.location)
+                        updates.location = requirements.location;
+                    if (requirements.required_quantity && !existingData.required_quantity)
+                        updates.required_quantity = requirements.required_quantity;
+                    if (requirements.event_name && !existingData.event_name)
+                        updates.event_name = requirements.event_name;
+                    if (requirements.event_type && !existingData.event_type)
+                        updates.event_type = requirements.event_type;
+                    if (requirements.delivery_date && !existingData.delivery_date)
+                        updates.delivery_date = requirements.delivery_date;
+                    if (requirements.urgency)
+                        updates.urgency = requirements.urgency;
+                    await leadDoc.ref.update(updates);
+                    // Log pipeline change if it moved
+                    if (existingData.pipeline_id !== pipelineId || existingData.status !== firstStageId) {
+                        const historyArray = existingData.stage_history || [];
+                        historyArray.push({
+                            from_stage: existingData.status || "Unknown",
+                            to_stage: targetPipeline?.stages?.[0]?.label || "New",
+                            changed_by: "system_meta_inbound",
+                            changed_by_name: "WhatsApp Auto-Capture",
+                            changed_at: new Date(),
+                            note: `Repeat customer mapped to pipeline "${targetPipeline?.name || pipelineId}" via rules (${classification.matched_rule_name}).`
+                        });
+                        await leadDoc.ref.update({ stage_history: historyArray });
+                    }
+                    // Create in-app notification for repeat customer message
+                    await db.collection("notifications").add({
+                        title: `New Message: ${existingData.name || 'Existing Lead'}`,
+                        message: `Pipeline: ${existingData.pipeline_id !== pipelineId && shouldMovePipeline ? (targetPipeline?.name || pipelineId) : (existingData.pipeline_id || 'Unknown')}`,
+                        type: "lead",
+                        link: `/leads/${leadId}`,
+                        is_read: false,
+                        created_at: FieldValue.serverTimestamp()
+                    });
                 }
             }
             // Find or create Conversation
@@ -164,8 +268,14 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                     platform: "whatsapp",
                     status: "open",
                     participantPhone: senderPhone,
+                    participantName: contact?.profile?.name || (cleanPhoneDigits ? `+${cleanPhoneDigits}` : senderPhone),
+                    lastMessage: textBody,
+                    lastMessageAt: FieldValue.serverTimestamp(),
+                    lastDirection: "inbound",
                     createdAt: FieldValue.serverTimestamp(),
+                    created_at: FieldValue.serverTimestamp(),
                     updatedAt: FieldValue.serverTimestamp(),
+                    updated_at: FieldValue.serverTimestamp(),
                     lastCustomerReplyAt: FieldValue.serverTimestamp()
                 });
             }
@@ -174,7 +284,11 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 if (convDoc) {
                     conversationId = convDoc.id;
                     await convDoc.ref.update({
+                        lastMessage: textBody,
+                        lastMessageAt: FieldValue.serverTimestamp(),
+                        lastDirection: "inbound",
                         updatedAt: FieldValue.serverTimestamp(),
+                        updated_at: FieldValue.serverTimestamp(),
                         lastCustomerReplyAt: FieldValue.serverTimestamp()
                     });
                 }
@@ -185,6 +299,8 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 id: newMsgRef.id,
                 conversationId,
                 leadId,
+                senderPhone,
+                from: senderPhone,
                 direction: "inbound",
                 type: message.type,
                 content: textBody,
@@ -208,7 +324,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 batchUpdate.set(doc.ref, { status: "paused_due_to_reply", updatedBy: "system" }, { merge: true });
             });
             await batchUpdate.commit();
-            await snapshot.ref.set({
+            await db.collection('meta_webhook_events').doc(eventId).set({
                 processingStatus: "completed",
                 relatedConversationId: conversationId,
                 relatedLeadId: leadId,
@@ -248,7 +364,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 }
                 await qDoc.ref.set(updateData, { merge: true });
             }
-            await snapshot.ref.set({
+            await db.collection('meta_webhook_events').doc(eventId).set({
                 processingStatus: "completed",
                 processedAt: FieldValue.serverTimestamp()
             }, { merge: true });
@@ -262,7 +378,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             // Check duplicate
             const existingLeadDocs = await db.collection("leads").where("leadgenId", "==", leadgenId).limit(1).get();
             if (!existingLeadDocs.empty) {
-                await snapshot.ref.set({ processingStatus: "completed", note: "Duplicate leadgen ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                await db.collection('meta_webhook_events').doc(eventId).set({ processingStatus: "completed", note: "Duplicate leadgen ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
                 return;
             }
             let token = "";
@@ -326,6 +442,15 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             if (delivery_date)
                 newLeadData.delivery_date = delivery_date;
             await newLeadRef.set(newLeadData);
+            // Create in-app notification
+            await db.collection("notifications").add({
+                title: `New Lead: ${name}`,
+                message: `From Facebook Lead Ads. Assigned to Default Pipeline.`,
+                type: "lead",
+                link: `/leads/${leadId}`,
+                is_read: false,
+                created_at: FieldValue.serverTimestamp()
+            });
             // Create corresponding Customer record
             const newCustomerRef = db.collection("customers").doc();
             await newCustomerRef.set({
@@ -357,7 +482,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                 date: new Date().toISOString()
             });
             await db.collection("meta_integrations").doc("default").set({ lastFacebookLeadAt: new Date().toISOString() }, { merge: true });
-            await snapshot.ref.set({ processingStatus: "completed", relatedLeadId: leadId, processedAt: FieldValue.serverTimestamp() }, { merge: true });
+            await db.collection('meta_webhook_events').doc(eventId).set({ processingStatus: "completed", relatedLeadId: leadId, processedAt: FieldValue.serverTimestamp() }, { merge: true });
             return;
         }
         // --- 4. PROCESS FACEBOOK / INSTAGRAM MESSAGES ---
@@ -368,12 +493,12 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             const messageObj = msgEvent.message;
             const messageId = messageObj?.mid;
             if (!senderId || !messageObj || !messageId) {
-                await snapshot.ref.set({ processingStatus: "completed", note: "Not a valid message event", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                await db.collection('meta_webhook_events').doc(eventId).set({ processingStatus: "completed", note: "Not a valid message event", processedAt: FieldValue.serverTimestamp() }, { merge: true });
                 return;
             }
             const existingMsgDocs = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
             if (!existingMsgDocs.empty) {
-                await snapshot.ref.set({ processingStatus: "completed", note: "Duplicate message ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
+                await db.collection('meta_webhook_events').doc(eventId).set({ processingStatus: "completed", note: "Duplicate message ignored", processedAt: FieldValue.serverTimestamp() }, { merge: true });
                 return;
             }
             let leadId = "";
@@ -393,6 +518,15 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
                     status: "new",
                     createdAt: FieldValue.serverTimestamp(),
                     updatedAt: FieldValue.serverTimestamp()
+                });
+                // Create in-app notification
+                await db.collection("notifications").add({
+                    title: `New Lead: ${leadName}`,
+                    message: `From ${platform === 'instagram' ? 'Instagram' : 'Facebook'} Direct Message. Assigned to Default Pipeline.`,
+                    type: "lead",
+                    link: `/leads/${leadId}`,
+                    is_read: false,
+                    created_at: FieldValue.serverTimestamp()
                 });
                 // Create corresponding Customer record
                 const newCustomerRef = db.collection("customers").doc();
@@ -470,7 +604,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             else if (platform === "page") {
                 await db.collection("meta_integrations").doc("default").set({ lastFacebookMessageAt: new Date().toISOString() }, { merge: true });
             }
-            await snapshot.ref.set({
+            await db.collection('meta_webhook_events').doc(eventId).set({
                 processingStatus: "completed",
                 relatedConversationId: conversationId,
                 relatedLeadId: leadId,
@@ -480,7 +614,7 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
             return;
         }
         // Ignored event type
-        await snapshot.ref.set({
+        await db.collection("meta_webhook_events").doc(eventId).set({
             processingStatus: "ignored",
             note: "Event type not handled",
             processedAt: FieldValue.serverTimestamp()
@@ -488,11 +622,11 @@ export const processMetaWebhookEvent = onDocumentCreated({ document: "meta_webho
     }
     catch (error) {
         console.error(`Error processing webhook event ${eventId}:`, error);
-        await snapshot.ref.set({
+        await db.collection("meta_webhook_events").doc(eventId).set({
             processingStatus: "failed",
             processingError: error.message,
             processedAt: FieldValue.serverTimestamp()
         }, { merge: true });
     }
-});
+}
 //# sourceMappingURL=metaWebhookProcessor.js.map

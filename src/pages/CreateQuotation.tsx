@@ -83,6 +83,26 @@ export default function CreateQuotation() {
           } catch (numErr) {
             console.warn("Could not generate proposed quotation number:", numErr);
           }
+
+          // Check if prefilled from lead URL query parameters
+          const searchParams = new URLSearchParams(location.search);
+          const urlName = searchParams.get('name');
+          const urlPhone = searchParams.get('phone');
+          const urlCompany = searchParams.get('company');
+          if (urlName) {
+            const matched = loadedCustomers.find(
+              c => c.name.toLowerCase() === urlName.toLowerCase() || (urlPhone && c.phone === urlPhone)
+            );
+            if (matched) {
+              setSelectedCustomerId(matched.id);
+              setSelectedCustomerName(matched.name);
+              if (matched.billing_address) setCustomerAddress(matched.billing_address);
+              if (matched.gst_number) setCustomerGstin(matched.gst_number);
+            } else {
+              setSelectedCustomerName(urlName);
+              if (urlCompany) setCustomerAddress(urlCompany);
+            }
+          }
         }
       } catch (error) {
         console.error("Error fetching library data:", error);
@@ -91,7 +111,7 @@ export default function CreateQuotation() {
       }
     }
     fetchData();
-  }, [id, companySettings?.quotation_prefix, companySettings?.quotation_format, companySettings?.quotation_year, companySettings?.quotation_next_number]);
+  }, [id, location.search, companySettings?.quotation_prefix, companySettings?.quotation_format, companySettings?.quotation_year, companySettings?.quotation_next_number]);
 
   const autoSaveDraft = async (customerName: string | null, voiceItems: any[], voiceCustomerType?: 'gst' | 'non_gst') => {
     if (!auth?.currentUser || !functions || !db) {

@@ -10,6 +10,7 @@ import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
 import { resolveWhatsAppAuthorization, waToken } from "./meta/auth.js";
 const googleWebhookKey = defineSecret("GOOGLE_WEBHOOK_KEY");
+const metaFbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
 export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
 export * from './meta/facebook.js';
@@ -2218,6 +2219,256 @@ export const updateLeadDetails = onCall(async (request) => {
         return { success: true, leadId, changedFields };
     });
 });
+// ─────────────────────────────────────────────────────────────────────────────
+// Send a free-text WhatsApp message for a stage change (called from frontend)
+// ─────────────────────────────────────────────────────────────────────────────
+export const sendStageWhatsApp = onCall({
+    secrets: [metaFbToken, waToken],
+    region: "asia-south1",
+}, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must be logged in");
+    const { leadId, message, phone, stageId, stageName } = request.data;
+    if (!leadId || !message || !phone)
+        throw new HttpsError("invalid-argument", "Missing leadId, message, or phone");
+    let tokensToTry = [];
+    try {
+        if (metaFbToken.value())
+            tokensToTry.push(metaFbToken.value());
+    }
+    catch { }
+    try {
+        if (waToken.value())
+            tokensToTry.push(waToken.value());
+    }
+    catch { }
+    let phoneNumberId = "1263075550230396";
+    let graphApiVersion = "v18.0";
+    try {
+        const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+        if (metaConfigDoc.exists) {
+            const cfg = metaConfigDoc.data() || {};
+            if (cfg.whatsappPhoneNumberId)
+                phoneNumberId = cfg.whatsappPhoneNumberId;
+            if (cfg.phoneNumberId)
+                phoneNumberId = cfg.phoneNumberId;
+            if (cfg.graphApiVersion)
+                graphApiVersion = cfg.graphApiVersion;
+            if (cfg.accessToken)
+                tokensToTry.push(cfg.accessToken);
+        }
+    }
+    catch { }
+    if (leadId) {
+        try {
+            const leadDoc = await db.collection("leads").doc(leadId).get();
+            if (leadDoc.exists) {
+                const lData = leadDoc.data() || {};
+                if (lData.whatsapp_business_phone_id) {
+                    phoneNumberId = lData.whatsapp_business_phone_id;
+                }
+            }
+        }
+        catch { }
+    }
+    tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+    if (tokensToTry.length === 0) {
+        throw new HttpsError("failed-precondition", "No Meta/WhatsApp access token configured in secrets or Firestore.");
+    }
+    const rawPhone = String(phone).replace(/\D/g, "");
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    let wamid = "";
+    let lastError = "";
+    for (const token of tokensToTry) {
+        try {
+            const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    recipient_type: "individual",
+                    to: cleanPhone,
+                    type: "text",
+                    text: { body: message },
+                }),
+            });
+            const resJson = await res.json();
+            if (resJson.messages?.[0]?.id) {
+                wamid = resJson.messages[0].id;
+                break;
+            }
+            else {
+                lastError = resJson.error?.message || JSON.stringify(resJson);
+                console.warn(`[sendStageWhatsApp] Token attempt failed: ${lastError}`);
+            }
+        }
+        catch (err) {
+            lastError = err.message || String(err);
+        }
+    }
+    if (!wamid) {
+        await db.collection("activities").add({
+            lead_id: leadId,
+            type: "message.stage_failed",
+            message: `Stage WhatsApp failed for "${stageName}": ${lastError}`,
+            actor: "system",
+            created_at: FieldValue.serverTimestamp(),
+        });
+        throw new HttpsError("internal", `WhatsApp API error: ${lastError}`);
+    }
+    await db.collection("messages").add({
+        leadId,
+        senderPhone: cleanPhone,
+        direction: "outbound",
+        type: "text",
+        content: message,
+        metaMessageId: wamid,
+        platform: "whatsapp",
+        triggeredBy: "stage_change",
+        created_at: FieldValue.serverTimestamp(),
+    });
+    await db.collection("activities").add({
+        lead_id: leadId,
+        type: "message.stage_sent",
+        message: `Auto WhatsApp sent for stage "${stageName}". WAMID: ${wamid}`,
+        actor: "system",
+        created_at: FieldValue.serverTimestamp(),
+    });
+    return { ok: true, wamid };
+});
+// ─────────────────────────────────────────────────────────────────────────────
+// Send a manual or AI-assisted chat reply via WhatsApp Cloud API (Live Chat)
+// ─────────────────────────────────────────────────────────────────────────────
+export const sendWhatsAppChatMessage = onCall({
+    secrets: [metaFbToken, waToken],
+    region: "asia-south1",
+}, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must be logged in");
+    const { conversationId, leadId, phone, message } = request.data;
+    if (!message || !phone)
+        throw new HttpsError("invalid-argument", "Missing phone or message");
+    let tokensToTry = [];
+    try {
+        if (metaFbToken.value())
+            tokensToTry.push(metaFbToken.value());
+    }
+    catch { }
+    try {
+        if (waToken.value())
+            tokensToTry.push(waToken.value());
+    }
+    catch { }
+    let phoneNumberId = "1263075550230396";
+    let graphApiVersion = "v18.0";
+    try {
+        const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+        if (metaConfigDoc.exists) {
+            const cfg = metaConfigDoc.data() || {};
+            if (cfg.whatsappPhoneNumberId)
+                phoneNumberId = cfg.whatsappPhoneNumberId;
+            if (cfg.phoneNumberId)
+                phoneNumberId = cfg.phoneNumberId;
+            if (cfg.graphApiVersion)
+                graphApiVersion = cfg.graphApiVersion;
+            if (cfg.accessToken)
+                tokensToTry.push(cfg.accessToken);
+        }
+    }
+    catch { }
+    if (leadId) {
+        try {
+            const leadDoc = await db.collection("leads").doc(leadId).get();
+            if (leadDoc.exists) {
+                const lData = leadDoc.data() || {};
+                if (lData.whatsapp_business_phone_id) {
+                    phoneNumberId = lData.whatsapp_business_phone_id;
+                }
+            }
+        }
+        catch { }
+    }
+    tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+    if (tokensToTry.length === 0) {
+        throw new HttpsError("failed-precondition", "No Meta/WhatsApp access token configured in secrets or Firestore.");
+    }
+    const rawPhone = String(phone).replace(/\D/g, "");
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+    let wamid = "";
+    let lastError = "";
+    for (const token of tokensToTry) {
+        try {
+            const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    recipient_type: "individual",
+                    to: cleanPhone,
+                    type: "text",
+                    text: { body: message },
+                }),
+            });
+            const resJson = await res.json();
+            if (resJson.messages?.[0]?.id) {
+                wamid = resJson.messages[0].id;
+                break;
+            }
+            else {
+                lastError = resJson.error?.message || JSON.stringify(resJson);
+                console.warn(`[sendWhatsAppChatMessage] Token attempt failed: ${lastError}`);
+            }
+        }
+        catch (err) {
+            lastError = err.message || String(err);
+        }
+    }
+    if (!wamid) {
+        throw new HttpsError("internal", `WhatsApp API error: ${lastError}`);
+    }
+    const senderName = request.auth.token.name || request.auth.token.email || "Staff";
+    // Record outbound message in messages collection
+    const messageDocRef = await db.collection("messages").add({
+        conversationId: conversationId || null,
+        leadId: leadId || null,
+        senderPhone: cleanPhone,
+        direction: "outbound",
+        type: "text",
+        content: message,
+        metaMessageId: wamid,
+        platform: "whatsapp",
+        triggeredBy: "live_chat",
+        senderName,
+        senderUid: request.auth.uid,
+        created_at: FieldValue.serverTimestamp(),
+    });
+    // Update conversation doc if provided
+    if (conversationId) {
+        try {
+            await db.collection("conversations").doc(conversationId).set({
+                lastMessage: `[You]: ${message}`,
+                lastMessageAt: FieldValue.serverTimestamp(),
+                lastDirection: "outbound",
+                ai_suggested_reply: "", // Clear pending suggestion if any
+                updated_at: FieldValue.serverTimestamp(),
+            }, { merge: true });
+        }
+        catch (e) {
+            console.warn(`[sendWhatsAppChatMessage] Could not update conversation doc: ${e}`);
+        }
+    }
+    if (leadId) {
+        await db.collection("activities").add({
+            lead_id: leadId,
+            type: "whatsapp_reply_sent",
+            title: "WhatsApp Chat Reply Sent",
+            message: `Sent WhatsApp reply: "${message.slice(0, 100)}${message.length > 100 ? '...' : ''}"`,
+            actor: senderName,
+            created_at: FieldValue.serverTimestamp(),
+        });
+    }
+    return { ok: true, wamid, messageId: messageDocRef.id };
+});
 export const processMessageQueueItem = onDocumentCreated({
     document: "message_queue/{itemId}",
     secrets: [waToken]
@@ -2245,6 +2496,84 @@ export const processMessageQueueItem = onDocumentCreated({
             status: "sent",
             updated_at: FieldValue.serverTimestamp()
         });
+        return;
+    }
+    // ── FREE-TEXT message (stage-change notifications) ────────────────────────
+    if (data.message_type === "free_text" && data.body && data.recipient_phone) {
+        let fbTokenValue = "";
+        try {
+            fbTokenValue = metaFbToken.value();
+        }
+        catch { }
+        if (!fbTokenValue) {
+            await snapshot.ref.update({ status: "failed", error: "META_FACEBOOK_SYSTEM_USER_TOKEN not configured", updated_at: FieldValue.serverTimestamp() });
+            return;
+        }
+        let phoneNumberId = "1263075550230396";
+        let graphApiVersion = "v18.0";
+        try {
+            const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+            if (metaConfigDoc.exists) {
+                const cfg = metaConfigDoc.data() || {};
+                if (cfg.whatsappPhoneNumberId)
+                    phoneNumberId = cfg.whatsappPhoneNumberId;
+                if (cfg.phoneNumberId)
+                    phoneNumberId = cfg.phoneNumberId;
+                if (cfg.graphApiVersion)
+                    graphApiVersion = cfg.graphApiVersion;
+            }
+        }
+        catch { }
+        try {
+            const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${fbTokenValue}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    messaging_product: "whatsapp",
+                    recipient_type: "individual",
+                    to: String(data.recipient_phone).replace(/\D/g, ""),
+                    type: "text",
+                    text: { body: data.body },
+                }),
+            });
+            const resJson = await res.json();
+            const wamid = resJson.messages?.[0]?.id;
+            if (wamid) {
+                await snapshot.ref.update({ status: "sent", metaMessageId: wamid, sentAt: FieldValue.serverTimestamp(), updated_at: FieldValue.serverTimestamp() });
+                await db.collection("messages").add({
+                    leadId: data.lead_id,
+                    senderPhone: data.recipient_phone,
+                    direction: "outbound",
+                    type: "text",
+                    content: data.body,
+                    metaMessageId: wamid,
+                    platform: "whatsapp",
+                    triggeredBy: "stage_change",
+                    created_at: FieldValue.serverTimestamp(),
+                });
+                await db.collection("activities").add({
+                    lead_id: data.lead_id,
+                    type: "message.stage_sent",
+                    message: `Stage-change WhatsApp sent successfully. WAMID: ${wamid}`,
+                    actor: "system",
+                    created_at: FieldValue.serverTimestamp(),
+                });
+            }
+            else {
+                const errMsg = resJson.error?.message || JSON.stringify(resJson);
+                await snapshot.ref.update({ status: "failed", error: errMsg, updated_at: FieldValue.serverTimestamp() });
+                await db.collection("activities").add({
+                    lead_id: data.lead_id,
+                    type: "message.stage_failed",
+                    message: `Stage-change WhatsApp failed: ${errMsg}`,
+                    actor: "system",
+                    created_at: FieldValue.serverTimestamp(),
+                });
+            }
+        }
+        catch (err) {
+            await snapshot.ref.update({ status: "failed", error: err?.message || String(err), updated_at: FieldValue.serverTimestamp() });
+        }
         return;
     }
     let whatsappToken = "";
@@ -2513,7 +2842,7 @@ export const onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) =
     }
 });
 // ── Trigger: lead document updated (stage change / pipeline move) ─────────────
-export const onLeadUpdated = onDocumentUpdated("leads/{leadId}", async (event) => {
+export const onLeadUpdated = onDocumentUpdated({ document: "leads/{leadId}", secrets: [metaFbToken, waToken] }, async (event) => {
     const before = event.data?.before.data();
     const after = event.data?.after.data();
     if (!before || !after)
@@ -2647,6 +2976,170 @@ export const onLeadUpdated = onDocumentUpdated("leads/{leadId}", async (event) =
         }
         catch (err) {
             console.error("Failed stage change auto enrollments:", err);
+        }
+    }
+    // ── AUTO STAGE-CHANGE WHATSAPP MESSAGE ────────────────────────────────────
+    // When a lead's stage changes, automatically send a WhatsApp message to the customer
+    if (stageChanged && after.phone) {
+        try {
+            const newStageId = after.status;
+            const leadId = event.params.leadId;
+            // Skip non-human stages
+            const skipStages = ['won', 'lost', 'lost_cancelled', 'completed'];
+            if (!skipStages.includes(newStageId)) {
+                // Look up stage_messages config for this stage
+                const stageMsgDoc = await db.collection('stage_messages').doc(newStageId).get();
+                let whatsappEnabled = true;
+                let whatsappTemplate = `Hi {customer_name}, your order is now in the "{current_stage}" stage. Our team will keep you updated. – EcoTrophy`;
+                if (stageMsgDoc.exists) {
+                    const cfg = stageMsgDoc.data() || {};
+                    whatsappEnabled = cfg.whatsapp_enabled !== false;
+                    if (cfg.whatsapp_template)
+                        whatsappTemplate = cfg.whatsapp_template;
+                }
+                if (whatsappEnabled) {
+                    // Build context for template rendering
+                    const pipelineSnap = await db.collection('pipelines').doc(after.pipeline_id || 'default').get();
+                    const pipelineData = pipelineSnap.data() || {};
+                    const stages = pipelineData.stages || [];
+                    const currentStageObj = stages.find((s) => s.id === newStageId);
+                    const prevStageObj = stages.find((s) => s.id === before.status);
+                    const context = {
+                        customer_name: after.name || 'Customer',
+                        lead_name: after.name || 'Customer',
+                        phone: after.phone || '',
+                        current_stage: currentStageObj?.label || newStageId,
+                        previous_stage: prevStageObj?.label || before.status || '',
+                        pipeline_name: pipelineData.name || after.pipeline_id || '',
+                        required_quantity: String(after.required_quantity || ''),
+                        budget: String(after.budget || ''),
+                        event_name: after.event_name || '',
+                        event_type: after.event_type || '',
+                        company: after.company || '',
+                        location: after.location || '',
+                    };
+                    // Render template
+                    const renderedMessage = String(whatsappTemplate).replace(/\{\{?([a-zA-Z0-9_]+)\}?\}/g, (_m, key) => context[key] || '');
+                    // Get token and phone_number_id from meta_integrations config
+                    let tokensToTry = [];
+                    try {
+                        if (metaFbToken.value())
+                            tokensToTry.push(metaFbToken.value());
+                    }
+                    catch { }
+                    try {
+                        if (waToken.value())
+                            tokensToTry.push(waToken.value());
+                    }
+                    catch { }
+                    let phoneNumberId = '1263075550230396'; // fallback from existing config
+                    let graphApiVersion = 'v18.0';
+                    const metaConfigDoc = await db.collection('meta_integrations').doc('default').get();
+                    if (metaConfigDoc.exists) {
+                        const metaCfg = metaConfigDoc.data() || {};
+                        if (metaCfg.whatsappPhoneNumberId)
+                            phoneNumberId = metaCfg.whatsappPhoneNumberId;
+                        if (metaCfg.phoneNumberId)
+                            phoneNumberId = metaCfg.phoneNumberId;
+                        if (metaCfg.graphApiVersion)
+                            graphApiVersion = metaCfg.graphApiVersion;
+                        if (metaCfg.accessToken)
+                            tokensToTry.push(metaCfg.accessToken);
+                    }
+                    tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+                    if (tokensToTry.length === 0) {
+                        console.warn('[AutoStageMsg] No Meta access token configured, skipping auto-message.');
+                    }
+                    else {
+                        // Normalize phone
+                        const rawPhone = String(after.phone).replace(/\D/g, '');
+                        const finalPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+                        let wamid = '';
+                        let lastError = '';
+                        for (const token of tokensToTry) {
+                            try {
+                                const apiRes = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+                                    method: 'POST',
+                                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        messaging_product: 'whatsapp',
+                                        recipient_type: 'individual',
+                                        to: finalPhone,
+                                        type: 'text',
+                                        text: { body: renderedMessage },
+                                    }),
+                                });
+                                const apiData = await apiRes.json();
+                                if (apiData.messages?.[0]?.id) {
+                                    wamid = apiData.messages[0].id;
+                                    break;
+                                }
+                                else {
+                                    lastError = apiData.error?.message || JSON.stringify(apiData);
+                                }
+                            }
+                            catch (err) {
+                                lastError = err.message || String(err);
+                            }
+                        }
+                        if (wamid) {
+                            // Save message to messages collection
+                            await db.collection('messages').add({
+                                leadId,
+                                senderPhone: finalPhone,
+                                direction: 'outbound',
+                                type: 'text',
+                                content: renderedMessage,
+                                metaMessageId: wamid,
+                                platform: 'whatsapp',
+                                triggeredBy: 'stage_change_auto',
+                                created_at: FieldValue.serverTimestamp(),
+                            });
+                            // Log activity
+                            await db.collection('activities').add({
+                                lead_id: leadId,
+                                type: 'message.stage_auto_sent',
+                                message: `Auto WhatsApp sent for stage change to "${currentStageObj?.label || newStageId}": ${renderedMessage.substring(0, 80)}...`,
+                                actor: 'system',
+                                created_at: FieldValue.serverTimestamp(),
+                            });
+                            // Update lead notification history
+                            const existingHistory = after.notification_history || [];
+                            await db.collection('leads').doc(leadId).update({
+                                notification_history: [
+                                    {
+                                        id: `wa_${wamid}`,
+                                        stage_id: newStageId,
+                                        stage_name: currentStageObj?.label || newStageId,
+                                        channel: 'whatsapp',
+                                        recipient: finalPhone,
+                                        message: renderedMessage,
+                                        status: 'sent',
+                                        sent_at: new Date(),
+                                        sent_by: 'system_auto',
+                                    },
+                                    ...existingHistory,
+                                ],
+                                [`notifications_sent.${newStageId}`]: true,
+                            });
+                            console.log(`[AutoStageMsg] ✅ Sent to ${finalPhone} for stage ${newStageId}. WAMID: ${wamid}`);
+                        }
+                        else {
+                            console.warn(`[AutoStageMsg] ⚠️ API error for lead ${leadId}:`, lastError);
+                            await db.collection('activities').add({
+                                lead_id: leadId,
+                                type: 'message.stage_auto_failed',
+                                message: `Auto WhatsApp failed for stage "${newStageId}": ${lastError || 'Unknown error'}`,
+                                actor: 'system',
+                                created_at: FieldValue.serverTimestamp(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        catch (err) {
+            console.error('[AutoStageMsg] Failed to send automatic stage-change WhatsApp:', err);
         }
     }
     // Welcome message handler

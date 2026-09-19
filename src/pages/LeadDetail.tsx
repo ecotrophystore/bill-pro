@@ -32,11 +32,21 @@ import {
   StickyNote,
   Bell,
   Plus,
+  Layers,
+  Award,
+  Trash2,
+  Pin,
+  Tag,
+  CircleAlert,
+  ChevronRight,
 } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import {
   type Lead,
   type LeadActivity,
+  type LeadNote,
+  type NoteCategory,
+  type NotePriority,
   type MessageTemplate,
   type Pipeline,
   type PipelineStage,
@@ -52,6 +62,12 @@ import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 import { openWhatsAppWebDirect } from '../services/stageNotificationService';
+import { STAGE_PHASES, type StagePhase } from './PipelineBoard';
+import {
+  createLeadNote,
+  deleteLeadNote,
+  togglePinLeadNote,
+} from '../services/leadNoteService';
 
 type LeadFormState = {
   name: string;
@@ -106,15 +122,23 @@ export default function LeadDetail() {
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
   const [users, setUsers] = useState<DBUser[]>([]);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
+  const [leadNotes, setLeadNotes] = useState<LeadNote[]>([]);
+  const [leadQuotations, setLeadQuotations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'notes' | 'conversation' | 'history' | 'quotation'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'notes' | 'quotation' | 'conversation' | 'history'>('details');
   const [notesDrawerOpen, setNotesDrawerOpen] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [composerText, setComposerText] = useState('');
   const [dismissedReassign, setDismissedReassign] = useState(false);
   const { hasPermission } = useCRMPermission();
+
+  // Inline Note Form State
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNoteCategory, setNewNoteCategory] = useState<NoteCategory>('general');
+  const [newNotePriority, setNewNotePriority] = useState<NotePriority>('medium');
+  const [addingNote, setAddingNote] = useState(false);
 
   // Stage change modal state
   const [stageModalState, setStageModalState] = useState<{
@@ -206,6 +230,22 @@ export default function LeadDetail() {
       }
     );
 
+    // Load notes directly for inline tab
+    const unsubNotes = onSnapshot(
+      query(collection(db, 'lead_notes'), where('lead_id', '==', id)),
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as LeadNote));
+        list.sort((a, b) => {
+          if (a.is_pinned && !b.is_pinned) return -1;
+          if (!a.is_pinned && b.is_pinned) return 1;
+          const at = a.created_at?.toDate?.()?.getTime?.() || 0;
+          const bt = b.created_at?.toDate?.()?.getTime?.() || 0;
+          return bt - at;
+        });
+        setLeadNotes(list);
+      }
+    );
+
     // Load omnichannel messages
     const unsubMessages = onSnapshot(
       query(collection(db, 'messages'), where('leadId', '==', id)),
@@ -235,6 +275,7 @@ export default function LeadDetail() {
       unsubPipelines();
       unsubUsers();
       unsubActivities();
+      unsubNotes();
       unsubMessages();
     };
   }, [id]);
@@ -249,7 +290,7 @@ export default function LeadDetail() {
       email: lead.email || '',
       location: lead.location || '',
       required_quantity: lead.required_quantity ? String(lead.required_quantity) : '',
-      value: lead.value ? String(lead.value) : '',
+      value: lead.value ? String(lead.value) : (lead.budget ? String(lead.budget).replace(/[^\d]/g, '') : ''),
       event_name: lead.event_name || '',
       event_date: lead.event_date || '',
       delivery_date: lead.delivery_date || '',
@@ -266,6 +307,22 @@ export default function LeadDetail() {
     });
   }, [lead]);
 
+  // Load linked quotations for this lead
+  useEffect(() => {
+    if (!db || !lead) return;
+    const unsubQuotations = onSnapshot(collection(db, 'quotations'), (snap) => {
+      const rows = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter(
+          (q: any) =>
+            q.lead_id === id ||
+            (q.customer_name && lead.name && q.customer_name.trim().toLowerCase() === lead.name.trim().toLowerCase())
+        );
+      setLeadQuotations(rows);
+    });
+    return () => unsubQuotations();
+  }, [id, lead?.name]);
+
   const activePipeline = useMemo(() => {
     if (!lead) return DEFAULT_QUANTITY_PIPELINES[1];
     const found = pipelines.find((p) => p.id === lead.pipeline_id);
@@ -275,6 +332,15 @@ export default function LeadDetail() {
   const activeStages = useMemo(() => {
     return activePipeline?.stages?.length ? activePipeline.stages : STANDARD_CRM_STAGES;
   }, [activePipeline]);
+
+  // Current stage label and index
+  const currentStageIndex = useMemo(() => {
+    const currentId = lead?.status || 'new_enquiry';
+    const idx = activeStages.findIndex((s) => s.id === currentId);
+    return idx >= 0 ? idx : 0;
+  }, [lead?.status, activeStages]);
+
+  const currentStageLabel = activeStages[currentStageIndex]?.label || lead?.status || 'New Enquiry';
 
   // Check if quantity/value qualifies for a different pipeline
   const recommendedPipeline = useMemo(() => {
@@ -302,9 +368,9 @@ export default function LeadDetail() {
   const handleStageSelectChange = (newStageId: string) => {
     if (!lead || newStageId === lead.status) return;
 
-    const fromStage = activeStages.find((s) => s.id === lead.status) || {
+    const fromStage = activeStages.find((s) => s.id === (lead.status || 'new_enquiry')) || {
       id: lead.status || 'new_enquiry',
-      label: lead.status || 'New Enquiry',
+      label: currentStageLabel,
     };
     const toStage = activeStages.find((s) => s.id === newStageId) || {
       id: newStageId,
@@ -325,7 +391,7 @@ export default function LeadDetail() {
         pipeline_id: targetPipelineId,
         updated_at: serverTimestamp(),
       });
-      setFeedback(`Moved customer to ${pipelines.find((p) => p.id === targetPipelineId)?.name || 'Pipeline'}.`);
+      setFeedback(`Reassigned to ${recommendedPipeline?.name || targetPipelineId}`);
       setDismissedReassign(true);
     } catch (err: any) {
       console.error('Failed to reassign pipeline:', err);
@@ -376,12 +442,66 @@ export default function LeadDetail() {
         created_at: serverTimestamp(),
       });
 
-      setFeedback('Customer details saved successfully.');
+      setFeedback('Customer & order details saved successfully.');
     } catch (err: any) {
       console.error('Save failed:', err);
       setFeedback(err?.message || 'Failed to save changes.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAddInlineNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNoteContent.trim() || !id || !lead) return;
+
+    setAddingNote(true);
+    try {
+      await createLeadNote(
+        {
+          lead_id: id,
+          lead_name: lead.name,
+          company: lead.company,
+          phone: lead.phone,
+          pipeline_id: activePipeline.id,
+          stage_id: lead.status,
+          stage_name: currentStageLabel,
+          content: newNoteContent.trim(),
+          category: newNoteCategory,
+          priority: newNotePriority,
+          tagged_users: [],
+          has_reminder: false,
+        },
+        {
+          uid: auth?.currentUser?.uid || 'user',
+          name: auth?.currentUser?.displayName || auth?.currentUser?.email || 'CRM Rep',
+          email: auth?.currentUser?.email || '',
+        }
+      );
+      setNewNoteContent('');
+      setFeedback('Note recorded successfully.');
+    } catch (err: any) {
+      console.error('Failed to create inline note:', err);
+      setFeedback('Failed to add note.');
+    } finally {
+      setAddingNote(false);
+    }
+  };
+
+  const handleDeleteInlineNote = async (noteId: string) => {
+    if (!id) return;
+    try {
+      await deleteLeadNote(noteId, id);
+    } catch (err) {
+      console.error('Failed to delete note:', err);
+    }
+  };
+
+  const handleTogglePin = async (noteId: string, currentPinned: boolean) => {
+    try {
+      await togglePinLeadNote(noteId, !currentPinned);
+    } catch (err) {
+      console.error('Failed to toggle pin:', err);
     }
   };
 
@@ -394,10 +514,10 @@ export default function LeadDetail() {
         email: lead.email || '',
         company: lead.company || lead.organization || '',
         type: 'business',
-        notes: `Converted from lead. Quantity: ${lead.required_quantity || '-'}, Event: ${lead.event_name || '-'}`,
+        notes: `Converted from CRM Lead. Quantity: ${lead.required_quantity || '-'}, Event: ${lead.event_name || '-'}`,
         created_at: serverTimestamp(),
       });
-      setFeedback(`Converted to Customer record (${custRef.id}) in Customer Library!`);
+      setFeedback(`Saved to Customer Library as record (${custRef.id})!`);
     } catch (e: any) {
       console.error('Customer conversion failed:', e);
       setFeedback('Failed to create customer record.');
@@ -424,13 +544,12 @@ export default function LeadDetail() {
     );
   }
 
-  const currentStageLabel = activeStages.find((s) => s.id === lead.status)?.label || lead.status;
   const stageHistoryList = lead.stage_history || [];
   const notificationHistoryList = lead.notification_history || [];
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-6xl mx-auto">
-      {/* Top Breadcrumb & Actions */}
+    <div className="space-y-5 animate-fade-in max-w-6xl mx-auto">
+      {/* Top Breadcrumb & Quick Action Buttons */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <Link
           to="/pipeline"
@@ -444,10 +563,10 @@ export default function LeadDetail() {
             type="button"
             onClick={() => setNotesDrawerOpen(true)}
             className="neo-btn text-xs px-3.5 py-1.5 font-bold flex items-center gap-1.5 text-primary-dark hover:bg-primary/10"
-            title="Open Notes, Team Mentions & Reminder Alarms"
+            title="Open Notes, Team Mentions & Reminder Alarms Drawer"
           >
-            <StickyNote size={14} className={lead.notes_count ? 'text-primary' : 'text-secondary'} />
-            <span>Notes & Reminders {lead.notes_count ? `(${lead.notes_count})` : ''}</span>
+            <StickyNote size={14} className={leadNotes.length || lead.notes_count ? 'text-primary' : 'text-secondary'} />
+            <span>Notes & Reminders ({leadNotes.length || lead.notes_count || 0})</span>
           </button>
 
           <button
@@ -469,7 +588,7 @@ export default function LeadDetail() {
         </div>
       </div>
 
-      {/* Pipeline Reassignment Recommendation Banner */}
+      {/* Pipeline Reassignment Recommendation Banner (Rule 1) */}
       <PipelineReassignBanner
         currentPipelineName={activePipeline.name}
         recommendedPipeline={recommendedPipeline}
@@ -480,15 +599,15 @@ export default function LeadDetail() {
       {/* Profile Header Card */}
       <div className="neo-card space-y-4 border border-shadow-darker/10">
         <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap mb-1">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-bold text-primary tracking-wide uppercase">
                 {activePipeline.name}
               </span>
               <span>•</span>
               <span className="text-xs text-secondary">Created {formatDate(lead.created_at)}</span>
 
-              {/* Customer Lifecycle Badge (Rule 2) */}
+              {/* Customer Lifecycle Badge */}
               {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
                 <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 shadow-xs">
                   Repeat Customer
@@ -516,74 +635,170 @@ export default function LeadDetail() {
                 </span>
               )}
             </div>
-            <h1 className="text-3xl font-extrabold text-primary-dark mt-1">{lead.name}</h1>
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-primary-dark">{lead.name}</h1>
+
             {lead.company && (
-              <div className="text-sm font-semibold text-secondary flex items-center gap-1.5 mt-0.5">
+              <div className="text-sm font-semibold text-secondary flex items-center gap-1.5">
                 <Building size={14} /> {lead.company}
               </div>
             )}
           </div>
 
-          {/* Manual Stage Selector */}
+          {/* Quick Stage Move Dropdown */}
           <div className="flex flex-col items-end gap-1.5">
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">
-              Current Stage (Click to Change)
+              Stage Selector
             </span>
-            <div className="relative">
-              <select
-                className="neo-btn-primary text-xs font-bold py-2 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md cursor-pointer"
-                value={lead.status || 'new_enquiry'}
-                onChange={(e) => handleStageSelectChange(e.target.value)}
-              >
-                {activeStages.map((s, idx) => (
-                  <option key={s.id} value={s.id} className="bg-surface text-primary-dark font-medium">
-                    {idx + 1}. {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              aria-label="Select pipeline stage"
+              className="neo-btn-primary text-xs font-bold py-2 px-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md cursor-pointer"
+              value={lead.status || 'new_enquiry'}
+              onChange={(e) => handleStageSelectChange(e.target.value)}
+            >
+              {activeStages.map((s, idx) => (
+                <option key={s.id} value={s.id} className="bg-surface text-primary-dark font-medium">
+                  {idx + 1}. {s.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
         {/* Quick Contact & Metrics Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-shadow-darker/10 text-xs">
+          {/* Phone with 1-click WhatsApp web button */}
           <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5 flex items-center justify-between">
             <div>
               <span className="text-secondary font-medium block">Phone</span>
-              <span className="font-bold text-primary-dark">{lead.phone || 'No phone'}</span>
+              <span className="font-bold text-primary-dark font-mono">{lead.phone || 'No phone'}</span>
             </div>
             {lead.phone && (
-              <button
-                type="button"
-                onClick={() =>
-                  openWhatsAppWebDirect(
-                    lead.phone || '',
-                    `Hi ${lead.name}, regarding your enquiry with EcoTrophy:`
-                  )
-                }
-                className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-50 border border-emerald-200 transition-colors"
-                title="Chat on WhatsApp Web"
-              >
-                <ExternalLink size={14} />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      `/whatsapp-automation?leadId=${lead.id}&phone=${lead.phone}`
+                    )
+                  }
+                  className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors flex items-center gap-1 text-xs font-semibold"
+                  title="Chat in WhatsApp Live Chat"
+                >
+                  <MessageSquare size={14} />
+                  <span>Chat</span>
+                </button>
+                <a
+                  href={`tel:${lead.phone}`}
+                  className="p-1.5 rounded-lg text-slate-700 hover:bg-slate-200 border border-slate-300 transition-colors"
+                  title="Call Customer"
+                >
+                  <Phone size={14} />
+                </a>
+              </div>
             )}
           </div>
+
           <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
             <span className="text-secondary font-medium block">Quantity</span>
             <span className="font-bold text-primary-dark">
-              {lead.required_quantity ? `${lead.required_quantity} pieces` : 'Not specified'}
+              {lead.required_quantity ? `🎯 ${lead.required_quantity} pieces` : 'Not specified'}
             </span>
           </div>
+
           <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100">
             <span className="text-emerald-800 font-medium block">Order Value</span>
             <span className="font-bold text-emerald-900">
               {lead.value ? `₹${Number(lead.value).toLocaleString('en-IN')}` : '₹0'}
             </span>
           </div>
+
           <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
             <span className="text-secondary font-medium block">Delivery Deadline</span>
-            <span className="font-bold text-primary-dark">{lead.delivery_date || 'TBD'}</span>
+            <span className="font-bold text-primary-dark">
+              {lead.delivery_date ? `🚚 ${lead.delivery_date}` : 'TBD'}
+            </span>
           </div>
+        </div>
+      </div>
+
+      {/* VISUAL STAGE PROGRESS STEPPER (5 PHASES & 16 STAGES) */}
+      <div className="neo-card space-y-3.5 bg-gradient-to-br from-slate-50/80 to-white border border-shadow-darker/10">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Layers size={16} className="text-primary" />
+            <h2 className="text-xs font-bold uppercase tracking-wider text-primary-dark">
+              Order Milestone Stepper
+            </h2>
+            <span className="text-xs text-secondary">
+              (Stage {currentStageIndex + 1} of {activeStages.length}: <strong className="text-primary-dark">{currentStageLabel}</strong>)
+            </span>
+          </div>
+          <span className="text-[11px] text-secondary">
+            Click any milestone stage below to initiate manual transition & notification preview
+          </span>
+        </div>
+
+        {/* 5 Phase Track */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {STAGE_PHASES.map((phase, pIdx) => {
+            const hasCurrentStage = phase.stageIds.includes(lead.status || 'new_enquiry');
+            const phaseFirstStageIndex = activeStages.findIndex((s) => phase.stageIds.includes(s.id));
+            const isPhasePassed = currentStageIndex > phaseFirstStageIndex && !hasCurrentStage;
+
+            return (
+              <div
+                key={phase.id}
+                className={`p-2.5 rounded-xl border text-xs transition-all ${
+                  hasCurrentStage
+                    ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/20'
+                    : isPhasePassed
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : 'bg-slate-50 border-slate-200 text-slate-500 opacity-80'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-extrabold text-[11px] truncate">{phase.shortLabel}</span>
+                  {isPhasePassed ? (
+                    <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                  ) : hasCurrentStage ? (
+                    <span className="w-2 h-2 rounded-full bg-primary animate-ping shrink-0" />
+                  ) : (
+                    <span className="text-[10px] text-slate-400">P{pIdx + 1}</span>
+                  )}
+                </div>
+
+                {/* Sub-stages chips */}
+                <div className="flex items-center gap-1 flex-wrap">
+                  {phase.stageIds.map((sId) => {
+                    const stg = activeStages.find((s) => s.id === sId);
+                    if (!stg) return null;
+                    const stgIdx = activeStages.findIndex((s) => s.id === sId);
+                    const isPassed = currentStageIndex > stgIdx;
+                    const isCurrent = lead.status === sId || (stgIdx === 0 && !lead.status);
+
+                    return (
+                      <button
+                        key={sId}
+                        type="button"
+                        onClick={() => handleStageSelectChange(sId)}
+                        className={`text-[9px] px-1.5 py-0.5 rounded transition-all font-semibold truncate max-w-[85px] ${
+                          isCurrent
+                            ? 'bg-primary text-white shadow-xs font-bold'
+                            : isPassed
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-white/80 text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
+                        }`}
+                        title={`Click to set stage to: ${stg.label}`}
+                      >
+                        {stg.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -617,18 +832,19 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* Tab Navigation */}
+      {/* Tab Navigation Ribbon (5 Complete Tabs) */}
       <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2 flex-wrap">
         <button
           onClick={() => setActiveTab('details')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'details'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
           }`}
         >
-          Customer & Order Details
+          <Award size={14} /> Customer & Order Specs
         </button>
+
         <button
           onClick={() => setActiveTab('notes')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -637,8 +853,20 @@ export default function LeadDetail() {
               : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
           }`}
         >
-          <StickyNote size={14} /> Notes & Reminders {lead.notes_count ? `(${lead.notes_count})` : ''}
+          <StickyNote size={14} /> Notes & Reminders ({leadNotes.length || lead.notes_count || 0})
         </button>
+
+        <button
+          onClick={() => setActiveTab('quotation')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            activeTab === 'quotation'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+          }`}
+        >
+          <FileText size={14} /> Quotations ({leadQuotations.length})
+        </button>
+
         <button
           onClick={() => setActiveTab('conversation')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -647,8 +875,9 @@ export default function LeadDetail() {
               : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
           }`}
         >
-          <MessageSquare size={14} /> Omnichannel Conversation ({messages.length})
+          <MessageSquare size={14} /> Omnichannel Chat ({messages.length})
         </button>
+
         <button
           onClick={() => setActiveTab('history')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -657,7 +886,7 @@ export default function LeadDetail() {
               : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
           }`}
         >
-          <History size={14} /> Stage History & Notifications ({stageHistoryList.length + notificationHistoryList.length})
+          <History size={14} /> Stage History ({stageHistoryList.length + notificationHistoryList.length})
         </button>
       </div>
 
@@ -670,171 +899,269 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* TAB 1: Customer & Order Details Form */}
+      {/* TAB 1: SECTIONAL CUSTOMER & ORDER DETAILS FORM */}
       {activeTab === 'details' && (
-        <div className="neo-card space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-            {/* Customer Info */}
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Customer Name</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Section 1: Contact & Organization */}
+            <div className="neo-card space-y-3.5">
+              <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+                <Building size={16} className="text-primary" />
+                <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wider">
+                  Contact & Organization
+                </h3>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Customer Name</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="Customer full name"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Company / Organization</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="e.g. Acme Corp / Rotary Club"
+                    value={form.company}
+                    onChange={(e) => setForm({ ...form, company: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Phone Number</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full font-mono"
+                    placeholder="10-digit mobile number"
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Email Address</label>
+                  <input
+                    type="email"
+                    className="neo-input w-full"
+                    placeholder="customer@example.com"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Location / City</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="City, State"
+                    value={form.location}
+                    onChange={(e) => setForm({ ...form, location: e.target.value })}
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Company / Organization</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                value={form.company}
-                onChange={(e) => setForm({ ...form, company: e.target.value })}
-              />
+            {/* Section 2: Trophy & Requirement Specifications */}
+            <div className="neo-card space-y-3.5">
+              <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+                <Award size={16} className="text-primary" />
+                <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wider">
+                  Trophy & Requirement Specifications
+                </h3>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-emerald-800 block mb-1">
+                    Required Quantity (Pieces)
+                  </label>
+                  <input
+                    type="number"
+                    className="neo-input w-full font-bold text-emerald-900 border-emerald-300"
+                    placeholder="e.g. 50"
+                    value={form.required_quantity}
+                    onChange={(e) => setForm({ ...form, required_quantity: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-emerald-800 block mb-1">
+                    Estimated Deal Value (₹)
+                  </label>
+                  <input
+                    type="number"
+                    className="neo-input w-full font-bold text-emerald-900 border-emerald-300"
+                    placeholder="e.g. 35000"
+                    value={form.value}
+                    onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">
+                    Trophy Size / Material
+                  </label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="e.g. 8 inch Wooden / Crystal Star"
+                    value={form.trophy_size}
+                    onChange={(e) => setForm({ ...form, trophy_size: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">
+                    Order Reason / Notes
+                  </label>
+                  <textarea
+                    className="neo-input w-full min-h-[70px] resize-y"
+                    placeholder="Additional customer specifications or notes..."
+                    value={form.reason}
+                    onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Phone Number</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              />
+            {/* Section 3: Event & Delivery Logistics */}
+            <div className="neo-card space-y-3.5">
+              <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+                <Truck size={16} className="text-primary" />
+                <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wider">
+                  Event & Delivery Logistics
+                </h3>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Event Name</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="e.g. Annual Sports Meet 2026"
+                    value={form.event_name}
+                    onChange={(e) => setForm({ ...form, event_name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Event Date</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="e.g. 24 Oct 2026"
+                    value={form.event_date}
+                    onChange={(e) => setForm({ ...form, event_date: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-amber-900 block mb-1">
+                    Delivery Deadline
+                  </label>
+                  <input
+                    type="text"
+                    className="neo-input w-full font-semibold text-amber-950 border-amber-300"
+                    placeholder="e.g. 20 Oct 2026"
+                    value={form.delivery_date}
+                    onChange={(e) => setForm({ ...form, delivery_date: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">
+                    Shipment Tracking Number
+                  </label>
+                  <input
+                    type="text"
+                    className="neo-input w-full font-mono"
+                    placeholder="e.g. ST49201928 / Bluedart"
+                    value={form.tracking_number}
+                    onChange={(e) => setForm({ ...form, tracking_number: e.target.value })}
+                  />
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Email Address</label>
-              <input
-                type="email"
-                className="neo-input w-full"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-              />
-            </div>
+            {/* Section 4: Ownership, Follow-up & Source */}
+            <div className="neo-card space-y-3.5">
+              <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+                <User size={16} className="text-primary" />
+                <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wider">
+                  Ownership, Follow-up & Source
+                </h3>
+              </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Location / City</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                value={form.location}
-                onChange={(e) => setForm({ ...form, location: e.target.value })}
-              />
-            </div>
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Assigned Sales Person</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="Sales rep name"
+                    value={form.sales_person}
+                    onChange={(e) => setForm({ ...form, sales_person: e.target.value })}
+                  />
+                </div>
 
-            {/* Order Specs */}
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Required Quantity (Pieces)</label>
-              <input
-                type="number"
-                className="neo-input w-full font-bold text-emerald-800"
-                value={form.required_quantity}
-                onChange={(e) => setForm({ ...form, required_quantity: e.target.value })}
-              />
-            </div>
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Assigned Design Person</label>
+                  <input
+                    type="text"
+                    className="neo-input w-full"
+                    placeholder="Designer name"
+                    value={form.design_person}
+                    onChange={(e) => setForm({ ...form, design_person: e.target.value })}
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Estimated Order Value (₹)</label>
-              <input
-                type="number"
-                className="neo-input w-full font-bold text-emerald-800"
-                value={form.value}
-                onChange={(e) => setForm({ ...form, value: e.target.value })}
-              />
-            </div>
+                <div>
+                  <label className="font-bold text-primary-dark block mb-1">Next Follow-up Date</label>
+                  <input
+                    type="date"
+                    className="neo-input w-full font-medium"
+                    value={form.next_follow_up_date}
+                    onChange={(e) => setForm({ ...form, next_follow_up_date: e.target.value })}
+                  />
+                </div>
 
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Event Name</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="e.g. Annual Award Function"
-                value={form.event_name}
-                onChange={(e) => setForm({ ...form, event_name: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Event Date</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="e.g. 24 Oct 2026"
-                value={form.event_date}
-                onChange={(e) => setForm({ ...form, event_date: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Delivery Deadline</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="e.g. 20 Oct 2026"
-                value={form.delivery_date}
-                onChange={(e) => setForm({ ...form, delivery_date: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Trophy Size / Material</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="e.g. 8 inch Wooden / Crystal"
-                value={form.trophy_size}
-                onChange={(e) => setForm({ ...form, trophy_size: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Shipment Tracking Number</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="e.g. ST49201928"
-                value={form.tracking_number}
-                onChange={(e) => setForm({ ...form, tracking_number: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Assigned Sales Person</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="Sales rep name"
-                value={form.sales_person}
-                onChange={(e) => setForm({ ...form, sales_person: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Assigned Design Person</label>
-              <input
-                type="text"
-                className="neo-input w-full"
-                placeholder="Designer name"
-                value={form.design_person}
-                onChange={(e) => setForm({ ...form, design_person: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-primary-dark block">Next Follow-up Date</label>
-              <input
-                type="date"
-                className="neo-input w-full"
-                value={form.next_follow_up_date}
-                onChange={(e) => setForm({ ...form, next_follow_up_date: e.target.value })}
-              />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="font-bold text-primary-dark block mb-1">Source</label>
+                    <input
+                      type="text"
+                      className="neo-input w-full"
+                      placeholder="e.g. WhatsApp, Meta"
+                      value={form.source}
+                      onChange={(e) => setForm({ ...form, source: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-primary-dark block mb-1">Campaign</label>
+                    <input
+                      type="text"
+                      className="neo-input w-full"
+                      placeholder="e.g. Diwali Promo"
+                      value={form.campaign}
+                      onChange={(e) => setForm({ ...form, campaign: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-shadow-darker/10">
+          <div className="flex items-center justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={handleSaveDetails}
@@ -848,57 +1175,268 @@ export default function LeadDetail() {
         </div>
       )}
 
-      {/* TAB 2: Notes & Reminders Full Workspace */}
+      {/* TAB 2: INLINE LIVE NOTES & REMINDERS WORKSPACE */}
       {activeTab === 'notes' && (
-        <div className="space-y-6">
-          <div className="neo-card space-y-4">
-            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3 flex-wrap gap-2">
-              <div>
-                <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
-                  <StickyNote size={16} className="text-primary" />
-                  Notes, Team Mentions & Follow-up Reminders
-                </h2>
-                <p className="text-xs text-secondary mt-0.5">
-                  Keep track of client requirements, tag team members (@mentions), set audio alarms, and sync follow-ups to calendar.
-                </p>
-              </div>
-
+        <div className="space-y-5">
+          {/* Add Inline Note Form */}
+          <div className="neo-card space-y-3">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-2.5">
+              <h2 className="text-xs font-bold text-primary-dark flex items-center gap-2 uppercase tracking-wider">
+                <StickyNote size={15} className="text-primary" />
+                Add Internal Note & Follow-up
+              </h2>
               <button
                 type="button"
                 onClick={() => setNotesDrawerOpen(true)}
-                className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+                className="text-xs text-primary hover:underline font-bold flex items-center gap-1"
               >
-                <Plus size={14} /> Open Notes & Audio Dictation Drawer
+                <span>Open Audio Dictation & Calendar Sync Drawer</span>
+                <ExternalLink size={12} />
               </button>
             </div>
 
-            <div className="p-6 rounded-2xl bg-slate-50/70 border border-shadow-darker/10 text-center space-y-3">
-              <StickyNote size={36} className="mx-auto text-primary opacity-60" />
-              <div className="max-w-md mx-auto space-y-1">
-                <h3 className="text-sm font-bold text-primary-dark">Collaborative Stage Notes & Alarms</h3>
-                <p className="text-xs text-secondary leading-relaxed">
-                  Use the Slide-over Drawer to compose notes with @member autocomplete, live audio alarms, action checklists, and 1-click Google Calendar sync.
-                </p>
+            <form onSubmit={handleAddInlineNote} className="space-y-3">
+              <textarea
+                className="neo-input w-full text-xs min-h-[80px] resize-y"
+                placeholder={`Type notes regarding ${lead.name}'s requirements, stage updates, or call summaries...`}
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                required
+              />
+
+              <div className="flex items-center justify-between gap-3 flex-wrap text-xs">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-secondary font-bold">Category:</span>
+                    <select
+                      aria-label="Note Category"
+                      className="neo-input !py-1 !px-2 text-xs"
+                      value={newNoteCategory}
+                      onChange={(e) => setNewNoteCategory(e.target.value as NoteCategory)}
+                    >
+                      <option value="general">📝 General</option>
+                      <option value="call">📞 Call Log</option>
+                      <option value="whatsapp">💬 WhatsApp</option>
+                      <option value="requirement">🎯 Requirement</option>
+                      <option value="urgent">🚨 Urgent</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-secondary font-bold">Priority:</span>
+                    <select
+                      aria-label="Note Priority"
+                      className="neo-input !py-1 !px-2 text-xs"
+                      value={newNotePriority}
+                      onChange={(e) => setNewNotePriority(e.target.value as NotePriority)}
+                    >
+                      <option value="low">🌱 Low</option>
+                      <option value="medium">⚡ Medium</option>
+                      <option value="high">🔥 High</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={addingNote || !newNoteContent.trim()}
+                  className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md disabled:opacity-50"
+                >
+                  {addingNote ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}
+                  Add Note
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setNotesDrawerOpen(true)}
-                className="neo-btn text-xs px-5 py-2 font-bold inline-flex items-center gap-2 text-primary shadow-sm hover:bg-primary/10"
-              >
-                <StickyNote size={14} /> View / Add Notes for {lead.name}
-              </button>
+            </form>
+          </div>
+
+          {/* Notes Stream */}
+          <div className="neo-card space-y-3">
+            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-2.5">
+              <h2 className="text-xs font-bold text-primary-dark uppercase tracking-wider">
+                Note History ({leadNotes.length})
+              </h2>
+              <span className="text-xs text-secondary">
+                Most recent and pinned notes for {lead.name}
+              </span>
             </div>
+
+            {leadNotes.length === 0 ? (
+              <div className="py-12 text-center text-xs text-secondary border border-dashed border-shadow-darker/15 rounded-xl">
+                No notes logged yet. Use the form above or the drawer to add call logs, customer requests, or follow-up reminders.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {leadNotes.map((n) => (
+                  <div
+                    key={n.id}
+                    className={`p-3.5 rounded-2xl border text-xs space-y-2 transition-all ${
+                      n.is_pinned
+                        ? 'bg-amber-50/50 border-amber-200'
+                        : 'bg-slate-50/70 border-shadow-darker/10'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-primary-dark">{n.author_name}</span>
+                        <span className="text-[10px] text-secondary">•</span>
+                        <span className="text-[10px] text-secondary">{formatDate(n.created_at)}</span>
+
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-white border border-shadow-darker/15 text-slate-700">
+                          {n.category || 'General'}
+                        </span>
+
+                        {n.priority === 'high' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-100 text-rose-800 border border-rose-200">
+                            High Priority
+                          </span>
+                        )}
+
+                        {n.stage_name && (
+                          <span className="text-[9px] text-secondary">Stage: {n.stage_name}</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePin(n.id, !!n.is_pinned)}
+                          className={`p-1 rounded hover:bg-white text-secondary ${
+                            n.is_pinned ? 'text-amber-600' : 'hover:text-primary'
+                          }`}
+                          title={n.is_pinned ? 'Unpin note' : 'Pin note to top'}
+                        >
+                          <Pin size={13} className={n.is_pinned ? 'fill-amber-500' : ''} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteInlineNote(n.id)}
+                          className="p-1 rounded hover:bg-rose-50 text-secondary hover:text-rose-600"
+                          title="Delete note"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-slate-800 leading-relaxed whitespace-pre-wrap">{n.content}</p>
+
+                    {n.has_reminder && n.reminder_datetime && (
+                      <div className="pt-1.5 border-t border-shadow-darker/5 flex items-center justify-between text-[10px] text-secondary">
+                        <span className="flex items-center gap-1 font-semibold text-emerald-800">
+                          <Bell size={11} /> Reminder: {formatDate(n.reminder_datetime)}
+                        </span>
+                        <span className="capitalize">{n.reminder_status || 'scheduled'}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* TAB 3: Omnichannel Conversation Feed (Rule 10) */}
+      {/* TAB 3: LINKED QUOTATIONS & ESTIMATES */}
+      {activeTab === 'quotation' && (
+        <div className="neo-card space-y-4">
+          <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3 flex-wrap gap-2">
+            <div>
+              <h2 className="text-xs font-bold text-primary-dark uppercase tracking-wider flex items-center gap-2">
+                <FileText size={16} className="text-primary" />
+                Linked Quotations ({leadQuotations.length})
+              </h2>
+              <p className="text-xs text-secondary mt-0.5">
+                Estimates and formal quotations generated for {lead.name}.
+              </p>
+            </div>
+
+            <Link
+              to={`/quotations/new?lead_id=${lead.id}&name=${encodeURIComponent(lead.name)}&phone=${encodeURIComponent(
+                lead.phone || ''
+              )}&company=${encodeURIComponent(lead.company || '')}`}
+              className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+            >
+              <Plus size={14} /> Create New Quotation
+            </Link>
+          </div>
+
+          {leadQuotations.length === 0 ? (
+            <div className="py-12 text-center text-xs text-secondary border border-dashed border-shadow-darker/15 rounded-xl space-y-3">
+              <FileText size={32} className="mx-auto text-secondary/40" />
+              <p className="font-semibold text-primary-dark">No quotations created for this customer yet.</p>
+              <p className="text-[11px] text-secondary max-w-sm mx-auto">
+                Generate a branded PDF quotation with custom line items, advance payment tracking, and GST calculations in 1-click.
+              </p>
+              <Link
+                to={`/quotations/new?lead_id=${lead.id}&name=${encodeURIComponent(lead.name)}&phone=${encodeURIComponent(
+                  lead.phone || ''
+                )}&company=${encodeURIComponent(lead.company || '')}`}
+                className="neo-btn text-xs px-4 py-1.5 font-bold inline-flex items-center gap-1 text-primary"
+              >
+                <Plus size={13} /> Draft Quotation Now
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-shadow-darker/10 text-secondary">
+                    <th className="py-2.5 px-3 font-bold">Quote #</th>
+                    <th className="py-2.5 px-3 font-bold">Date</th>
+                    <th className="py-2.5 px-3 font-bold">Items Summary</th>
+                    <th className="py-2.5 px-3 font-bold">Total Value</th>
+                    <th className="py-2.5 px-3 font-bold">Advance Status</th>
+                    <th className="py-2.5 px-3 font-bold text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-shadow-darker/5">
+                  {leadQuotations.map((q: any) => (
+                    <tr key={q.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-3 font-bold text-primary-dark">
+                        {q.number || 'Draft Quote'}
+                      </td>
+                      <td className="py-3 px-3 text-secondary">{formatDate(q.created_at)}</td>
+                      <td className="py-3 px-3 text-slate-700">
+                        {q.items?.length
+                          ? `${q.items.length} item(s) (${q.items[0]?.description || 'Custom Trophy'})`
+                          : 'General Estimate'}
+                      </td>
+                      <td className="py-3 px-3 font-bold text-emerald-800">
+                        ₹{(q.total_amount || q.total || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-3 px-3">
+                        {q.advance_amount ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            ₹{q.advance_amount} Adv Paid
+                          </span>
+                        ) : (
+                          <span className="text-secondary text-[10px]">No advance recorded</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-right">
+                        <Link
+                          to={`/quotations/edit/${q.id}`}
+                          className="neo-btn text-[11px] px-3 py-1 font-bold inline-flex items-center gap-1 text-primary"
+                        >
+                          View / Edit
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: OMNICHANNEL CONVERSATION FEED */}
       {activeTab === 'conversation' && (
         <div className="space-y-6">
           <div className="neo-card space-y-4">
             <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3 flex-wrap gap-2">
               <div>
-                <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+                <h2 className="text-xs font-bold text-primary-dark flex items-center gap-2 uppercase tracking-wider">
                   <MessageSquare size={16} className="text-primary" />
                   Meta Omnichannel Conversation History
                 </h2>
@@ -953,7 +1491,9 @@ export default function LeadDetail() {
                         <span className={`px-1.5 py-0.2 rounded font-extrabold uppercase border ${badgeColor}`}>
                           {platformLabel}
                         </span>
-                        <span className="font-bold text-slate-700">{isInbound ? m.senderName || lead.name : 'EcoTrophy Team'}</span>
+                        <span className="font-bold text-slate-700">
+                          {isInbound ? m.senderName || lead.name : 'EcoTrophy Team'}
+                        </span>
                         <span>•</span>
                         <span>{formatDate(m.created_at)}</span>
                       </div>
@@ -996,7 +1536,7 @@ export default function LeadDetail() {
                 <span className="text-[10px] font-bold text-secondary uppercase">Quick Variables:</span>
                 {[
                   { label: 'Customer Name', value: lead.name },
-                  { label: 'Stage', value: activeStages.find((s) => s.id === lead.status)?.label || lead.status },
+                  { label: 'Stage', value: currentStageLabel },
                   { label: 'Quantity', value: lead.required_quantity ? `${lead.required_quantity} pcs` : '' },
                   { label: 'Event', value: lead.event_name || '' },
                   { label: 'Delivery Date', value: lead.delivery_date || '' },
@@ -1026,7 +1566,9 @@ export default function LeadDetail() {
                   type="button"
                   onClick={() =>
                     setComposerText(
-                      `Hi ${lead.name}, thank you for contacting EcoTrophy! We have received your enquiry for ${lead.required_quantity || ''} trophies and our team is reviewing your requirements.`
+                      `Hi ${lead.name}, thank you for contacting EcoTrophy! We have received your enquiry for ${
+                        lead.required_quantity || ''
+                      } trophies and our team is reviewing your requirements.`
                     )
                   }
                   className="text-[11px] font-bold text-primary hover:underline"
@@ -1034,30 +1576,46 @@ export default function LeadDetail() {
                   Use Greeting Template
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const text = composerText.trim() || `Hi ${lead.name}, regarding your trophy enquiry with EcoTrophy:`;
-                    openWhatsAppWebDirect(lead.phone || '', text);
-                  }}
-                  disabled={!lead.phone}
-                  className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md disabled:opacity-50"
-                >
-                  <ExternalLink size={14} /> Open & Send via WhatsApp Web
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      navigate(
+                        `/whatsapp-automation?leadId=${lead.id}&phone=${lead.phone}`
+                      )
+                    }
+                    disabled={!lead.phone}
+                    className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm disabled:opacity-50"
+                  >
+                    <MessageSquare size={14} /> Open Live Chat
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const text = composerText.trim() || `Hi ${lead.name}, regarding your trophy enquiry with EcoTrophy:`;
+                      openWhatsAppWebDirect(lead.phone || '', text);
+                    }}
+                    disabled={!lead.phone}
+                    className="neo-btn text-xs px-3 py-2 font-semibold flex items-center gap-1.5 text-secondary hover:text-primary-dark disabled:opacity-50"
+                    title="Open in WhatsApp Web"
+                  >
+                    <ExternalLink size={13} /> WhatsApp Web
+                  </button>
+                </div>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: Stage Transition & Notification History Stream */}
+      {/* TAB 5: STAGE TRANSITION & NOTIFICATION HISTORY */}
       {activeTab === 'history' && (
         <div className="space-y-6">
           {/* Stage Move History */}
           <div className="neo-card space-y-4">
             <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
-              <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+              <h2 className="text-xs font-bold text-primary-dark uppercase tracking-wider flex items-center gap-2">
                 <History size={16} className="text-primary" />
                 Stage Transition Timeline (Manual Changes)
               </h2>
@@ -1099,7 +1657,7 @@ export default function LeadDetail() {
           {/* Automated Notification History */}
           <div className="neo-card space-y-4">
             <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
-              <h2 className="text-sm font-bold text-primary-dark flex items-center gap-2">
+              <h2 className="text-xs font-bold text-primary-dark uppercase tracking-wider flex items-center gap-2">
                 <MessageSquare size={16} className="text-emerald-600" />
                 Automated Customer Notifications Log
               </h2>

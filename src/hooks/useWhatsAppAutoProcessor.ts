@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, updateDoc, doc, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { processInboundWhatsAppMessage } from '../lib/whatsappInboundProcessor';
 
@@ -35,11 +35,31 @@ export function useWhatsAppAutoProcessor() {
           processingRef.current.add(msgId);
 
           try {
-            console.log(`[AutoProcessor] Auto-analyzing incoming message from ${msgData.senderPhone || msgData.from}...`);
-
-            const senderPhone = msgData.senderPhone || msgData.from || msgData.participantPhone || '';
-            const senderName = msgData.senderName || msgData.name || '';
+            let senderPhone = msgData.senderPhone || msgData.from || msgData.participantPhone || '';
+            let senderName = msgData.senderName || msgData.name || '';
             const content = msgData.content || msgData.body || msgData.text || '';
+
+            // If phone is missing on message, resolve from conversation doc
+            if (!senderPhone && msgData.conversationId) {
+              try {
+                const convSnap = await getDoc(doc(db, 'conversations', msgData.conversationId));
+                if (convSnap.exists()) {
+                  const cData = convSnap.data();
+                  senderPhone = cData.participantPhone || '';
+                  if (!senderName) senderName = cData.participantName || '';
+                  if (senderPhone) {
+                    await updateDoc(doc(db, 'messages', msgId), {
+                      senderPhone,
+                      from: senderPhone
+                    });
+                  }
+                }
+              } catch (e) {
+                console.warn('[AutoProcessor] Could not resolve phone from conversation:', e);
+              }
+            }
+
+            console.log(`[AutoProcessor] Auto-analyzing incoming message from ${senderPhone || 'unknown'}...`);
 
             if (senderPhone && content) {
               await processInboundWhatsAppMessage({

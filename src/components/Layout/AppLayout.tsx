@@ -34,6 +34,7 @@ import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
 import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
 import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
+import { Toaster } from 'react-hot-toast';
 
 interface SubMenuItem {
   path: string;
@@ -60,14 +61,14 @@ const navCategories: NavCategory[] = [
     label: 'CRM',
     icon: Target,
     items: [
-      { path: '/leads', label: 'Leads', icon: Users },
-      { path: '/leads/new', label: 'Add Lead', icon: UserPlus },
       { path: '/pipeline', label: 'Pipeline Board', icon: Columns3 },
-      { path: '/lead-intake', label: 'Lead Intake', icon: Inbox },
+      { path: '/leads', label: 'Leads Directory', icon: Users },
+      { path: '/crm-dashboard', label: 'CRM Analytics', icon: BarChart3 },
+      { path: '/library/customers', label: 'Customer Library', icon: Building2 },
+      { path: '/whatsapp-automation', label: 'WhatsApp Automation', icon: Bot },
       { path: '/message-templates', label: 'Message Templates', icon: MessageSquare },
       { path: '/message-queue', label: 'Message Queue', icon: Send },
-      { path: '/whatsapp-automation', label: 'WhatsApp Automation', icon: Bot },
-      { path: '/crm-dashboard', label: 'CRM Analytics', icon: BarChart3 },
+      { path: '/lead-intake', label: 'Lead Intake Logs', icon: Inbox },
       { path: '/audit-logs', label: 'Audit Logs', icon: Shield },
     ],
   },
@@ -408,6 +409,7 @@ export function AppLayout() {
           <Outlet />
         </div>
       </main>
+      <Toaster position="top-right" />
     </div>
   );
 }

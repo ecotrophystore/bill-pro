@@ -5,7 +5,7 @@ import { db } from '../../lib/firebase';
 import { processInboundWhatsAppMessage } from '../../lib/whatsappInboundProcessor';
 
 const PERMANENT_TOKEN = "EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD";
-const PHONE_NUMBER_ID = "1292217613971980";
+const PHONE_NUMBER_ID = "1263075550230396";
 
 export function WhatsAppAiInbox() {
   const [conversations, setConversations] = useState<any[]>([]);

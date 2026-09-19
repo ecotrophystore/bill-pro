@@ -10,13 +10,10 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, auth, functions } from '../lib/firebase';
 import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage } from '../types';
 import { buildTemplateContext, renderTemplateText, DEFAULT_STAGE_MESSAGES } from '../utils/templateVariables';
-
-const PERMANENT_TOKEN =
-  'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
-const PHONE_NUMBER_ID = '1292217613971980';
 
 export interface StageMoveResult {
   success: boolean;
@@ -197,82 +194,36 @@ export async function executeManualStageMove(params: {
         });
       } else {
         try {
-          // Attempt dispatch via WhatsApp API
-          const url = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${PERMANENT_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              recipient_type: 'individual',
-              to: finalPhone,
-              type: 'text',
-              text: { body: renderedMessage },
-            }),
+          // Call Cloud Function directly — bypasses Firestore security rules
+          // and uses the real Meta token stored as a server secret
+          if (!functions) throw new Error('Firebase Functions not initialized');
+          const sendFn = httpsCallable(functions, 'sendStageWhatsApp');
+          await sendFn({
+            leadId: lead.id,
+            message: renderedMessage,
+            phone: finalPhone,
+            stageId: toStage.id,
+            stageName: toStage.label,
           });
 
-          const resData = await res.json();
-
-          if (resData.messages?.[0]?.id) {
-            notificationStatus.whatsapp = 'sent';
-            notificationHistoryEntries.push({
-              id: `wa_${resData.messages[0].id}`,
-              stage_id: toStage.id,
-              stage_name: toStage.label,
-              channel: 'whatsapp',
-              recipient: finalPhone,
-              message: renderedMessage,
-              status: 'sent',
-              sent_at: now,
-              sent_by: currentUserName,
-            });
-
-            // Record in messages collection
-            await addDoc(collection(db, 'messages'), {
-              leadId: lead.id,
-              senderPhone: finalPhone,
-              direction: 'outbound',
-              type: 'text',
-              content: renderedMessage,
-              metaMessageId: resData.messages[0].id,
-              platform: 'whatsapp',
-              created_at: serverTimestamp(),
-            });
-          } else {
-            // Log as pending/configured fallback if API returns error/unconfigured
-            console.warn('WhatsApp API response notice:', resData);
-            notificationStatus.whatsapp = 'pending';
-            notificationHistoryEntries.push({
-              id: `wa_pending_${Date.now()}`,
-              stage_id: toStage.id,
-              stage_name: toStage.label,
-              channel: 'whatsapp',
-              recipient: finalPhone,
-              message: renderedMessage,
-              status: 'pending',
-              sent_at: now,
-              sent_by: currentUserName,
-              error: resData.error?.message || 'WhatsApp message pending – integration not configured',
-            });
-          }
-        } catch (apiErr: any) {
-          console.warn('WhatsApp dispatch warning:', apiErr);
-          notificationStatus.whatsapp = 'pending';
+          notificationStatus.whatsapp = 'sent';
           notificationHistoryEntries.push({
-            id: `wa_err_${Date.now()}`,
+            id: `wa_queued_${Date.now()}`,
             stage_id: toStage.id,
             stage_name: toStage.label,
             channel: 'whatsapp',
             recipient: finalPhone,
             message: renderedMessage,
-            status: 'pending',
+            status: 'sent',
             sent_at: now,
             sent_by: currentUserName,
-            error: apiErr?.message || 'WhatsApp message pending – integration not configured',
           });
+        } catch (apiErr: any) {
+          // Extract the actual error message from Firebase HttpsError
+          const errMsg = apiErr?.details?.message || apiErr?.message || 'WhatsApp send failed';
+          console.error('[sendStageWhatsApp] Error:', errMsg, apiErr);
+          // Re-throw so the modal can show the actual error
+          throw new Error(`WhatsApp failed: ${errMsg}`);
         }
       }
     } else {

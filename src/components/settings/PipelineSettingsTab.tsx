@@ -86,10 +86,20 @@ export default function PipelineSettingsTab() {
         setPipelines(DEFAULT_QUANTITY_PIPELINES);
       } else {
         const loaded = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pipeline));
-        const existingIds = new Set(loaded.map((p) => p.id));
         const merged = [...loaded];
         DEFAULT_QUANTITY_PIPELINES.forEach((def) => {
-          if (!existingIds.has(def.id)) merged.push(def);
+          const hasMatch = loaded.some(p => {
+            if (p.id === def.id) return true;
+            const pName = p.name.toLowerCase();
+            if (def.id === 'unclassified' && (pName.includes('unclassified') || pName.includes('pending'))) return true;
+            if (def.id === 'small_order' && pName.includes('small')) return true;
+            if (def.id === 'regular_order' && pName.includes('regular')) return true;
+            if (def.id === 'bulk_order' && pName.includes('bulk')) return true;
+            return pName === def.name.toLowerCase().trim();
+          });
+          if (!hasMatch) {
+            merged.push(def);
+          }
         });
         setPipelines(merged);
       }

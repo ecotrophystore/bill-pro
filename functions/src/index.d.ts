@@ -128,6 +128,15 @@ export declare const updateLeadDetails: import("firebase-functions/v2/https").Ca
     leadId: string;
     changedFields: string[];
 }>, unknown>;
+export declare const sendStageWhatsApp: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    wamid: string;
+}>, unknown>;
+export declare const sendWhatsAppChatMessage: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    ok: boolean;
+    wamid: string;
+    messageId: string;
+}>, unknown>;
 export declare const processMessageQueueItem: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<import("firebase-functions/v2/firestore").QueryDocumentSnapshot | undefined, {
     itemId: string;
 }>>;

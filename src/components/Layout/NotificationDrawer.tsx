@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -84,6 +85,24 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
           const unread = items.filter((n) => !n.is_read).length;
           onUnreadCountChange?.(unread);
           setLoading(false);
+
+          // Alert user to new notifications via toast
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              if (!data.is_read) {
+                const now = Date.now();
+                const ts = typeof data.created_at?.toMillis === 'function' ? data.created_at.toMillis() : 0;
+                // Only toast if created in the last 15 seconds (prevents spam on initial load)
+                if (ts > now - 15000) {
+                  toast.success(`New Activity: ${data.title}`, {
+                    duration: 5000,
+                    icon: '🔔'
+                  });
+                }
+              }
+            }
+          });
         } else {
           // If no stored notification docs exist yet, check live invoice/leads to provide useful system alerts
           try {

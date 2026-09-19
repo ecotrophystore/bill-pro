@@ -5,6 +5,7 @@ import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
 import { resolveWhatsAppAuthorization, resolveFacebookAuthorization, waToken, fbToken } from "./meta/auth.js";
 import { graphGet } from "./meta/graphApi.js";
+import { processWebhookPayload } from "./metaWebhookProcessor.js";
 // We define Firebase Secrets that need to be set via CLI
 const metaAppSecret = defineSecret("META_APP_SECRET");
 const metaVerifyToken = defineSecret("META_WEBHOOK_VERIFY_TOKEN");
@@ -387,8 +388,30 @@ export const metaWebhook = onRequest({ secrets: [metaAppSecret, metaVerifyToken]
                 }
             }
         }
-        // Fast Return
-        res.status(200).send("EVENT_RECEIVED");
+        // Temporary Debug dump
+        if (req.query.debug === 'dump_leads') {
+            const snap = await db.collection("leads").get();
+            res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            return;
+        }
+        if (req.query.debug === 'dump_pipelines') {
+            const snap = await db.collection("pipelines").get();
+            res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            return;
+        }
+        if (req.query.debug === 'dump_events') {
+            const snap = await db.collection("meta_webhook_events").orderBy("receivedAt", "desc").limit(10).get();
+            res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+            return;
+        }
+        if (req.query.debug === 'fix_leads') {
+            const snap = await db.collection("leads").where("pipeline_id", "==", "regular_order").where("status", "==", "new").get();
+            const batch = db.batch();
+            snap.docs.forEach(d => batch.update(d.ref, { status: "new_enquiry" }));
+            await batch.commit();
+            res.json({ fixed: snap.size });
+            return;
+        }
         const body = req.body;
         try {
             // Normalize event payload (supports both standard live webhooks and Meta Console Test tool)
@@ -412,6 +435,7 @@ export const metaWebhook = onRequest({ secrets: [metaAppSecret, metaVerifyToken]
                     lastWebhookReceivedAt: new Date().toISOString()
                 }, { merge: true });
                 const batch = db.batch();
+                const eventsToProcess = [];
                 entries.forEach((entry) => {
                     const eventId = (entry.id || "evt") + "_" + new Date().getTime();
                     const docRef = db.collection("meta_webhook_events").doc(eventId);
@@ -452,12 +476,37 @@ export const metaWebhook = onRequest({ secrets: [metaAppSecret, metaVerifyToken]
                             entry: entry
                         }
                     });
+                    // Queue for synchronous processing
+                    eventsToProcess.push({
+                        id: eventId,
+                        data: {
+                            idempotencyKey,
+                            platform,
+                            eventType,
+                            processingStatus: "pending",
+                            payloadSummary: { entry: entry }
+                        }
+                    });
                 });
                 await batch.commit();
+                // Execute processing immediately to bypass broken Eventarc triggers
+                // Run sequentially to prevent race conditions on the same lead
+                for (const ev of eventsToProcess) {
+                    try {
+                        await processWebhookPayload(ev.id, ev.data);
+                    }
+                    catch (processingErr) {
+                        console.error("Webhook inline processing failed:", processingErr);
+                    }
+                }
             }
+            // Return 200 OK after processing completes
+            res.status(200).send("EVENT_RECEIVED");
         }
         catch (err) {
             console.error("Error storing webhook event", err);
+            // Still return 200 to prevent infinite Meta retries if it's a code bug
+            res.status(200).send("EVENT_RECEIVED");
         }
     }
     else {
