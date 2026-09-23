@@ -273,14 +273,14 @@ export default function CRMDashboard() {
       </div>
 
       {/* Pipeline Selector Tab Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-slate-100 rounded-2xl border border-shadow-darker/10">
+      <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-transparent rounded-2xl border border-shadow-darker/10">
         <button
           type="button"
           onClick={() => setSelectedPipelineId("all")}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
             selectedPipelineId === "all"
-              ? "bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]"
-              : "text-secondary hover:text-primary-dark hover:bg-white/60"
+              ? "bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]"
+              : "text-secondary hover:text-primary-dark hover:bg-transparent"
           }`}
         >
           All Pipelines ({leads.length} leads)
@@ -296,8 +296,8 @@ export default function CRMDashboard() {
               onClick={() => setSelectedPipelineId(p.id)}
               className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                 isSelected
-                  ? "bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]"
-                  : "text-secondary hover:text-primary-dark hover:bg-white/60"
+                  ? "bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]"
+                  : "text-secondary hover:text-primary-dark hover:bg-transparent"
               }`}
             >
               <span>{p.name}</span>
@@ -392,10 +392,10 @@ export default function CRMDashboard() {
           {phaseBreakdown.map((p) => {
             const pct = stats.total > 0 ? Math.round((p.count / stats.total) * 100) : 0;
             return (
-              <div key={p.id} className="p-3 rounded-2xl bg-slate-50 border border-shadow-darker/10 space-y-2">
+              <div key={p.id} className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 space-y-2">
                 <div className="flex items-center justify-between gap-1">
                   <span className="text-xs font-bold text-primary-dark truncate">{p.shortLabel}</span>
-                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-white border border-shadow-darker/15 text-primary-dark">
+                  <span className="text-xs font-black px-2 py-0.5 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark">
                     {p.count}
                   </span>
                 </div>
@@ -445,7 +445,7 @@ export default function CRMDashboard() {
                     </div>
                   </div>
 
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-shadow-darker/5">
+                  <div className="w-full bg-transparent h-2 rounded-full overflow-hidden border border-shadow-darker/5">
                     <div
                       className="bg-gradient-to-r from-emerald-500 to-teal-500 h-full rounded-full transition-all duration-500"
                       style={{ width: `${pct}%` }}
@@ -474,7 +474,7 @@ export default function CRMDashboard() {
               {salesRepStats.map((rep, idx) => (
                 <div
                   key={rep.name}
-                  className="p-3 rounded-2xl bg-slate-50 border border-shadow-darker/10 text-xs space-y-1"
+                  className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 text-xs space-y-1"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 font-bold text-primary-dark truncate">
@@ -570,7 +570,7 @@ export default function CRMDashboard() {
               {recentActivities.map((act, i) => (
                 <div
                   key={act.id || i}
-                  className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5 text-xs flex items-start justify-between gap-3"
+                  className="p-2.5 rounded-xl bg-transparent border border-shadow-darker/5 text-xs flex items-start justify-between gap-3"
                 >
                   <p className="text-slate-800 leading-snug">{act.message}</p>
                   <span className="text-[10px] text-secondary shrink-0">{formatDate(act.created_at)}</span>
@@ -583,3 +583,6 @@ export default function CRMDashboard() {
     </div>
   );
 }
+
+
+

@@ -200,7 +200,7 @@ export default function Quotations() {
     if (status === 'converted' || (q as any).conversion_status === 'converted') {
       return (
         <div className="flex flex-col items-center gap-0.5">
-          <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+          <span className="neo-badge text-success bg-transparent shadow-neo-surface">Converted</span>
           {((q as any).proformaInvoiceNumber || (q as any).proforma_number) && (
             <span 
               onClick={() => navigate('/proforma-invoices')}
@@ -218,7 +218,7 @@ export default function Quotations() {
       <select 
         value={status} 
         onChange={(e) => updateStatus(q, e.target.value)}
-        className="neo-input py-1 px-2 text-xs bg-surface cursor-pointer min-w-[100px]"
+        className="neo-input py-1 px-2 text-xs bg-transparent cursor-pointer min-w-[100px]"
       >
         <option value="draft">Draft</option>
         <option value="sent">Sent</option>
@@ -295,7 +295,7 @@ export default function Quotations() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -338,7 +338,7 @@ export default function Quotations() {
             </div>
             <div className="relative">
               <select 
-                className="neo-btn !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+                className="neo-btn !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
@@ -455,3 +455,4 @@ export default function Quotations() {
     </div>
   );
 }
+

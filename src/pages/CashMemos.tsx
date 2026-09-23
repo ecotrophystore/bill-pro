@@ -175,7 +175,7 @@ export default function CashMemos() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -212,7 +212,7 @@ export default function CashMemos() {
         </div>
         <div className="relative">
           <select 
-            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -229,7 +229,7 @@ export default function CashMemos() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface border-b border-shadow-darker/10">
+              <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Cash Memo Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer / Type</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
@@ -280,7 +280,7 @@ export default function CashMemos() {
                           alert("Failed to update payment status.");
                         }
                       }}
-                      className={`px-2 py-1 rounded-full text-xs font-semibold cursor-pointer border-none focus:ring-2 focus:ring-primary bg-surface ${
+                      className={`px-2 py-1 rounded-full text-xs font-semibold cursor-pointer border-none focus:ring-2 focus:ring-primary bg-transparent ${
                         memo.payment_status === 'paid' ? 'bg-green-100 text-green-700' : memo.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
@@ -351,3 +351,4 @@ export default function CashMemos() {
     </div>
   );
 }
+

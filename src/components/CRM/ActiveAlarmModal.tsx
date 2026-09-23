@@ -46,7 +46,7 @@ export function ActiveAlarmModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
       <div
-        className={`relative w-full max-w-lg bg-surface rounded-3xl shadow-2xl border ${
+        className={`relative w-full max-w-lg bg-transparent rounded-3xl shadow-2xl border ${
           isUrgent ? 'border-rose-500 shadow-rose-500/20' : 'border-amber-500 shadow-amber-500/20'
         } p-6 overflow-hidden animate-scale-up`}
       >
@@ -107,7 +107,7 @@ export function ActiveAlarmModal() {
             {isAlarmAudioPlaying && (
               <button
                 onClick={muteAlarmSound}
-                className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300 transition-colors"
+                className="p-2 rounded-xl bg-transparent text-slate-700 hover:bg-slate-200 border border-slate-300 transition-colors"
                 title="Silence Alarm Sound"
               >
                 <VolumeX size={18} className="text-rose-600" />
@@ -116,7 +116,7 @@ export function ActiveAlarmModal() {
 
             <button
               onClick={dismissAlarm}
-              className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-slate-100 transition-colors"
+              className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
               title="Dismiss"
             >
               <X size={20} />
@@ -125,7 +125,7 @@ export function ActiveAlarmModal() {
         </div>
 
         {/* Customer Context Strip */}
-        <div className="grid grid-cols-2 gap-2 my-3.5 p-3 rounded-2xl bg-slate-50 border border-shadow-darker/5 text-xs">
+        <div className="grid grid-cols-2 gap-2 my-3.5 p-3 rounded-2xl bg-transparent border border-shadow-darker/5 text-xs">
           {note.stage_name && (
             <div>
               <span className="text-secondary text-[10px] uppercase font-bold block">Pipeline Stage</span>
@@ -183,7 +183,7 @@ export function ActiveAlarmModal() {
             </button>
 
             {snoozeMenuOpen && (
-              <div className="absolute left-0 bottom-full mb-1 w-44 bg-surface rounded-2xl shadow-xl border border-shadow-darker/15 p-1.5 z-20 space-y-1 animate-scale-up text-xs">
+              <div className="absolute left-0 bottom-full mb-1 w-44 bg-transparent rounded-2xl shadow-xl border border-shadow-darker/15 p-1.5 z-20 space-y-1 animate-scale-up text-xs">
                 {[
                   { label: '5 Minutes', mins: 5 },
                   { label: '15 Minutes', mins: 15 },
@@ -197,7 +197,7 @@ export function ActiveAlarmModal() {
                       setSnoozeMenuOpen(false);
                       snoozeAlarm(s.mins);
                     }}
-                    className="w-full text-left px-3 py-2 rounded-xl font-medium hover:bg-slate-100 text-slate-800 transition-colors flex items-center justify-between"
+                    className="w-full text-left px-3 py-2 rounded-xl font-medium hover:bg-transparent text-slate-800 transition-colors flex items-center justify-between"
                   >
                     <span>{s.label}</span>
                     <Clock size={12} className="text-secondary" />
@@ -227,3 +227,5 @@ export function ActiveAlarmModal() {
     </div>
   );
 }
+
+

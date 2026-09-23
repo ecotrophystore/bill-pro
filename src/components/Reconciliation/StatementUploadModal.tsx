@@ -193,7 +193,7 @@ export default function StatementUploadModal({
 
   return (
     <div className="fixed inset-0 bg-primary-dark/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-surface rounded-3xl shadow-neo-surface w-full max-w-lg overflow-hidden border border-shadow-darker/10 animate-slide-up">
+      <div className="bg-transparent rounded-3xl shadow-neo-surface w-full max-w-lg overflow-hidden border border-shadow-darker/10 animate-slide-up">
         <div className="bg-shadow-darker/5 p-6 border-b border-shadow-darker/10 flex justify-between items-center">
           <h2 className="text-xl font-bold text-primary-dark">Upload Bank Statement</h2>
           <button onClick={onClose} className="text-secondary hover:text-error transition-colors"><X size={24} /></button>
@@ -252,3 +252,4 @@ export default function StatementUploadModal({
     </div>
   );
 }
+

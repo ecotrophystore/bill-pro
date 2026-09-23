@@ -4,9 +4,10 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { ReminderAlarmProvider } from './contexts/ReminderAlarmContext';
 import { AppLayout } from './components/Layout/AppLayout';
-import Login from './pages/Login';
-
+const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+
+// Lazy loaded routes
 const AddLead = lazy(() => import('./pages/AddLead'));
 const Leads = lazy(() => import('./pages/Leads'));
 const LeadDetail = lazy(() => import('./pages/LeadDetail'));
@@ -36,11 +37,21 @@ const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const WhatsAppAutomation = lazy(() => import('./pages/WhatsAppAutomation'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, dbUser, loading, logout } = useAuth();
   const location = useLocation();
 
-  if (loading) return <div className="min-h-screen bg-surface flex items-center justify-center font-semibold text-primary">Loading...</div>;
+  if (loading) return <div className="min-h-screen bg-transparent flex items-center justify-center font-semibold text-primary">Loading...</div>;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+  
+  if (dbUser && !dbUser.is_active) {
+    return (
+      <div className="min-h-screen bg-transparent flex flex-col items-center justify-center font-semibold text-primary gap-4">
+        <p className="text-xl">Your account is pending admin approval.</p>
+        <button onClick={logout} className="neo-btn-primary px-6 py-2">Sign Out</button>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }
 
@@ -116,3 +127,4 @@ export default function App() {
     </AuthProvider>
   );
 }
+

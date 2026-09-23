@@ -181,12 +181,12 @@ export default function WhatsAppAutomation() {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center p-1 bg-slate-100/90 rounded-xl border border-shadow-darker/20 shadow-xs">
+        <div className="flex items-center p-1 bg-transparent rounded-xl border border-shadow-darker/20 shadow-xs">
           <button
             onClick={() => setActiveTab('chat')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'chat'
-                ? 'bg-white text-emerald-700 shadow-sm'
+                ? 'bg-transparent text-emerald-700 shadow-sm'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -196,7 +196,7 @@ export default function WhatsAppAutomation() {
             onClick={() => setActiveTab('inbox')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'inbox'
-                ? 'bg-white text-primary shadow-sm'
+                ? 'bg-transparent text-primary shadow-sm'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -206,7 +206,7 @@ export default function WhatsAppAutomation() {
             onClick={() => setActiveTab('workflows')}
             className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
               activeTab === 'workflows'
-                ? 'bg-white text-primary shadow-sm'
+                ? 'bg-transparent text-primary shadow-sm'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -261,7 +261,7 @@ export default function WhatsAppAutomation() {
                   <div>
                     <div className="flex items-center gap-2">
                       <h3 className="text-lg font-bold text-primary-dark">{a.name || 'Unnamed Automation'}</h3>
-                      <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${a.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-100 text-slate-500'}`}>{a.status || 'draft'}</span>
+                      <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${a.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-transparent text-slate-500'}`}>{a.status || 'draft'}</span>
                     </div>
                     <div className="text-sm text-secondary mt-1">
                       {pipelineName} &rarr; {stageName} &bull; {(a.scheduleType || 'immediate').replace(/_/g, ' ')}
@@ -293,3 +293,5 @@ export default function WhatsAppAutomation() {
     </div>
   );
 }
+
+

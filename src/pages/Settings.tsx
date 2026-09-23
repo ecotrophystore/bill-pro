@@ -362,7 +362,7 @@ export default function Settings() {
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-xs font-black text-secondary tracking-widest uppercase">Company Logo</label>
                   <div className="flex items-center gap-4">
-                    {localSettings.companyLogo && <img src={localSettings.companyLogo} alt="Logo" className="h-16 object-contain bg-white rounded p-1 border" />}
+                    {localSettings.companyLogo && <img src={localSettings.companyLogo} alt="Logo" className="h-16 object-contain bg-transparent rounded p-1 border" />}
                     <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'companyLogo')} className="neo-input w-full" />
                   </div>
                 </div>
@@ -419,7 +419,7 @@ export default function Settings() {
                 <div className="space-y-2">
                   <label className="text-xs font-black text-secondary tracking-widest uppercase">QR Code Upload</label>
                   <div className="flex items-center gap-4">
-                    {localSettings.qrCode && <img src={localSettings.qrCode} alt="QR Code" className="h-24 object-contain bg-white rounded p-1 border" />}
+                    {localSettings.qrCode && <img src={localSettings.qrCode} alt="QR Code" className="h-24 object-contain bg-transparent rounded p-1 border" />}
                     <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'qrCode')} className="neo-input w-full" />
                   </div>
                 </div>
@@ -456,7 +456,7 @@ export default function Settings() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-black text-secondary tracking-widest uppercase">Default GST %</label>
-                    <select value={localSettings.defaultGst} onChange={(e) => setLocalSettings({...localSettings, defaultGst: Number(e.target.value)})} className="w-full neo-input appearance-none bg-surface">
+                    <select value={localSettings.defaultGst} onChange={(e) => setLocalSettings({...localSettings, defaultGst: Number(e.target.value)})} className="w-full neo-input appearance-none bg-transparent">
                       <option value="0">0%</option>
                       <option value="5">5%</option>
                       <option value="12">12%</option>
@@ -500,7 +500,7 @@ export default function Settings() {
                 <div className="space-y-2">
                   <label className="text-xs font-black text-secondary tracking-widest uppercase">Authorized Signature Upload</label>
                   <div className="flex items-center gap-4">
-                    {localSettings.authorizedSignature && <img src={localSettings.authorizedSignature} alt="Signature" className="h-16 object-contain bg-white rounded p-1 border" />}
+                    {localSettings.authorizedSignature && <img src={localSettings.authorizedSignature} alt="Signature" className="h-16 object-contain bg-transparent rounded p-1 border" />}
                     <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'authorizedSignature')} className="neo-input w-full" />
                   </div>
                 </div>
@@ -599,7 +599,7 @@ export default function Settings() {
                         <button type="button" onClick={() => setLocalSettings({...localSettings, quotation_year: '25-26'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300">25-26</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, quotation_year: '26-27'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300">26-27</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, quotation_year: '27-28'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300">27-28</button>
-                        <button type="button" onClick={() => setLocalSettings({...localSettings, quotation_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-surface hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
+                        <button type="button" onClick={() => setLocalSettings({...localSettings, quotation_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-transparent hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
                       </div>
                     </div>
 
@@ -608,7 +608,7 @@ export default function Settings() {
                       <select 
                         value={localSettings.quotation_format || 'prefix_hyphen_fy'} 
                         onChange={(e) => setLocalSettings({...localSettings, quotation_format: e.target.value})} 
-                        className="w-full neo-input appearance-none bg-surface"
+                        className="w-full neo-input appearance-none bg-transparent"
                       >
                         <option value="prefix_hyphen_fy">{qPrefix}/{qYearHyphen}/0001 (FY Hyphen)</option>
                         <option value="prefix_slash_fy">{qPrefix}/{qYearSlash}/0001 (FY Slash)</option>
@@ -676,7 +676,7 @@ export default function Settings() {
                         <button type="button" onClick={() => setLocalSettings({...localSettings, proforma_year: '25-26'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300">25-26</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, proforma_year: '26-27'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300">26-27</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, proforma_year: '27-28'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300">27-28</button>
-                        <button type="button" onClick={() => setLocalSettings({...localSettings, proforma_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-surface hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
+                        <button type="button" onClick={() => setLocalSettings({...localSettings, proforma_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-transparent hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
                       </div>
                     </div>
 
@@ -685,7 +685,7 @@ export default function Settings() {
                       <select 
                         value={localSettings.proforma_format || 'prefix_hyphen_fy'} 
                         onChange={(e) => setLocalSettings({...localSettings, proforma_format: e.target.value})} 
-                        className="w-full neo-input appearance-none bg-surface"
+                        className="w-full neo-input appearance-none bg-transparent"
                       >
                         <option value="prefix_hyphen_fy">{piPrefix}/{piYearHyphen}/0001 (FY Hyphen)</option>
                         <option value="prefix_slash_fy">{piPrefix}/{piYearSlash}/0001 (FY Slash)</option>
@@ -753,7 +753,7 @@ export default function Settings() {
                         <button type="button" onClick={() => setLocalSettings({...localSettings, invoice_year: '25-26'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300">25-26</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, invoice_year: '26-27'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300">26-27</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, invoice_year: '27-28'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300">27-28</button>
-                        <button type="button" onClick={() => setLocalSettings({...localSettings, invoice_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-surface hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
+                        <button type="button" onClick={() => setLocalSettings({...localSettings, invoice_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-transparent hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
                       </div>
                     </div>
 
@@ -762,7 +762,7 @@ export default function Settings() {
                       <select 
                         value={localSettings.invoice_format || 'prefix_hyphen_fy'} 
                         onChange={(e) => setLocalSettings({...localSettings, invoice_format: e.target.value})} 
-                        className="w-full neo-input appearance-none bg-surface"
+                        className="w-full neo-input appearance-none bg-transparent"
                       >
                         <option value="prefix_hyphen_fy">{invPrefix}/{invYearHyphen}/0001 (FY Hyphen)</option>
                         <option value="prefix_slash_fy">{invPrefix}/{invYearSlash}/0001 (FY Slash)</option>
@@ -830,7 +830,7 @@ export default function Settings() {
                         <button type="button" onClick={() => setLocalSettings({...localSettings, memo_year: '25-26'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300">25-26</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, memo_year: '26-27'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300">26-27</button>
                         <button type="button" onClick={() => setLocalSettings({...localSettings, memo_year: '27-28'})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300">27-28</button>
-                        <button type="button" onClick={() => setLocalSettings({...localSettings, memo_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-surface hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
+                        <button type="button" onClick={() => setLocalSettings({...localSettings, memo_year: ''})} className="px-2 py-0.5 text-[11px] font-mono rounded bg-transparent hover:bg-shadow-darker/10 text-secondary border border-shadow-darker/20">Auto ({fy.fyHyphen})</button>
                       </div>
                     </div>
 
@@ -839,7 +839,7 @@ export default function Settings() {
                       <select 
                         value={localSettings.memo_format || 'prefix_hyphen_fy'} 
                         onChange={(e) => setLocalSettings({...localSettings, memo_format: e.target.value})} 
-                        className="w-full neo-input appearance-none bg-surface"
+                        className="w-full neo-input appearance-none bg-transparent"
                       >
                         <option value="prefix_hyphen_fy">{memoPrefix}/{memoYearHyphen}/0001 (FY Hyphen)</option>
                         <option value="prefix_slash_fy">{memoPrefix}/{memoYearSlash}/0001 (FY Slash)</option>
@@ -907,7 +907,7 @@ export default function Settings() {
                        <select 
                         value={config.currency}
                         onChange={(e) => setConfig({...config, currency: e.target.value})}
-                        className="w-full neo-input !pl-10 appearance-none bg-surface"
+                        className="w-full neo-input !pl-10 appearance-none bg-transparent"
                        >
                          <option value="INR">INR (₹)</option>
                          <option value="USD">USD ($)</option>
@@ -917,7 +917,7 @@ export default function Settings() {
                 </div>
 
                 <div className="space-y-4 pt-4 border-t border-shadow-darker/10">
-                  <div className="flex items-center justify-between p-3 neo-input bg-surface/50">
+                  <div className="flex items-center justify-between p-3 neo-input bg-transparent">
                     <div>
                        <p className="font-bold text-primary-dark text-sm">HSN Validation</p>
                        <p className="text-[10px] text-secondary">Enforce 4+ digits for HSN/SAC codes (Rule #14)</p>
@@ -926,11 +926,11 @@ export default function Settings() {
                       onClick={() => setConfig({...config, hsn_validation: !config.hsn_validation})}
                       className={`w-12 h-6 rounded-full transition-all relative ${config.hsn_validation ? 'bg-primary shadow-neo-inset' : 'bg-shadow-darker/20'}`}
                     >
-                      <div className={`absolute top-1 bottom-1 w-4 bg-surface rounded-full transition-all ${config.hsn_validation ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
+                      <div className={`absolute top-1 bottom-1 w-4 bg-transparent rounded-full transition-all ${config.hsn_validation ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between p-3 neo-input bg-surface/50">
+                  <div className="flex items-center justify-between p-3 neo-input bg-transparent">
                     <div>
                        <p className="font-bold text-primary-dark text-sm">GST Calculation</p>
                        <p className="text-[10px] text-secondary">Automatic CGST/SGST splitting (Rule #12)</p>
@@ -939,7 +939,7 @@ export default function Settings() {
                       onClick={() => setConfig({...config, gst_enabled: !config.gst_enabled})}
                       className={`w-12 h-6 rounded-full transition-all relative ${config.gst_enabled ? 'bg-primary shadow-neo-inset' : 'bg-shadow-darker/20'}`}
                     >
-                      <div className={`absolute top-1 bottom-1 w-4 bg-surface rounded-full transition-all ${config.gst_enabled ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
+                      <div className={`absolute top-1 bottom-1 w-4 bg-transparent rounded-full transition-all ${config.gst_enabled ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
                     </button>
                   </div>
                 </div>
@@ -1007,21 +1007,21 @@ export default function Settings() {
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-                  <div className="p-3 bg-surface rounded-xl border border-shadow-darker/10 space-y-1">
+                  <div className="p-3 bg-transparent rounded-xl border border-shadow-darker/10 space-y-1">
                     <div className="flex items-center gap-2 text-primary-dark font-bold text-xs">
                       <Lock size={14} className="text-primary" />
                       Database Auth Guards
                     </div>
                     <p className="text-[11px] text-secondary">request.auth != null verified on all read/write endpoints.</p>
                   </div>
-                  <div className="p-3 bg-surface rounded-xl border border-shadow-darker/10 space-y-1">
+                  <div className="p-3 bg-transparent rounded-xl border border-shadow-darker/10 space-y-1">
                     <div className="flex items-center gap-2 text-primary-dark font-bold text-xs">
                       <KeyRound size={14} className="text-primary" />
                       Secret Manager
                     </div>
                     <p className="text-[11px] text-secondary">Backend API keys & Webhook verify tokens mounted securely.</p>
                   </div>
-                  <div className="p-3 bg-surface rounded-xl border border-shadow-darker/10 space-y-1">
+                  <div className="p-3 bg-transparent rounded-xl border border-shadow-darker/10 space-y-1">
                     <div className="flex items-center gap-2 text-primary-dark font-bold text-xs">
                       <Users size={14} className="text-primary" />
                       Active Role: <span className="uppercase text-primary">{dbUser?.role || 'sales'}</span>
@@ -1040,7 +1040,7 @@ export default function Settings() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="border-b border-shadow-darker/10 text-left text-secondary uppercase tracking-wider bg-surface/50">
+                      <tr className="border-b border-shadow-darker/10 text-left text-secondary uppercase tracking-wider bg-transparent">
                         <th className="py-2.5 px-3 font-semibold">Capability / Area</th>
                         <th className="py-2.5 px-3 font-semibold text-center">Admin</th>
                         <th className="py-2.5 px-3 font-semibold text-center">Accounts</th>
@@ -1147,3 +1147,5 @@ export default function Settings() {
     </div>
   );
 }
+
+

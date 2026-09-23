@@ -527,7 +527,7 @@ export default function CreateQuotation() {
                 </label>
                 <SpeechInput 
                   type="text" 
-                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-surface" 
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-transparent" 
                   placeholder="e.g. QTN/25/26/0001" 
                   value={documentNumber} 
                   onChange={(e: any) => setDocumentNumber(e.target.value)}
@@ -555,7 +555,7 @@ export default function CreateQuotation() {
                 </div>
 
                 {enrichedItems.map((item, index) => (
-                  <div key={index} className="flex gap-4 items-center bg-surface border border-shadow-darker/10 p-4 rounded-xl shadow-sm relative group transition-all hover:shadow-md">
+                  <div key={index} className="flex gap-4 items-center bg-transparent border border-shadow-darker/10 p-4 rounded-xl shadow-sm relative group transition-all hover:shadow-md">
                     <div className="flex-1 min-w-[200px] space-y-2">
                       <SearchableAutocomplete
                         items={products.map(p => ({ 
@@ -743,7 +743,7 @@ export default function CreateQuotation() {
                   }}
                   className={`w-12 h-6 rounded-full transition-all relative ${hasAdvance ? 'bg-primary shadow-neo-inset' : 'bg-shadow-darker/20'}`}
                 >
-                  <div className={`absolute top-1 bottom-1 w-4 bg-surface rounded-full transition-all ${hasAdvance ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
+                  <div className={`absolute top-1 bottom-1 w-4 bg-transparent rounded-full transition-all ${hasAdvance ? 'right-1' : 'left-1 shadow-neo-raised'}`} />
                 </button>
               </div>
 
@@ -834,3 +834,4 @@ export default function CreateQuotation() {
     </div>
   );
 }
+

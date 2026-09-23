@@ -155,7 +155,7 @@ export function MetaInboundSimulator() {
               key={idx}
               type="button"
               onClick={() => handleApplyPreset(p)}
-              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-primary-dark border border-slate-200 transition-colors"
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-transparent hover:bg-slate-200 text-primary-dark border border-slate-200 transition-colors"
             >
               {p.label}
             </button>
@@ -286,7 +286,7 @@ export function MetaInboundSimulator() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             {/* Customer Identification */}
-            <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-1">
+            <div className="p-3 rounded-xl bg-transparent border border-emerald-200 space-y-1">
               <span className="text-[10px] font-bold text-secondary uppercase block">Customer Identification</span>
               <span
                 className={`font-extrabold px-2 py-0.5 rounded-full inline-block text-[11px] ${
@@ -303,7 +303,7 @@ export function MetaInboundSimulator() {
             </div>
 
             {/* Pipeline Assigned */}
-            <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-1">
+            <div className="p-3 rounded-xl bg-transparent border border-emerald-200 space-y-1">
               <span className="text-[10px] font-bold text-secondary uppercase block">Assigned Pipeline</span>
               <span className="font-extrabold text-primary-dark block text-xs">
                 {outcome.pipelineName}
@@ -312,7 +312,7 @@ export function MetaInboundSimulator() {
             </div>
 
             {/* Initial Stage */}
-            <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-1">
+            <div className="p-3 rounded-xl bg-transparent border border-emerald-200 space-y-1">
               <span className="text-[10px] font-bold text-secondary uppercase block">Initial Stage</span>
               <span className="font-extrabold text-emerald-700 block text-xs bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 w-max">
                 {outcome.stageName}
@@ -321,7 +321,7 @@ export function MetaInboundSimulator() {
             </div>
 
             {/* Extracted Specs */}
-            <div className="p-3 rounded-xl bg-white border border-emerald-200 space-y-1">
+            <div className="p-3 rounded-xl bg-transparent border border-emerald-200 space-y-1">
               <span className="text-[10px] font-bold text-secondary uppercase block">Extracted Details</span>
               <div className="text-[11px] space-y-0.5 text-slate-700 font-medium">
                 <div>🎯 Qty: {outcome.extractedRequirements.required_quantity || 'Not specified'}</div>
@@ -339,3 +339,5 @@ export function MetaInboundSimulator() {
     </div>
   );
 }
+
+

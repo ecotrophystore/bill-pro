@@ -35,6 +35,7 @@ import { NotificationDrawer } from './NotificationDrawer';
 import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
 import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
 import { Toaster } from 'react-hot-toast';
+import { preloadRoute } from '../../utils/routePreloader';
 
 interface SubMenuItem {
   path: string;
@@ -160,7 +161,7 @@ export function AppLayout() {
   const isExpanded = mobileMenuOpen || isHovered;
 
   return (
-    <div className="min-h-screen flex bg-surface text-secondary">
+    <div className="min-h-screen flex bg-transparent text-secondary">
       {/* Global Omnichannel Search Modal */}
       <GlobalSearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
 
@@ -181,7 +182,7 @@ export function AppLayout() {
         onMouseLeave={() => setIsHovered(false)}
         className={clsx(
           'fixed z-50 transition-all duration-300 transform flex flex-col',
-          'bg-surface/95 backdrop-blur-xl border border-shadow-darker/20 shadow-2xl',
+          'bg-transparent backdrop-blur-xl border border-shadow-darker/20 shadow-2xl',
           'md:left-4 md:top-4 md:bottom-4 md:rounded-2xl',
           mobileMenuOpen ? 'inset-y-0 left-0 w-64 translate-x-0' : '-translate-x-full md:translate-x-0',
           !mobileMenuOpen && (isHovered ? 'md:w-64' : 'md:w-[72px]')
@@ -216,6 +217,8 @@ export function AppLayout() {
           <NavLink
             to={mainNavItem.path}
             onClick={() => setMobileMenuOpen(false)}
+            onMouseEnter={() => preloadRoute(mainNavItem.path)}
+            onTouchStart={() => preloadRoute(mainNavItem.path)}
             title={!isExpanded ? mainNavItem.label : undefined}
             className={({ isActive }) =>
               clsx(
@@ -258,10 +261,10 @@ export function AppLayout() {
                   className={clsx(
                     'w-full flex items-center justify-between min-h-[48px] px-3.5 py-2.5 rounded-xl font-bold text-left transition-all duration-200 select-none group',
                     isOpen
-                      ? 'bg-surface shadow-neo-pressed text-primary-dark'
+                      ? 'bg-transparent shadow-neo-pressed text-primary-dark'
                       : hasActiveChild
                       ? 'bg-primary/5 text-primary border border-primary/20 shadow-sm'
-                      : 'bg-surface/80 hover:bg-surface shadow-neo-surface text-secondary hover:text-primary-dark',
+                      : 'bg-transparent hover:bg-transparent shadow-neo-surface text-secondary hover:text-primary-dark',
                     !isExpanded && 'justify-center px-0 w-11 mx-auto'
                   )}
                 >
@@ -312,6 +315,8 @@ export function AppLayout() {
                               key={subItem.path}
                               to={subItem.path}
                               onClick={() => setMobileMenuOpen(false)}
+                              onMouseEnter={() => preloadRoute(subItem.path)}
+                              onTouchStart={() => preloadRoute(subItem.path)}
                               className={({ isActive }) =>
                                 clsx(
                                   'flex items-center min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-200 group',
@@ -338,7 +343,7 @@ export function AppLayout() {
 
       {/* Main App Content Area */}
       <main className={clsx('flex-1 flex flex-col min-h-screen transition-all duration-300', 'md:ml-[104px]')}>
-        <header className="h-16 flex items-center justify-between px-6 bg-surface border-b border-shadow-darker/20 sticky top-0 z-40">
+        <header className="h-16 flex items-center justify-between px-6 bg-transparent border-b border-shadow-darker/20 sticky top-0 z-40">
           <div className="flex items-center gap-4">
             <button onClick={() => setMobileMenuOpen(true)} className="p-2 text-primary-dark block md:hidden">
               <Menu size={24} />
@@ -351,7 +356,7 @@ export function AppLayout() {
             >
               <Search size={18} className="text-secondary group-hover:text-primary transition-colors" />
               <span className="text-secondary/70 text-sm flex-1 font-medium">Quick search anything...</span>
-              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-surface border border-shadow-darker/20 rounded shadow-xs text-secondary">
+              <kbd className="hidden lg:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-mono font-bold bg-transparent border border-shadow-darker/20 rounded shadow-xs text-secondary">
                 <Command size={10} />K
               </kbd>
             </div>
@@ -413,4 +418,5 @@ export function AppLayout() {
     </div>
   );
 }
+
 

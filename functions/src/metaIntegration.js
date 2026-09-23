@@ -4,7 +4,7 @@ import * as crypto from "node:crypto";
 import { defineSecret } from "firebase-functions/params";
 import { db } from "./config.js";
 import { resolveWhatsAppAuthorization, resolveFacebookAuthorization, waToken, fbToken } from "./meta/auth.js";
-import { graphGet } from "./meta/graphApi.js";
+import { graphGet, graphPost } from "./meta/graphApi.js";
 import { processWebhookPayload } from "./metaWebhookProcessor.js";
 // We define Firebase Secrets that need to be set via CLI
 const metaAppSecret = defineSecret("META_APP_SECRET");
@@ -607,6 +607,55 @@ export const syncMetaTemplates = onCall({ secrets: [waToken] }, async (request) 
     }
     catch (err) {
         throw new HttpsError("internal", err.message);
+    }
+});
+// ── syncBusinessProfileToMeta ───────────────────────────────────────────────
+export const syncBusinessProfileToMeta = onCall({ secrets: [waToken] }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Must log in");
+    await requireAdmin(request.auth.uid);
+    const { profile } = request.data;
+    if (!profile)
+        throw new HttpsError("invalid-argument", "Profile data missing");
+    const config = await db.collection("meta_integrations").doc("default").get().then(d => d.data() || {});
+    const version = config.graphApiVersion || "v18.0";
+    if (!config.whatsappPhoneNumberId) {
+        throw new HttpsError("failed-precondition", "WhatsApp Phone Number ID not configured");
+    }
+    try {
+        const token = await resolveWhatsAppAuthorization();
+        // Update text fields
+        const payload = {
+            messaging_product: "whatsapp",
+        };
+        if (profile.address)
+            payload.address = profile.address;
+        if (profile.description)
+            payload.description = profile.description;
+        if (profile.category)
+            payload.vertical = profile.category;
+        if (profile.email)
+            payload.email = profile.email;
+        if (profile.website)
+            payload.websites = [profile.website];
+        await graphPost(`/${version}/${config.whatsappPhoneNumberId}/whatsapp_business_profile`, token, payload);
+        // Note: Updating the profile picture is significantly more complex as it 
+        // requires the Resumable Upload API. We are logging the request here and 
+        // skipping the image upload for this iteration.
+        if (profile.profilePicture && profile.profilePicture.startsWith('data:image')) {
+            console.log("Image upload requested, but Resumable Upload API integration is required.");
+            // TODO: Implement Resumable Upload Session
+        }
+        await db.collection("audit_logs").add({
+            action: "meta_business_profile_synced",
+            user: request.auth.uid,
+            timestamp: FieldValue.serverTimestamp()
+        });
+        return { success: true };
+    }
+    catch (err) {
+        console.error("Failed to sync profile:", err);
+        throw new HttpsError("internal", err.message || "Failed to sync profile");
     }
 });
 //# sourceMappingURL=metaIntegration.js.map

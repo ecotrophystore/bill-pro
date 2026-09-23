@@ -194,7 +194,7 @@ export default function Purchases() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -236,7 +236,7 @@ export default function Purchases() {
         </button>
         <div className="relative">
           <select 
-            className="neo-btn !px-4 !pl-10 flex items-center justify-center gap-2 appearance-none cursor-pointer bg-surface"
+            className="neo-btn !px-4 !pl-10 flex items-center justify-center gap-2 appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -317,3 +317,4 @@ export default function Purchases() {
     </div>
   );
 }
+

@@ -34,7 +34,7 @@ export default function FieldMicButton({ onTranscript, className }: FieldMicButt
           startListening();
         }
       }}
-      className={className || "p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors flex items-center justify-center border border-transparent active:scale-95"}
+      className={className || "p-1.5 rounded-full hover:bg-black/5 dark:hover:bg-transparent transition-colors flex items-center justify-center border border-transparent active:scale-95"}
       title={isListening ? "Stop listening" : "Start voice input"}
     >
       {isListening ? (
@@ -50,3 +50,5 @@ export default function FieldMicButton({ onTranscript, className }: FieldMicButt
     </button>
   );
 }
+
+

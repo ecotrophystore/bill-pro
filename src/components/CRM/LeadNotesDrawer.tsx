@@ -55,7 +55,7 @@ interface LeadNotesDrawerProps {
 }
 
 const CATEGORY_CONFIG: Record<NoteCategory, { label: string; icon: string; bg: string }> = {
-  general: { label: 'General', icon: '📝', bg: 'bg-slate-100 text-slate-800 border-slate-200' },
+  general: { label: 'General', icon: '📝', bg: 'bg-transparent text-slate-800 border-slate-200' },
   call: { label: 'Call Log', icon: '📞', bg: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
   whatsapp: { label: 'WhatsApp', icon: '💬', bg: 'bg-teal-100 text-teal-800 border-teal-200' },
   meeting: { label: 'Meeting', icon: '🤝', bg: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
@@ -64,7 +64,7 @@ const CATEGORY_CONFIG: Record<NoteCategory, { label: string; icon: string; bg: s
 };
 
 const PRIORITY_CONFIG: Record<NotePriority, { label: string; bg: string }> = {
-  low: { label: 'Low', bg: 'bg-slate-100 text-slate-700 border-slate-200' },
+  low: { label: 'Low', bg: 'bg-transparent text-slate-700 border-slate-200' },
   medium: { label: 'Medium', bg: 'bg-blue-100 text-blue-800 border-blue-200' },
   high: { label: 'High', bg: 'bg-amber-100 text-amber-800 border-amber-200' },
   urgent: { label: 'Urgent 🔥', bg: 'bg-rose-100 text-rose-800 border-rose-200 font-bold animate-pulse' },
@@ -391,16 +391,16 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/50 backdrop-blur-xs flex justify-end animate-fade-in">
-      <div className="w-full max-w-2xl bg-surface h-full shadow-2xl flex flex-col border-l border-shadow-darker/20 animate-slide-left overflow-hidden">
+      <div className="w-full max-w-2xl bg-transparent h-full shadow-2xl flex flex-col border-l border-shadow-darker/20 animate-slide-left overflow-hidden">
         {/* Drawer Header */}
-        <div className="p-5 border-b border-shadow-darker/10 bg-surface/90 backdrop-blur flex items-start justify-between gap-3 shrink-0">
+        <div className="p-5 border-b border-shadow-darker/10 bg-transparent backdrop-blur flex items-start justify-between gap-3 shrink-0">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
                 Pipeline Stage Notes & Reminders
               </span>
               {stageName && (
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-transparent text-slate-700 border border-slate-200">
                   📍 {stageName}
                 </span>
               )}
@@ -425,7 +425,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-slate-100 transition-colors"
+            className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
           >
             <X size={20} />
           </button>
@@ -448,7 +448,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                 className={`text-xs px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all ${
                   isPinned
                     ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                    : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+                    : 'text-secondary hover:text-primary-dark hover:bg-transparent'
                 }`}
                 title={isPinned ? 'Note will be pinned to top' : 'Pin note'}
               >
@@ -469,7 +469,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all ${
                       category === cat
                         ? CATEGORY_CONFIG[cat].bg + ' shadow-xs ring-1 ring-primary/40'
-                        : 'bg-surface text-secondary border-shadow-darker/10 hover:bg-slate-50'
+                        : 'bg-transparent text-secondary border-shadow-darker/10 hover:bg-transparent'
                     }`}
                   >
                     <span>{CATEGORY_CONFIG[cat].icon}</span> {CATEGORY_CONFIG[cat].label}
@@ -512,7 +512,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                       className={`text-[11px] px-2.5 py-0.5 rounded-full border font-bold transition-all flex items-center gap-1 ${
                         isTagged
                           ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                          : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                          : 'bg-transparent text-slate-700 border-slate-200 hover:bg-slate-200'
                       }`}
                     >
                       <User size={10} />
@@ -543,7 +543,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                   className={`p-1.5 rounded-lg border transition-all ${
                     isListening
                       ? 'bg-rose-500 text-white border-rose-600 animate-pulse'
-                      : 'bg-surface text-secondary hover:text-primary-dark border-shadow-darker/15 hover:bg-slate-100'
+                      : 'bg-transparent text-secondary hover:text-primary-dark border-shadow-darker/15 hover:bg-transparent'
                   }`}
                   title={isListening ? 'Stop voice recording' : 'Dictate note with microphone'}
                 >
@@ -553,7 +553,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
 
               {/* Autocomplete Dropdown Popup */}
               {mentionQuery !== null && filteredMentions.length > 0 && (
-                <div className="absolute left-0 top-full mt-1 w-64 bg-surface rounded-2xl shadow-xl border border-shadow-darker/20 p-1.5 z-30 space-y-1 animate-scale-up text-xs">
+                <div className="absolute left-0 top-full mt-1 w-64 bg-transparent rounded-2xl shadow-xl border border-shadow-darker/20 p-1.5 z-30 space-y-1 animate-scale-up text-xs">
                   <div className="px-2 py-1 text-[10px] font-bold text-secondary uppercase border-b border-shadow-darker/10">
                     Team Members
                   </div>
@@ -587,7 +587,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
               </div>
 
               {checklists.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-slate-50 border border-shadow-darker/5 text-xs">
+                <div key={item.id} className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-transparent border border-shadow-darker/5 text-xs">
                   <span className="flex items-center gap-1.5 text-slate-800">
                     <CheckSquare size={13} className="text-emerald-600" />
                     <span>{item.text}</span>
@@ -662,7 +662,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                         key={btn.preset}
                         type="button"
                         onClick={() => setReminderDatetime(getPresetDateTime(btn.preset))}
-                        className="px-2 py-0.5 rounded-md bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-semibold text-[11px] transition-colors"
+                        className="px-2 py-0.5 rounded-md bg-transparent hover:bg-amber-100 border border-amber-300 text-amber-900 font-semibold text-[11px] transition-colors"
                       >
                         {btn.label}
                       </button>
@@ -785,7 +785,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
             <div className="flex items-center justify-between gap-2 flex-wrap border-b border-shadow-darker/10 pb-2">
               <h3 className="text-sm font-extrabold text-primary-dark flex items-center gap-2">
                 <span>Notes & Reminder Thread</span>
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-transparent text-slate-700 border border-slate-200">
                   {notes.length}
                 </span>
               </h3>
@@ -798,7 +798,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                   className={`px-2.5 py-1 rounded-lg font-bold border flex items-center gap-1 transition-colors ${
                     onlyReminders
                       ? 'bg-amber-100 text-amber-900 border-amber-300'
-                      : 'bg-surface text-secondary border-shadow-darker/10 hover:bg-slate-100'
+                      : 'bg-transparent text-secondary border-shadow-darker/10 hover:bg-transparent'
                   }`}
                 >
                   <Bell size={12} /> Reminders Only
@@ -847,7 +847,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                       className={`p-4 rounded-2xl border transition-all space-y-3 ${
                         n.is_pinned
                           ? 'bg-amber-50/50 border-amber-300 shadow-xs'
-                          : 'bg-surface border-shadow-darker/10 shadow-sm'
+                          : 'bg-transparent border-shadow-darker/10 shadow-sm'
                       }`}
                     >
                       {/* Note Header: Author, Stage, Category & Pin Action */}
@@ -856,7 +856,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-primary-dark">{n.author_name}</span>
                             {n.stage_name && (
-                              <span className="text-[10px] font-semibold px-2 py-0.2 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                              <span className="text-[10px] font-semibold px-2 py-0.2 rounded-md bg-transparent text-slate-700 border border-slate-200">
                                 {n.stage_name}
                               </span>
                             )}
@@ -887,7 +887,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                             className={`p-1.5 rounded-lg transition-colors ${
                               n.is_pinned
                                 ? 'text-amber-600 hover:bg-amber-100'
-                                : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+                                : 'text-secondary hover:text-primary-dark hover:bg-transparent'
                             }`}
                             title={n.is_pinned ? 'Unpin note' : 'Pin note'}
                           >
@@ -942,7 +942,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                                 key={item.id}
                                 type="button"
                                 onClick={() => toggleNoteChecklistItem(n.id, n.checklist || [], item.id)}
-                                className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-50 text-left transition-colors group"
+                                className="w-full flex items-center gap-2 p-1.5 rounded-lg hover:bg-transparent text-left transition-colors group"
                               >
                                 {item.completed ? (
                                   <CheckSquare size={14} className="text-emerald-600 shrink-0" />
@@ -1002,7 +1002,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
                               <button
                                 type="button"
                                 onClick={() => snoozeLeadNoteReminder(n.id, lead.id, 15)}
-                                className="px-2 py-1 rounded-lg bg-white border border-amber-300 text-amber-900 font-bold text-[10px] hover:bg-amber-100 transition-colors"
+                                className="px-2 py-1 rounded-lg bg-transparent border border-amber-300 text-amber-900 font-bold text-[10px] hover:bg-amber-100 transition-colors"
                               >
                                 Snooze 15m
                               </button>
@@ -1035,3 +1035,6 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
     </div>
   );
 }
+
+
+

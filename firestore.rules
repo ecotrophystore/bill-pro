@@ -95,9 +95,9 @@ service cloud.firestore {
     // PURCHASES COLLECTION
     match /purchases/{purchaseId} {
       allow read: if isAdmin() || isAccounts() || isSales() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isAdmin() || isAccounts() || isSales() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
-      allow update: if isAdmin() || isAccounts() || isSales() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin();
     }
 
     // EXPENSES COLLECTION

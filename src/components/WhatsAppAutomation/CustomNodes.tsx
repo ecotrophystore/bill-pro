@@ -30,7 +30,7 @@ const BaseNode = ({
 
   return (
     <div
-      className={`relative w-[280px] rounded-2xl border bg-white shadow-sm transition-all duration-200 ${
+      className={`relative w-[280px] rounded-2xl border bg-transparent shadow-sm transition-all duration-200 ${
         selected ? 'border-primary ring-4 ring-primary/10 shadow-md' : 'border-shadow-darker/10 hover:border-primary/30'
       }`}
     >
@@ -38,7 +38,7 @@ const BaseNode = ({
         <Handle
           type="target"
           position={Position.Top}
-          className="w-3 h-3 border-2 bg-white border-primary"
+          className="w-3 h-3 border-2 bg-transparent border-primary"
         />
       )}
       
@@ -82,7 +82,7 @@ const BaseNode = ({
         <Handle
           type="source"
           position={Position.Bottom}
-          className="w-3 h-3 border-2 bg-white border-primary"
+          className="w-3 h-3 border-2 bg-transparent border-primary"
         />
       )}
     </div>
@@ -146,3 +146,4 @@ export const nodeTypes = {
   delay: DelayNode,
   condition: ConditionNode,
 };
+

@@ -177,7 +177,7 @@ export default function Invoices() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -214,7 +214,7 @@ export default function Invoices() {
         </div>
         <div className="relative">
           <select 
-            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -231,7 +231,7 @@ export default function Invoices() {
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-surface border-b border-shadow-darker/10">
+              <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Invoice Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
@@ -326,3 +326,4 @@ export default function Invoices() {
     </div>
   );
 }
+

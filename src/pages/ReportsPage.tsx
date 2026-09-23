@@ -169,7 +169,7 @@ export default function ReportsPage() {
         {stats.map((stat) => (
           <div key={stat.label} className="neo-card flex flex-col justify-between h-32 group hover:shadow-neo-inset transition-all cursor-default overflow-hidden relative">
             {loading && (
-              <div className="absolute inset-0 bg-surface/50 backdrop-blur-[2px] z-10 flex items-center justify-center">
+              <div className="absolute inset-0 bg-transparent backdrop-blur-[2px] z-10 flex items-center justify-center">
                 <Loader2 className="animate-spin text-primary" size={24} />
               </div>
             )}
@@ -220,7 +220,7 @@ export default function ReportsPage() {
                      </button>
                      
                      {showYearMenu && (
-                        <div className="absolute top-10 left-0 w-36 bg-surface shadow-neo-raised rounded-lg border border-shadow-darker/10 p-2 z-20 animate-fade-in">
+                        <div className="absolute top-10 left-0 w-36 bg-transparent shadow-neo-raised rounded-lg border border-shadow-darker/10 p-2 z-20 animate-fade-in">
                            {['All Time', '2025-2026', '2026-2027'].map((fy) => (
                              <button
                                key={fy}
@@ -243,7 +243,7 @@ export default function ReportsPage() {
 
               {loading ? (
                 <div className="flex-1 flex flex-col justify-center items-center text-center p-8 bg-shadow-darker/5 rounded-xl border border-shadow-darker/10">
-                   <div className="w-16 h-16 rounded-full bg-surface shadow-neo-raised flex items-center justify-center text-secondary mb-4 opacity-50">
+                   <div className="w-16 h-16 rounded-full bg-transparent shadow-neo-raised flex items-center justify-center text-secondary mb-4 opacity-50">
                       <Loader2 size={32} className="animate-spin text-primary" />
                    </div>
                    <h4 className="text-primary-dark font-bold">Calculating Real-time data...</h4>
@@ -255,7 +255,7 @@ export default function ReportsPage() {
                    </div>
                 </div>
               ) : (
-                <div className="flex-1 p-6 bg-surface rounded-xl border border-shadow-darker/10 shadow-neo-inset">
+                <div className="flex-1 p-6 bg-transparent rounded-xl border border-shadow-darker/10 shadow-neo-inset">
                   {reportType === 'financial' && (
                     <div className="space-y-4 animate-fade-in">
                       <div className="flex justify-between items-center p-4 bg-shadow-darker/5 rounded-lg">
@@ -326,7 +326,7 @@ export default function ReportsPage() {
 
       {showConfig && (
         <div className="fixed inset-0 bg-shadow-darker/20 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-neo-raised w-full max-w-md p-6 border border-shadow-darker/10">
+          <div className="bg-transparent rounded-2xl shadow-neo-raised w-full max-w-md p-6 border border-shadow-darker/10">
              <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold text-primary-dark tracking-tight">Report Configuration</h3>
                 <button onClick={() => setShowConfig(false)} className="p-2 hover:bg-shadow-darker/5 rounded-full transition-colors text-secondary">
@@ -344,7 +344,7 @@ export default function ReportsPage() {
                      onClick={() => setIncludeCancelled(!includeCancelled)}
                      className={`w-12 h-6 rounded-full transition-colors relative ${includeCancelled ? 'bg-primary' : 'bg-shadow-darker/20'}`}
                    >
-                     <div className={`w-4 h-4 bg-surface rounded-full absolute top-1 transition-all ${includeCancelled ? 'left-7' : 'left-1 shadow-sm'}`}></div>
+                     <div className={`w-4 h-4 bg-transparent rounded-full absolute top-1 transition-all ${includeCancelled ? 'left-7' : 'left-1 shadow-sm'}`}></div>
                    </button>
                 </div>
                 
@@ -357,7 +357,7 @@ export default function ReportsPage() {
                      onClick={() => setComparePrevious(!comparePrevious)}
                      className={`w-12 h-6 rounded-full transition-colors relative ${comparePrevious ? 'bg-primary' : 'bg-shadow-darker/20'}`}
                    >
-                     <div className={`w-4 h-4 bg-surface rounded-full absolute top-1 transition-all ${comparePrevious ? 'left-7' : 'left-1 shadow-sm'}`}></div>
+                     <div className={`w-4 h-4 bg-transparent rounded-full absolute top-1 transition-all ${comparePrevious ? 'left-7' : 'left-1 shadow-sm'}`}></div>
                    </button>
                 </div>
              </div>
@@ -391,3 +391,4 @@ function Shield({ size, className }: { size: number, className?: string }) {
     </svg>
   );
 }
+

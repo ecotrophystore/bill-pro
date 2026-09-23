@@ -15,38 +15,34 @@ export async function extractDataFromDocument(
 ): Promise<any> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured. Please configure your Gemini API Key or environment.');
+    throw new Error('Gemini API key is not configured. Please add it to .env as VITE_GEMINI_API_KEY.');
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  // Use the flash model which is cost-effective and fast
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-flash-latest',
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  });
 
   const prompt = getPromptForType(type);
 
-  const imageParts = [
-    {
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.1
+      }
+    });
+
+    const imagePart = {
       inlineData: {
         data: base64Data,
-        mimeType: mimeType,
-      },
-    },
-  ];
+        mimeType: mimeType
+      }
+    };
 
-  try {
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const response = await result.response;
-    const text = response.text();
+    const result = await model.generateContent([prompt, imagePart]);
+    const text = result.response.text();
     return JSON.parse(text);
-  } catch (error) {
-    console.error('Gemini AI Extraction Error:', error);
-    throw new Error('Failed to extract data from document. Please verify the document format and quality.');
+  } catch (error: any) {
+    console.error('Gemini AI Extraction Error details:', error);
+    throw new Error('AI Error: ' + (error.message || 'Failed to extract data'));
   }
 }
 

@@ -220,7 +220,7 @@ export default function ProductLibrary() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -278,7 +278,7 @@ export default function ProductLibrary() {
               </thead>
               <tbody>
                 {filteredProducts.map(product => (
-                  <tr key={product.id} className="border-b border-secondary/10 hover:bg-surface/50">
+                  <tr key={product.id} className="border-b border-secondary/10 hover:bg-transparent">
                     <td className="py-3 px-4 font-medium">{product.name}</td>
                     <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
                     <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
@@ -415,3 +415,4 @@ export default function ProductLibrary() {
     </div>
   );
 }
+

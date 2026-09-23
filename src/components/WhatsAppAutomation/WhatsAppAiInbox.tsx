@@ -217,19 +217,19 @@ export function WhatsAppAiInbox() {
           <div className="flex gap-2 flex-wrap text-xs">
             <button 
               onClick={() => setSimText("Hi bro, enaku 50 custom wood trophies venum next month annual event ku. Budget around 30k. Possible ah?")}
-              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-secondary"
+              className="px-2.5 py-1 rounded bg-transparent hover:bg-slate-200 text-secondary"
             >
               Tanglish Lead Example
             </button>
             <button 
               onClick={() => setSimText("Payment GPay panniten sir, receipt anupunga")}
-              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-secondary"
+              className="px-2.5 py-1 rounded bg-transparent hover:bg-slate-200 text-secondary"
             >
               Payment Query Example
             </button>
             <button 
               onClick={() => setSimText("Earn 5000 daily from home click here")}
-              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-secondary"
+              className="px-2.5 py-1 rounded bg-transparent hover:bg-slate-200 text-secondary"
             >
               Spam Example
             </button>
@@ -272,19 +272,19 @@ export function WhatsAppAiInbox() {
             <div className="flex items-center gap-1">
               <button 
                 onClick={() => setFilter('all')} 
-                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'all' ? 'bg-primary text-white' : 'text-secondary hover:bg-slate-100'}`}
+                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'all' ? 'bg-primary text-white' : 'text-secondary hover:bg-transparent'}`}
               >
                 All
               </button>
               <button 
                 onClick={() => setFilter('Qualified')} 
-                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'Qualified' ? 'bg-emerald-500 text-white' : 'text-secondary hover:bg-slate-100'}`}
+                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'Qualified' ? 'bg-emerald-500 text-white' : 'text-secondary hover:bg-transparent'}`}
               >
                 Qualified
               </button>
               <button 
                 onClick={() => setFilter('review')} 
-                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'review' ? 'bg-amber-500 text-white' : 'text-secondary hover:bg-slate-100'}`}
+                className={`px-2 py-1 rounded text-xs font-bold ${filter === 'review' ? 'bg-amber-500 text-white' : 'text-secondary hover:bg-transparent'}`}
               >
                 Needs Review
               </button>
@@ -316,7 +316,7 @@ export function WhatsAppAiInbox() {
                     className={`p-3 rounded-xl border transition-all cursor-pointer ${
                       isSelected 
                         ? 'bg-primary/5 border-primary shadow-sm' 
-                        : 'bg-white hover:bg-slate-50 border-shadow-darker/10'
+                        : 'bg-transparent hover:bg-transparent border-shadow-darker/10'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -332,7 +332,7 @@ export function WhatsAppAiInbox() {
                     </div>
                     {c.ai_classification && (
                       <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                        <span className="text-[10px] bg-transparent text-slate-600 px-2 py-0.5 rounded font-medium">
                           {c.ai_classification.replace(/_/g, ' ')}
                         </span>
                         {c.ai_flag_for_review && (
@@ -377,7 +377,7 @@ export function WhatsAppAiInbox() {
               </div>
 
               {/* Message Received Box */}
-              <div className="bg-slate-50 border border-shadow-darker/10 p-3 rounded-xl">
+              <div className="bg-transparent border border-shadow-darker/10 p-3 rounded-xl">
                 <div className="text-[10px] font-bold uppercase tracking-wider text-secondary mb-1">Incoming Message</div>
                 <div className="text-sm text-primary-dark whitespace-pre-wrap">{selectedConv.lastMessage}</div>
               </div>
@@ -428,7 +428,7 @@ export function WhatsAppAiInbox() {
       {/* Structured Audit Log Modal */}
       {auditModalData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-shadow-darker/50 backdrop-blur-sm animate-fade-in">
-          <div className="neo-card w-full max-w-lg bg-surface flex flex-col p-6 space-y-4">
+          <div className="neo-card w-full max-w-lg bg-transparent flex flex-col p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
               <h3 className="font-bold text-primary-dark flex items-center gap-2">
                 <Sparkles size={18} className="text-primary" /> Internal Qualification Audit Log
@@ -451,3 +451,6 @@ export function WhatsAppAiInbox() {
     </div>
   );
 }
+
+
+

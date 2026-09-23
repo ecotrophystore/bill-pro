@@ -50,8 +50,8 @@ const NAV_ACTIONS: SearchResultItem[] = [
   { id: 'nav-purchases', title: 'Purchases & OCR', subtitle: 'Vendor invoice processing', badge: 'Finance', badgeColor: 'bg-teal-50 text-teal-700 border-teal-200', icon: ShoppingCart, path: '/purchases', category: 'Navigation' },
   { id: 'nav-customers', title: 'Customer Library', subtitle: 'Client directory & GST records', badge: 'Library', badgeColor: 'bg-sky-50 text-sky-700 border-sky-200', icon: Building2, path: '/library/customers', category: 'Navigation' },
   { id: 'nav-products', title: 'Product Library', subtitle: 'Items, HSN codes & pricing', badge: 'Library', badgeColor: 'bg-amber-50 text-amber-700 border-amber-200', icon: Receipt, path: '/library/products', category: 'Navigation' },
-  { id: 'nav-auditor', title: 'AI Auditor Trail', subtitle: 'Discrepancy checker & audit log', badge: 'Security', badgeColor: 'bg-slate-100 text-slate-700 border-slate-300', icon: Shield, path: '/auditor', category: 'Navigation' },
-  { id: 'nav-settings', title: 'Settings & Config', subtitle: 'Numbering sequence, company details, UPI', badge: 'System', badgeColor: 'bg-slate-100 text-slate-700 border-slate-300', icon: Settings, path: '/settings', category: 'Navigation' },
+  { id: 'nav-auditor', title: 'AI Auditor Trail', subtitle: 'Discrepancy checker & audit log', badge: 'Security', badgeColor: 'bg-transparent text-slate-700 border-slate-300', icon: Shield, path: '/auditor', category: 'Navigation' },
+  { id: 'nav-settings', title: 'Settings & Config', subtitle: 'Numbering sequence, company details, UPI', badge: 'System', badgeColor: 'bg-transparent text-slate-700 border-slate-300', icon: Settings, path: '/settings', category: 'Navigation' },
 ];
 
 interface GlobalSearchModalProps {
@@ -286,7 +286,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search Header Input */}
-        <div className="flex items-center px-4 py-3.5 border-b border-shadow-darker/10 gap-3 bg-surface">
+        <div className="flex items-center px-4 py-3.5 border-b border-shadow-darker/10 gap-3 bg-transparent">
           <Search size={20} className="text-primary shrink-0" />
           <input
             ref={inputRef}
@@ -307,14 +307,14 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
               <X size={18} />
             </button>
           ) : (
-            <kbd className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono font-semibold bg-surface border border-shadow-darker/20 rounded shadow-xs text-secondary">
+            <kbd className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-mono font-semibold bg-transparent border border-shadow-darker/20 rounded shadow-xs text-secondary">
               <Command size={11} /> K
             </kbd>
           )}
         </div>
 
         {/* Results List */}
-        <div className="max-h-[60vh] overflow-y-auto p-2 divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-surface/90">
+        <div className="max-h-[60vh] overflow-y-auto p-2 divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-transparent">
           {allResults.length === 0 ? (
             <div className="py-12 text-center text-secondary">
               <Sparkles size={32} className="mx-auto mb-2 opacity-30 text-primary" />
@@ -342,7 +342,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
                     <div
                       className={clsx(
                         'w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors',
-                        isSelected ? 'bg-primary text-surface shadow-xs' : 'bg-surface shadow-neo-surface text-primary-dark'
+                        isSelected ? 'bg-primary text-surface shadow-xs' : 'bg-transparent shadow-neo-surface text-primary-dark'
                       )}
                     >
                       <Icon size={18} />
@@ -377,21 +377,22 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
         </div>
 
         {/* Footer shortcuts bar */}
-        <div className="px-4 py-2.5 border-t border-shadow-darker/10 bg-surface/80 flex items-center justify-between text-[11px] text-secondary">
+        <div className="px-4 py-2.5 border-t border-shadow-darker/10 bg-transparent flex items-center justify-between text-[11px] text-secondary">
           <div className="flex items-center gap-3">
             <span>
-              <kbd className="font-mono bg-surface border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↑</kbd>{' '}
-              <kbd className="font-mono bg-surface border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↓</kbd> to navigate
+              <kbd className="font-mono bg-transparent border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↑</kbd>{' '}
+              <kbd className="font-mono bg-transparent border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↓</kbd> to navigate
             </span>
             <span>
-              <kbd className="font-mono bg-surface border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↵</kbd> to select
+              <kbd className="font-mono bg-transparent border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">↵</kbd> to select
             </span>
           </div>
           <span>
-            <kbd className="font-mono bg-surface border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">esc</kbd> to dismiss
+            <kbd className="font-mono bg-transparent border border-shadow-darker/20 px-1.5 py-0.5 rounded text-[10px]">esc</kbd> to dismiss
           </span>
         </div>
       </div>
     </div>
   );
 }
+

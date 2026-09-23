@@ -67,7 +67,7 @@ export default function SearchableAutocomplete({
       <div 
         className={clsx(
           "neo-input flex items-center gap-2 group transition-all duration-200",
-          isOpen && "ring-2 ring-primary/20 bg-white"
+          isOpen && "ring-2 ring-primary/20 bg-transparent"
         )}
       >
         <Search size={18} className="text-secondary group-focus-within:text-primary transition-colors" />
@@ -156,3 +156,5 @@ export default function SearchableAutocomplete({
     </div>
   );
 }
+
+

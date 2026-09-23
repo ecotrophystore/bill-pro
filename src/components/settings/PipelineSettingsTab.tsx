@@ -293,7 +293,7 @@ export default function PipelineSettingsTab() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             subTab === 'stage_messages'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <MessageSquare size={14} /> Stage Messages & Notifications
@@ -304,7 +304,7 @@ export default function PipelineSettingsTab() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             subTab === 'pipelines'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <Sliders size={14} /> Manage Pipelines ({pipelines.length})
@@ -315,7 +315,7 @@ export default function PipelineSettingsTab() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             subTab === 'rules'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <Sparkles size={14} /> Automatic Pipeline Rules ({rules.length})
@@ -341,7 +341,7 @@ export default function PipelineSettingsTab() {
       {subTab === 'stage_messages' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Stage Selector Sidebar */}
-          <div className="md:col-span-4 neo-card space-y-2 p-3 bg-slate-50/50">
+          <div className="md:col-span-4 neo-card space-y-2 p-3 bg-transparent">
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary px-2 block">
               Select Stage to Configure
             </span>
@@ -365,7 +365,7 @@ export default function PipelineSettingsTab() {
                     {isConfigured && (
                       <span
                         className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
-                          isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+                          isSelected ? 'bg-transparent text-white' : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
                         Active
@@ -407,7 +407,7 @@ export default function PipelineSettingsTab() {
                       key={v.variable}
                       type="button"
                       onClick={() => handleInsertVariable(v.variable)}
-                      className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 border border-shadow-darker/10 text-primary-dark hover:bg-primary/10 hover:border-primary/30 transition-colors"
+                      className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-transparent border border-shadow-darker/10 text-primary-dark hover:bg-primary/10 hover:border-primary/30 transition-colors"
                       title={v.label}
                     >
                       {v.variable}
@@ -442,7 +442,7 @@ export default function PipelineSettingsTab() {
                 />
 
                 {/* WhatsApp Live Preview */}
-                <div className="p-3 rounded-xl bg-white border border-emerald-100 text-xs">
+                <div className="p-3 rounded-xl bg-transparent border border-emerald-100 text-xs">
                   <span className="text-[10px] font-bold text-secondary block mb-1">Live WhatsApp Preview:</span>
                   <p className="text-slate-800 leading-relaxed font-sans whitespace-pre-wrap">
                     {renderTemplateText(editingConfig.whatsapp_template, sampleContext)}
@@ -600,7 +600,7 @@ export default function PipelineSettingsTab() {
                           stages: pipe.stages || STANDARD_CRM_STAGES,
                         });
                       }}
-                      className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 text-primary-dark hover:bg-slate-200"
+                      className="text-xs font-semibold px-2.5 py-1 rounded bg-transparent text-primary-dark hover:bg-slate-200"
                     >
                       Edit
                     </button>
@@ -721,7 +721,7 @@ export default function PipelineSettingsTab() {
                 {rules.map((rule) => (
                   <div
                     key={rule.id}
-                    className="p-3 rounded-xl bg-slate-50 border border-shadow-darker/10 flex items-center justify-between gap-3 text-xs"
+                    className="p-3 rounded-xl bg-transparent border border-shadow-darker/10 flex items-center justify-between gap-3 text-xs"
                   >
                     <div>
                       <span className="font-bold text-primary-dark">{rule.name}</span>
@@ -750,3 +750,6 @@ export default function PipelineSettingsTab() {
     </div>
   );
 }
+
+
+

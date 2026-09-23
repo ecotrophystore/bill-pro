@@ -89,4 +89,7 @@ export declare const syncMetaTemplates: import("firebase-functions/v2/https").Ca
     success: boolean;
     count: any;
 }>, unknown>;
+export declare const syncBusinessProfileToMeta: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+}>, unknown>;
 //# sourceMappingURL=metaIntegration.d.ts.map

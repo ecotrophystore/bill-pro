@@ -293,7 +293,7 @@ export default function Dashboard() {
           <p className="text-secondary mt-1">Overview of EcoBill financial activity.</p>
         </div>
         <div className="flex gap-4 items-center">
-          <div className="flex items-center gap-2 bg-surface p-1 rounded-xl shadow-neo-raised border border-shadow-darker/10">
+          <div className="flex items-center gap-2 bg-transparent p-1 rounded-xl shadow-neo-raised border border-shadow-darker/10">
             <Calendar size={16} className="text-secondary ml-2" />
             <select 
               value={dateFilter} 
@@ -342,7 +342,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="neo-card flex flex-col justify-between h-36 bg-surface shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
+        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
           <div className="flex justify-between items-start">
             <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Revenue</span>
             <TrendingUp size={18} className="text-secondary opacity-50 group-hover:text-primary-dark transition-colors" />
@@ -352,7 +352,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="neo-card flex flex-col justify-between h-36 bg-surface shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default border-l-4 border-warning/20">
+        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default border-l-4 border-warning/20">
           <div className="flex justify-between items-start">
             <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Pending</span>
             <Clock size={18} className="text-warning opacity-50 group-hover:opacity-100 transition-opacity" />
@@ -360,7 +360,7 @@ export default function Dashboard() {
           <span className="text-2xl font-black text-warning tracking-tight">₹ {metrics.pendingInvoices.toLocaleString()}</span>
         </div>
 
-        <div className="neo-card flex flex-col justify-between h-36 bg-surface shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
+        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
           <div className="flex justify-between items-start">
             <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Quotes To Convert</span>
             <AlertCircle size={18} className="text-error opacity-50" />
@@ -373,7 +373,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="neo-card flex flex-col justify-between h-36 bg-surface shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
+        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
           <div className="flex justify-between items-start">
             <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Quick Actions</span>
             <FileText size={18} className="text-primary-dark opacity-30" />
@@ -453,3 +453,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

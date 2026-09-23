@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { collection, query, orderBy, limit, onSnapshot, startAfter, getDocs } from "firebase/firestore";
 import { ShieldAlert, Loader2, XCircle, ChevronDown, Filter } from "lucide-react";
 import { db } from "../lib/firebase";
@@ -154,7 +154,7 @@ export default function AuditLogs() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="text-left text-secondary text-xs uppercase tracking-widest border-b border-shadow-darker/10 bg-surface/80">
+                  <tr className="text-left text-secondary text-xs uppercase tracking-widest border-b border-shadow-darker/10 bg-transparent">
                     <th className="px-5 py-3 font-semibold">Timestamp</th>
                     <th className="px-5 py-3 font-semibold">Action</th>
                     <th className="px-5 py-3 font-semibold">Type</th>
@@ -176,8 +176,8 @@ export default function AuditLogs() {
                         {DOC_TYPE_LABEL[log.document_type] || log.document_type}
                       </td>
                       <td className="px-5 py-3.5 text-secondary font-mono text-xs truncate max-w-[140px]">{log.document_id}</td>
-                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[120px]">{log.user_id || "—"}</td>
-                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[200px]">{log.notes || "—"}</td>
+                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[120px]">{log.user_id || "-"}</td>
+                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[200px]">{log.notes || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -201,3 +201,4 @@ export default function AuditLogs() {
     </div>
   );
 }
+

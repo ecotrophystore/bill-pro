@@ -97,7 +97,7 @@ export default function CustomerImportPreview({
                 key={action}
                 type="button"
                 onClick={() => setAllDuplicateAction(action)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors capitalize"
+                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-transparent border border-amber-300 text-amber-800 hover:bg-amber-100 transition-colors capitalize"
               >
                 All → {action === 'new' ? 'Import as New' : action === 'update' ? 'Update' : 'Skip'}
               </button>
@@ -120,7 +120,7 @@ export default function CustomerImportPreview({
             onClick={() => setActiveTab(tab)}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === tab
-                ? 'bg-surface shadow-neo-raised text-primary-dark'
+                ? 'bg-transparent shadow-neo-raised text-primary-dark'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -133,7 +133,7 @@ export default function CustomerImportPreview({
       <div className="overflow-hidden rounded-2xl border border-shadow-darker/15 max-h-[360px] overflow-y-auto">
         <table className="w-full text-xs min-w-[640px]">
           <thead className="sticky top-0 z-10">
-            <tr className="bg-surface border-b border-shadow-darker/10 text-left text-secondary uppercase tracking-wider">
+            <tr className="bg-transparent border-b border-shadow-darker/10 text-left text-secondary uppercase tracking-wider">
               <th className="px-3 py-2.5 font-semibold w-12">Row</th>
               <th className="px-3 py-2.5 font-semibold">Customer Name</th>
               <th className="px-3 py-2.5 font-semibold">Phone</th>
@@ -315,3 +315,5 @@ export default function CustomerImportPreview({
     </div>
   );
 }
+
+

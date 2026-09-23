@@ -37,7 +37,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface w-full p-4">
+    <div className="min-h-screen flex items-center justify-center bg-transparent w-full p-4">
       <div className="w-full max-w-md neo-card animate-fade-in flex flex-col gap-6">
         <div className="text-center">
           <div className="w-16 h-16 mx-auto bg-primary rounded-full shadow-neo-raised flex items-center justify-center mb-4">
@@ -52,7 +52,7 @@ export default function Login() {
         </div>
 
         {/* Tab switch */}
-        <div className="flex rounded-xl p-1 bg-surface border border-shadow-darker/15 shadow-neo-pressed">
+        <div className="flex rounded-xl p-1 bg-transparent border border-shadow-darker/15 shadow-neo-pressed">
           <button
             type="button"
             onClick={() => { setIsRegister(false); setError(''); }}
@@ -142,3 +142,4 @@ export default function Login() {
     </div>
   );
 }
+

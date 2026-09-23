@@ -108,13 +108,13 @@ export default function AuditorPage() {
                    Filter
                 </button>
                 {showFilterDropdown && (
-                  <div className="absolute right-0 mt-2 w-64 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 p-4 space-y-4">
+                  <div className="absolute right-0 mt-2 w-64 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 p-4 space-y-4">
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-secondary mb-1">Document Type</label>
                       <select 
                         value={docTypeFilter} 
                         onChange={(e) => setDocTypeFilter(e.target.value)}
-                        className="neo-input w-full text-xs !py-1 bg-surface border-shadow-darker/20 text-primary-dark"
+                        className="neo-input w-full text-xs !py-1 bg-transparent border-shadow-darker/20 text-primary-dark"
                       >
                         <option value="all">All Documents</option>
                         <option value="invoice">Invoice</option>
@@ -128,7 +128,7 @@ export default function AuditorPage() {
                       <select 
                         value={actionFilter} 
                         onChange={(e) => setActionFilter(e.target.value)}
-                        className="neo-input w-full text-xs !py-1 bg-surface border-shadow-darker/20 text-primary-dark"
+                        className="neo-input w-full text-xs !py-1 bg-transparent border-shadow-darker/20 text-primary-dark"
                       >
                         <option value="all">All Actions</option>
                         <option value="create">Create</option>
@@ -162,7 +162,7 @@ export default function AuditorPage() {
           ) : filteredLogs.map((log) => (
             <div key={log.id} className="p-4 hover:bg-shadow-darker/5 transition-colors flex items-start justify-between">
               <div className="flex gap-4">
-                <div className={`p-2 rounded-lg bg-surface shadow-neo-raised ${
+                <div className={`p-2 rounded-lg bg-transparent shadow-neo-raised ${
                   log.action === 'create' ? 'text-primary' : 'text-warning'
                 }`}>
                    <Clock size={16} />
@@ -190,3 +190,4 @@ export default function AuditorPage() {
     </div>
   );
 }
+

@@ -386,7 +386,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
       <button 
         onClick={() => setIsOpen(true)}
         title={label}
-        className="px-4 py-2 rounded-full transition-all flex items-center justify-center gap-2 bg-surface shadow-neo-raised text-secondary hover:text-primary-dark border border-shadow-darker/5"
+        className="px-4 py-2 rounded-full transition-all flex items-center justify-center gap-2 bg-transparent shadow-neo-raised text-secondary hover:text-primary-dark border border-shadow-darker/5"
       >
         <Mic size={16} className="text-primary" />
         <span className="text-sm font-bold">{label}</span>
@@ -394,7 +394,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
 
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-surface border border-shadow-darker/10 rounded-3xl w-full max-w-lg shadow-neo-raised flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-transparent border border-shadow-darker/10 rounded-3xl w-full max-w-lg shadow-neo-raised flex flex-col overflow-hidden animate-fade-in">
             {/* Modal Header */}
             <div className="flex justify-between items-center p-6 border-b border-shadow-darker/5 bg-primary-light/10">
               <div className="flex items-center gap-2">
@@ -411,7 +411,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
               {/* Voice preference controls sync */}
               <div className="flex items-center justify-between bg-primary-light/5 p-3 rounded-2xl border border-primary/5 text-xs">
                 <span className="font-bold text-secondary uppercase tracking-wider">Response Mode:</span>
-                <div className="flex bg-surface rounded-lg p-0.5 shadow-neo-inset">
+                <div className="flex bg-transparent rounded-lg p-0.5 shadow-neo-inset">
                   {(['text-only', 'voice-text', 'voice-only'] as const).map((mode) => (
                     <button
                       key={mode}
@@ -435,7 +435,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
                   <Globe size={16} className="text-primary" />
                   Voice Language
                 </span>
-                <div className="flex bg-surface shadow-inner p-1 rounded-xl border border-shadow-darker/5">
+                <div className="flex bg-transparent shadow-inner p-1 rounded-xl border border-shadow-darker/5">
                   <button 
                     onClick={() => setLanguage('en-US')}
                     className={clsx(
@@ -510,7 +510,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
                   value={transcript}
                   onChange={(e) => setTranscript(e.target.value)}
                   placeholder={language === 'ta-IN' ? 'தமிழ் அல்லது ஆங்கிலத்தில் பேசுங்கள் (அல்லது இங்கே தட்டச்சு செய்யவும்)...' : 'Speak or type your instructions directly...'}
-                  className="w-full min-h-[120px] p-4 rounded-2xl bg-surface border border-shadow-darker/10 focus:outline-none focus:border-primary/50 text-primary-dark font-medium shadow-inner resize-y transition-all"
+                  className="w-full min-h-[120px] p-4 rounded-2xl bg-transparent border border-shadow-darker/10 focus:outline-none focus:border-primary/50 text-primary-dark font-medium shadow-inner resize-y transition-all"
                 />
               </div>
 
@@ -527,7 +527,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
             </div>
 
             {/* Modal Footer */}
-            <div className="p-6 border-t border-shadow-darker/5 bg-surface-darker/20 flex gap-3 justify-between items-center">
+            <div className="p-6 border-t border-shadow-darker/5 bg-transparent-darker/20 flex gap-3 justify-between items-center">
               <div>
                 {(isListening || isRecListening) ? (
                   <button 
@@ -582,4 +582,5 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
     </>
   );
 }
+
 

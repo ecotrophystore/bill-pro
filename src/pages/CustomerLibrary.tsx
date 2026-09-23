@@ -212,7 +212,7 @@ export default function CustomerLibrary() {
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -334,7 +334,7 @@ export default function CustomerLibrary() {
       {/* Modern Modal Dialog for Adding/Editing Customer */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-surface w-full max-w-lg rounded-card shadow-neo-hover p-6 border border-shadow-darker/10">
+          <div className="bg-transparent w-full max-w-lg rounded-card shadow-neo-hover p-6 border border-shadow-darker/10">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-primary-dark">{editingCustomer ? 'Edit Customer' : 'Add New Customer'}</h2>
               <button 
@@ -456,3 +456,4 @@ export default function CustomerLibrary() {
 function clsx(...classes: any[]) {
   return classes.filter(Boolean).join(' ');
 }
+

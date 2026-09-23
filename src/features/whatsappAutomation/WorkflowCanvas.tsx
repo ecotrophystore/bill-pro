@@ -1,4 +1,4 @@
-﻿// @ts-nocheck
+// @ts-nocheck
 import { Background, Controls, MiniMap, ReactFlow } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { WorkflowNode } from './WorkflowNode';
@@ -29,10 +29,11 @@ export function WorkflowCanvas({ nodes, edges, onNodeClick, onNodeDelete, onNode
     <div className="h-full min-h-[720px] rounded-[32px] border border-shadow-darker/10 bg-[radial-gradient(circle_at_top,_rgba(0,128,125,0.08),_transparent_45%),linear-gradient(180deg,rgba(255,255,255,0.7),rgba(255,255,255,0.45))] shadow-neo-raised overflow-hidden">
       <ReactFlow key={fitViewKey} nodes={flowNodes as any} edges={edges as any} nodeTypes={nodeTypes as any} onPaneClick={onPaneClick} onInit={onInit} fitView panOnDrag={!locked} nodesDraggable={!locked} nodesConnectable={!locked} elementsSelectable minZoom={0.4} maxZoom={1.8}>
         <Background gap={28} size={1} color="rgba(15, 23, 42, 0.08)" />
-        <Controls position="bottom-right" className="!shadow-neo-raised !border !border-shadow-darker/10 !bg-surface" />
-        <MiniMap nodeStrokeColor={() => '#94a3b8'} nodeColor={(node) => (node.data as any)?.kind === 'whatsapp' ? '#10b981' : '#e2e8f0'} className="!bg-surface/90 !shadow-neo-raised" />
+        <Controls position="bottom-right" className="!shadow-neo-raised !border !border-shadow-darker/10 !bg-transparent" />
+        <MiniMap nodeStrokeColor={() => '#94a3b8'} nodeColor={(node) => (node.data as any)?.kind === 'whatsapp' ? '#10b981' : '#e2e8f0'} className="!bg-transparent !shadow-neo-raised" />
       </ReactFlow>
     </div>
   );
 }
+
 

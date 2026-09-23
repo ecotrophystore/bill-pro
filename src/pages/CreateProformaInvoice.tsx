@@ -283,7 +283,7 @@ export default function CreateProformaInvoice() {
                 </label>
                 <SpeechInput 
                   type="text" 
-                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-surface" 
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-transparent" 
                   placeholder="e.g. PI/25/26/0001" 
                   value={documentNumber} 
                   onChange={(e: any) => setDocumentNumber(e.target.value)} 
@@ -339,7 +339,7 @@ export default function CreateProformaInvoice() {
             <div className="overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-0 sm:px-0">
               <div className="min-w-[850px] space-y-8">
                 {items.map((item, index) => (
-                <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-surface border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
+                <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-transparent border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
                   <div className="flex-[2] space-y-1 w-full">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Product & Description</label>}
                     <SearchableAutocomplete
@@ -374,7 +374,7 @@ export default function CreateProformaInvoice() {
                   <div className="w-full sm:w-28 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Price Tier</label>}
                     <select 
-                      className="neo-input w-full bg-surface text-xs"
+                      className="neo-input w-full bg-transparent text-xs"
                       value={item.priceTier}
                       onChange={(e) => {
                         const tier = e.target.value as 'retail' | 'wholesale';

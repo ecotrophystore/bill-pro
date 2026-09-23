@@ -242,9 +242,9 @@ function BuilderContext({ initialData, allPipelines, onSave, onCancel, saving }:
   const selectedNode = nodes.find(n => n.id === selectedNodeId) || null;
 
   return (
-    <div className="flex flex-col h-[85vh] bg-slate-50/50 rounded-2xl border border-shadow-darker/10 overflow-hidden shadow-sm">
+    <div className="flex flex-col h-[85vh] bg-transparent rounded-2xl border border-shadow-darker/10 overflow-hidden shadow-sm">
       {/* Top Bar */}
-      <div className="bg-white border-b border-shadow-darker/10 px-4 py-3 flex items-center justify-between z-10 shrink-0">
+      <div className="bg-transparent border-b border-shadow-darker/10 px-4 py-3 flex items-center justify-between z-10 shrink-0">
         <div className="flex items-center gap-4 flex-1">
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shrink-0">
             <Bot size={20} className="text-white" />
@@ -312,11 +312,11 @@ function BuilderContext({ initialData, allPipelines, onSave, onCancel, saving }:
             }}
           >
             <Background color="#cbd5e1" gap={24} size={2} />
-            <Controls className="bg-white border-shadow-darker/10 shadow-sm rounded-xl overflow-hidden [&>button]:border-b [&>button]:border-shadow-darker/5" />
+            <Controls className="bg-transparent border-shadow-darker/10 shadow-sm rounded-xl overflow-hidden [&>button]:border-b [&>button]:border-shadow-darker/5" />
           </ReactFlow>
 
           {/* Global Settings overlay button (can be placed absolutely) */}
-          <div className="absolute top-4 right-4 bg-white/80 backdrop-blur-md p-3 rounded-2xl border border-shadow-darker/10 shadow-lg text-sm max-w-xs z-10">
+          <div className="absolute top-4 right-4 bg-transparent backdrop-blur-md p-3 rounded-2xl border border-shadow-darker/10 shadow-lg text-sm max-w-xs z-10">
              <div className="font-bold text-primary-dark mb-2 flex items-center gap-1.5"><Settings2 size={14}/> Global Safety Rules</div>
              <div className="space-y-1.5">
                <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer">
@@ -352,3 +352,5 @@ export function WorkflowBuilder(props: WorkflowBuilderProps) {
     </ReactFlowProvider>
   );
 }
+
+

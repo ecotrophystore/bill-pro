@@ -228,7 +228,7 @@ export default function MessageTemplates() {
             <h2 className="text-lg font-bold text-primary-dark">Preview</h2>
             <p className="text-sm text-secondary">Rendered with a sample lead so you can verify the output fast.</p>
           </div>
-          <div className="rounded-2xl border border-shadow-darker/10 bg-surface p-4 space-y-3">
+          <div className="rounded-2xl border border-shadow-darker/10 bg-transparent p-4 space-y-3">
             <div className="text-xs uppercase tracking-[0.2em] text-secondary">Subject</div>
             <div className="font-semibold text-primary-dark">{previewSubject}</div>
             <div className="text-xs uppercase tracking-[0.2em] text-secondary pt-2">Message</div>
@@ -292,3 +292,4 @@ export default function MessageTemplates() {
     </div>
   );
 }
+

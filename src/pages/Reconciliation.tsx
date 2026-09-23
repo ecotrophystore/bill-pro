@@ -255,19 +255,19 @@ export default function Reconciliation() {
         </div>
         
         <div className="flex flex-wrap items-center gap-3">
-          <div className="shadow-sm rounded-2xl bg-white/40 p-1 border border-black/5 hover:border-black/10 transition-colors">
+          <div className="shadow-sm rounded-2xl bg-transparent p-1 border border-black/5 hover:border-black/10 transition-colors">
                       </div>
           
           <div className="relative">
             <button 
               onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="px-5 py-2.5 text-sm font-bold bg-white/60 hover:bg-white/90 text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
+              className="px-5 py-2.5 text-sm font-bold bg-transparent hover:bg-transparent text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
             >
               <Download size={16} /> Report <ChevronDown size={14} />
             </button>
             {showReportDropdown && (
               <div 
-                className="absolute right-0 mt-2 w-44 bg-white border border-black/5 rounded-xl shadow-lg z-50 py-1"
+                className="absolute right-0 mt-2 w-44 bg-transparent border border-black/5 rounded-xl shadow-lg z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
                 <button 
@@ -288,7 +288,7 @@ export default function Reconciliation() {
 
           <button 
             onClick={() => setIsUploadModalOpen(true)} 
-            className="px-5 py-2.5 text-sm font-bold bg-white/60 hover:bg-white/90 text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
+            className="px-5 py-2.5 text-sm font-bold bg-transparent hover:bg-transparent text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
           >
             <Upload size={16} />
             Upload Statement
@@ -308,7 +308,7 @@ export default function Reconciliation() {
       {/* CFO Dashboard Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Card 1: Upload Status */}
-        <div className="bg-white/60 border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
+        <div className="bg-transparent border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
           <div>
              <p className="text-[10px] font-extrabold text-secondary uppercase tracking-widest mb-1.5">Upload Status</p>
              <h3 className="text-xl font-extrabold text-primary-dark">
@@ -336,7 +336,7 @@ export default function Reconciliation() {
         </div>
 
         {/* Card 2: Payments Collected */}
-        <div className="bg-white/60 border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
+        <div className="bg-transparent border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
           <div>
              <p className="text-[10px] font-extrabold text-secondary uppercase tracking-widest mb-1.5">Payments Collected</p>
              <h3 className="text-4xl font-black text-green-700">{stats.paymentsCollected}</h3>
@@ -347,7 +347,7 @@ export default function Reconciliation() {
         </div>
 
         {/* Card 3: Sales Processed */}
-        <div className="bg-white/60 border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
+        <div className="bg-transparent border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
           <div>
              <p className="text-[10px] font-extrabold text-secondary uppercase tracking-widest mb-1.5">Sales Processed</p>
              <h3 className="text-4xl font-black text-primary-dark">{stats.salesPayments}</h3>
@@ -358,7 +358,7 @@ export default function Reconciliation() {
         </div>
 
         {/* Card 4: Purchases & Other Expenses */}
-        <div className="bg-white/60 border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
+        <div className="bg-transparent border border-white/80 p-6 rounded-2xl shadow-sm flex flex-col justify-between hover:shadow-md transition-all duration-300">
           <div className="flex gap-4">
             <div className="flex-1">
                <p className="text-[10px] font-extrabold text-secondary uppercase tracking-widest mb-1.5">Purchases</p>
@@ -378,8 +378,8 @@ export default function Reconciliation() {
 
       {/* Tabs and Search Section */}
       {!selectedCategory && (
-        <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 mt-8 bg-white/20 p-2.5 rounded-2xl border border-white/40 shadow-sm">
-          <div className="flex bg-white/50 p-1.5 rounded-xl border border-black/5 gap-1.5 self-start shadow-sm">
+        <div className="flex flex-col md:flex-row justify-between items-stretch md:items-center gap-4 mt-8 bg-transparent p-2.5 rounded-2xl border border-white/40 shadow-sm">
+          <div className="flex bg-transparent p-1.5 rounded-xl border border-black/5 gap-1.5 self-start shadow-sm">
             <button 
               onClick={() => setFilter('pending_review')}
               className={`px-5 py-2 rounded-lg text-xs font-bold transition-all duration-200 ${
@@ -408,7 +408,7 @@ export default function Reconciliation() {
               placeholder="Search transactions..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white/70 hover:bg-white focus:bg-white rounded-xl border border-black/5 focus:border-primary/20 outline-none text-sm text-primary-dark font-medium transition-all"
+              className="w-full pl-10 pr-4 py-2.5 bg-transparent hover:bg-transparent focus:bg-transparent rounded-xl border border-black/5 focus:border-primary/20 outline-none text-sm text-primary-dark font-medium transition-all"
             />
           </div>
         </div>
@@ -419,7 +419,7 @@ export default function Reconciliation() {
          <div className="flex items-center gap-4 pb-6 border-b border-shadow-darker/30">
            <button 
              onClick={() => setSelectedCategory(null)} 
-             className="px-4 py-2 text-sm font-bold bg-white/60 hover:bg-white/90 text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
+             className="px-4 py-2 text-sm font-bold bg-transparent hover:bg-transparent text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
            >
              <ArrowLeft size={16} />
              Back to Categories
@@ -443,7 +443,7 @@ export default function Reconciliation() {
             <div 
               key={cat} 
               onClick={() => setSelectedCategory(cat)} 
-              className="bg-white/60 hover:bg-white/90 border border-white/80 p-6 rounded-2xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[160px] group"
+              className="bg-transparent hover:bg-transparent border border-white/80 p-6 rounded-2xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[160px] group"
             >
                 <div className="flex justify-between items-start mb-4">
                    <div className="flex items-center gap-3">
@@ -476,7 +476,7 @@ export default function Reconciliation() {
           ))}
         </div>
       ) : transactions.filter(tx => (tx.category || 'Uncategorized') === selectedCategory).length === 0 ? (
-        <div className="p-20 text-center bg-white/40 border-2 border-dashed border-black/10 rounded-3xl shadow-sm flex flex-col items-center justify-center">
+        <div className="p-20 text-center bg-transparent border-2 border-dashed border-black/10 rounded-3xl shadow-sm flex flex-col items-center justify-center">
            <CheckCircle2 size={48} className="text-green-500 mb-4 opacity-40 animate-bounce" />
            <p className="text-primary-dark font-bold text-lg">All transactions cleared!</p>
            <p className="text-secondary text-sm mt-1">No pending review actions required in this category.</p>
@@ -486,7 +486,7 @@ export default function Reconciliation() {
           {transactions.filter(tx => (tx.category || 'Uncategorized') === selectedCategory).map((tx) => (
             <div 
               key={tx.id} 
-              className="bg-white/60 hover:bg-white/85 border border-white/80 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200"
+              className="bg-transparent hover:bg-transparent border border-white/80 p-5 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200"
             >
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
@@ -559,7 +559,7 @@ export default function Reconciliation() {
                       <button 
                         onClick={() => handleAcceptMatch(tx)}
                         disabled={processingId === tx.id}
-                        className={`mt-3 text-xs font-extrabold uppercase tracking-wider bg-white/80 hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg border border-primary/20 shadow-sm transition-all flex items-center gap-2 ${
+                        className={`mt-3 text-xs font-extrabold uppercase tracking-wider bg-transparent hover:bg-primary hover:text-white px-3 py-1.5 rounded-lg border border-primary/20 shadow-sm transition-all flex items-center gap-2 ${
                           processingId === tx.id ? 'text-secondary/50 animate-pulse' : 'text-primary'
                         }`}
                       >
@@ -581,3 +581,5 @@ export default function Reconciliation() {
     </div>
   );
 }
+
+

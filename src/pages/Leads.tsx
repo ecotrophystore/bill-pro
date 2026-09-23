@@ -165,14 +165,14 @@ export default function Leads() {
       </div>
 
       {/* Pipeline Filter Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-slate-100 rounded-2xl border border-shadow-darker/10">
+      <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-transparent rounded-2xl border border-shadow-darker/10">
         <button
           type="button"
           onClick={() => setSelectedPipelineId('all')}
           className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
             selectedPipelineId === 'all'
-              ? 'bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
-              : 'text-secondary hover:text-primary-dark hover:bg-white/60'
+              ? 'bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           All Pipelines ({leads.length})
@@ -188,8 +188,8 @@ export default function Leads() {
               onClick={() => setSelectedPipelineId(p.id)}
               className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
                 isSelected
-                  ? 'bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
-                  : 'text-secondary hover:text-primary-dark hover:bg-white/60'
+                  ? 'bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
+                  : 'text-secondary hover:text-primary-dark hover:bg-transparent'
               }`}
             >
               <span>{p.name}</span>
@@ -207,7 +207,7 @@ export default function Leads() {
 
       {/* KPI Summary Ribbon */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-        <div className="p-3 rounded-2xl bg-white border border-shadow-darker/10 shadow-xs">
+        <div className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 shadow-xs">
           <span className="text-secondary font-medium block">Total Leads</span>
           <span className="text-xl font-black text-primary-dark">{kpis.total}</span>
         </div>
@@ -215,11 +215,11 @@ export default function Leads() {
           <span className="text-emerald-700 font-medium block">Pipeline Value</span>
           <span className="text-xl font-black text-emerald-800">₹{kpis.value.toLocaleString('en-IN')}</span>
         </div>
-        <div className="p-3 rounded-2xl bg-white border border-shadow-darker/10 shadow-xs">
+        <div className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 shadow-xs">
           <span className="text-secondary font-medium block">Total Trophies Required</span>
           <span className="text-xl font-black text-primary-dark">{kpis.pieces.toLocaleString('en-IN')} pcs</span>
         </div>
-        <div className="p-3 rounded-2xl bg-white border border-shadow-darker/10 shadow-xs">
+        <div className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 shadow-xs">
           <span className="text-secondary font-medium block">Completed Orders</span>
           <span className="text-xl font-black text-indigo-700">{kpis.completed}</span>
         </div>
@@ -309,7 +309,7 @@ export default function Leads() {
                   };
 
                   return (
-                    <tr key={lead.id} className="hover:bg-slate-50/70 transition-colors">
+                    <tr key={lead.id} className="hover:bg-transparent transition-colors">
                       <td className="py-3.5 pr-4">
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -424,7 +424,7 @@ export default function Leads() {
       {/* Styled In-App Deletion Confirmation Modal */}
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
-          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-white rounded-2xl shadow-xl">
+          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-transparent rounded-2xl shadow-xl">
             <div className="flex items-center gap-2.5 text-rose-600">
               <AlertTriangle size={20} />
               <h3 className="font-bold text-sm">Delete Customer Lead?</h3>
@@ -454,3 +454,6 @@ export default function Leads() {
     </div>
   );
 }
+
+
+

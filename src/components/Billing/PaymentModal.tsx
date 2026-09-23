@@ -155,7 +155,7 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="bg-surface w-full max-w-2xl rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="bg-transparent w-full max-w-2xl rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-shadow-darker/10 flex justify-between items-center bg-primary-light/10">
           <div>
             <h2 className="text-xl font-bold text-primary-dark">Manage Payments</h2>
@@ -218,7 +218,7 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
             ) : (
               <div className="space-y-3">
                 {payments.map(payment => (
-                  <div key={payment.id} className={`p-4 rounded-xl border flex justify-between items-center ${payment.status === 'voided' ? 'bg-error/5 border-error/20 opacity-75' : 'bg-surface border-shadow-darker/10'}`}>
+                  <div key={payment.id} className={`p-4 rounded-xl border flex justify-between items-center ${payment.status === 'voided' ? 'bg-error/5 border-error/20 opacity-75' : 'bg-transparent border-shadow-darker/10'}`}>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-primary-dark">₹{payment.amount.toLocaleString()}</span>
@@ -253,3 +253,4 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
     </div>
   );
 }
+

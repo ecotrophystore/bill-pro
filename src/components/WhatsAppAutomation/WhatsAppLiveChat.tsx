@@ -40,10 +40,23 @@ import {
   Check,
   Calendar,
   DollarSign,
-  Copy
+  Copy,
+  Plus,
+  MoreVertical,
+  Store,
+  Edit2,
+  Paperclip,
+  Image as ImageIcon,
+  Tag,
+  Settings
 } from 'lucide-react';
-import { db, functions } from '../../lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, functions, storage } from '../../lib/firebase';
 import { processInboundWhatsAppMessage } from '../../lib/whatsappInboundProcessor';
+import { BusinessProfileSettings } from './BusinessProfileSettings';
+import { NewChatModal } from './NewChatModal';
+import { ManageLabelsModal } from './ManageLabelsModal';
+import { useChatLabels } from '../../hooks/useChatLabels';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface MessageItem {
@@ -75,6 +88,7 @@ interface ConversationItem {
   ai_flag_for_review?: boolean;
   pipelineStage?: string;
   unreadCount?: number;
+  labels?: string[];
   updated_at?: any;
 }
 
@@ -133,15 +147,29 @@ export function WhatsAppLiveChat() {
   // Input state
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const docInputRef = useRef<HTMLInputElement>(null);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const [showLabelsMenu, setShowLabelsMenu] = useState(false);
+  const [showManageLabels, setShowManageLabels] = useState(false);
   const [sendError, setSendError] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
   const [showSimulator, setShowSimulator] = useState(false);
+  const [showBusinessProfile, setShowBusinessProfile] = useState(false);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [editContactMode, setEditContactMode] = useState(false);
+  const [editContactName, setEditContactName] = useState('');
+  const [savingContact, setSavingContact] = useState(false);
 
   // Right Drawer Context
   const [leadDetails, setLeadDetails] = useState<any | null>(null);
   const [showDetailsDrawer, setShowDetailsDrawer] = useState(false);
   const [updatingStage, setUpdatingStage] = useState(false);
   const [copiedPhone, setCopiedPhone] = useState(false);
+  
+  // Custom Labels Hook
+  const { labels: dynamicChatLabels } = useChatLabels();
 
   // Available Pipeline stages
   const [availableStages, setAvailableStages] = useState<{ id: string; label: string }[]>(DEFAULT_STAGES);
@@ -366,25 +394,59 @@ export function WhatsAppLiveChat() {
   const handleSendMessage = async (textToSend?: string) => {
     const content = (textToSend || inputText).trim();
     if (!content || !selectedConv || isSending) return;
-
     setIsSending(true);
     setSendError('');
+    await sendMessagePayload({ type: 'text', text: { body: content } }, content);
+    setInputText('');
+    setIsSending(false);
+  };
 
+  const handleSendMedia = async (file: File, type: 'image' | 'document' | 'audio') => {
+    if (!selectedConv?.id || !storage) return;
+    setIsSending(true);
+    setShowAttachmentMenu(false);
+    
     try {
-      const cleanPhone = String(selectedConv.participantPhone).replace(/\D/g, '');
-      const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const fileRef = ref(storage, `chat_media/${selectedConv.leadId || 'general'}/${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
 
+      let payload: any = { type };
+      let previewText = `Sent ${type}`;
+      
+      if (type === 'image') {
+        payload.image = { link: url };
+        previewText = '📷 Image';
+      } else if (type === 'document') {
+        payload.document = { link: url, filename: file.name };
+        previewText = `📄 ${file.name}`;
+      } else if (type === 'audio') {
+        payload.audio = { link: url };
+        previewText = '🎵 Audio';
+      }
+
+      await sendMessagePayload(payload, previewText, url);
+    } catch (err: any) {
+      console.error('Failed to send message:', err);
+      setSendError(err.message || 'Failed to send message');
+    }
+  };
+
+  const sendMessagePayload = async (messagePayload: any, textForDb: string, mediaUrl?: string) => {
+    try {
+      const cleanPhone = String(selectedConv!.participantPhone).replace(/\D/g, '');
+      const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
       let sentViaFunction = false;
 
       // 1. Try secure backend Callable Function first
-      if (functions) {
+      if (functions && messagePayload.type === 'text') {
         try {
           const sendFn = httpsCallable(functions, 'sendWhatsAppChatMessage');
           await sendFn({
-            conversationId: selectedConv.id,
-            leadId: selectedConv.leadId || '',
+            conversationId: selectedConv!.id,
+            leadId: selectedConv!.leadId || '',
             phone: finalPhone,
-            message: content
+            message: textForDb
           });
           sentViaFunction = true;
         } catch (fnErr: any) {
@@ -395,8 +457,7 @@ export function WhatsAppLiveChat() {
       // 2. Direct Meta Graph API fallback if Cloud Function not yet deployed
       if (!sentViaFunction) {
         let phoneId = '1263075550230396';
-        let token =
-          'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
+        let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
         let version = 'v18.0';
 
         if (db) {
@@ -424,8 +485,7 @@ export function WhatsAppLiveChat() {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
             to: finalPhone,
-            type: 'text',
-            text: { body: content }
+            ...messagePayload
           })
         });
 
@@ -436,36 +496,36 @@ export function WhatsAppLiveChat() {
 
         const wamid = resJson.messages?.[0]?.id || `out_${Date.now()}`;
 
-        // Save to Firestore messages & update conversation doc
         if (db) {
           await addDoc(collection(db, 'messages'), {
-            conversationId: selectedConv.id,
-            leadId: selectedConv.leadId || null,
+            conversationId: selectedConv!.id,
+            leadId: selectedConv!.leadId || null,
             senderPhone: finalPhone,
             direction: 'outbound',
-            type: 'text',
-            content,
+            type: messagePayload.type,
+            content: textForDb,
+            mediaUrl: mediaUrl || null,
             metaMessageId: wamid,
             platform: 'whatsapp',
             triggeredBy: 'live_chat',
             created_at: serverTimestamp()
           });
 
-          await updateDoc(doc(db, 'conversations', selectedConv.id), {
-            lastMessage: `[You]: ${content}`,
+          await updateDoc(doc(db, 'conversations', selectedConv!.id), {
+            lastMessage: `[You]: ${textForDb}`,
             lastMessageAt: serverTimestamp(),
             lastDirection: 'outbound',
             ai_suggested_reply: '',
             updated_at: serverTimestamp()
           });
 
-          if (selectedConv.leadId) {
+          if (selectedConv!.leadId) {
             await addDoc(collection(db, 'activities'), {
-              lead_id: selectedConv.leadId,
-              leadId: selectedConv.leadId,
+              lead_id: selectedConv!.leadId,
+              leadId: selectedConv!.leadId,
               type: 'whatsapp_reply_sent',
               title: 'WhatsApp Chat Reply Sent',
-              message: `Sent WhatsApp reply: "${content.slice(0, 100)}"`,
+              message: `Sent WhatsApp reply: "${textForDb.slice(0, 100)}"`,
               actor: 'Staff',
               created_at: serverTimestamp()
             });
@@ -531,6 +591,54 @@ export function WhatsAppLiveChat() {
     }
   };
 
+  const handleToggleLabel = async (labelId: string) => {
+    if (!selectedConv || !db) return;
+    
+    const currentLabels = selectedConv.labels || [];
+    const newLabels = currentLabels.includes(labelId)
+      ? currentLabels.filter((id) => id !== labelId)
+      : [...currentLabels, labelId];
+
+    try {
+      await updateDoc(doc(db, 'conversations', selectedConv.id), {
+        labels: newLabels,
+        updated_at: serverTimestamp()
+      });
+      setSelectedConv((prev: any) => (prev ? { ...prev, labels: newLabels } : prev));
+      setConversations((prev) => 
+        prev.map(c => c.id === selectedConv.id ? { ...c, labels: newLabels } : c)
+      );
+    } catch (err) {
+      console.error('Failed to update labels:', err);
+    }
+  };
+
+  const handleSaveContact = async () => {
+    if (!selectedConv || !db) return;
+    setSavingContact(true);
+    try {
+      await updateDoc(doc(db, 'conversations', selectedConv.id), {
+        participantName: editContactName,
+        updated_at: serverTimestamp()
+      });
+      
+      if (selectedConv.leadId) {
+        await updateDoc(doc(db, 'leads', selectedConv.leadId), {
+          name: editContactName,
+          updated_at: serverTimestamp()
+        });
+        setLeadDetails((prev: any) => prev ? { ...prev, name: editContactName } : prev);
+      }
+      
+      setSelectedConv(prev => prev ? { ...prev, participantName: editContactName } : prev);
+      setEditContactMode(false);
+    } catch (err) {
+      console.error('Error saving contact:', err);
+    } finally {
+      setSavingContact(false);
+    }
+  };
+
   // ── Filtered conversation list ──────────────────────────────────────────────
   const filteredConversations = useMemo(() => {
     return conversations.filter((c) => {
@@ -581,15 +689,15 @@ export function WhatsAppLiveChat() {
   };
 
   return (
-    <div className="w-full h-full flex flex-1 min-h-0 bg-white rounded-2xl border border-shadow-darker/20 shadow-lg overflow-hidden relative select-text">
+    <div className="w-full h-full flex flex-1 min-h-0 bg-transparent rounded-2xl border border-shadow-darker/20 shadow-lg overflow-hidden relative select-text">
       {/* ── COLUMN 1: CONVERSATIONS LIST SIDEBAR ─────────────────────────────── */}
       <div
         className={`${
           mobileView === 'chat' ? 'hidden md:flex' : 'flex'
-        } w-full md:w-80 lg:w-[320px] shrink-0 bg-white border-r border-slate-200/80 flex-col h-full min-h-0 z-10 transition-all`}
+        } w-full md:w-80 lg:w-[320px] shrink-0 bg-transparent border-r border-slate-200/80 flex-col h-full min-h-0 z-10 transition-all`}
       >
         {/* Sidebar Header & Search */}
-        <div className="p-3.5 border-b border-slate-200/80 bg-slate-50/70 space-y-2.5 shrink-0">
+        <div className="p-3.5 border-b border-slate-200/80 bg-transparent space-y-2.5 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-lg bg-emerald-600/10 flex items-center justify-center text-emerald-700">
@@ -601,14 +709,29 @@ export function WhatsAppLiveChat() {
               </span>
             </div>
 
-            <button
-              onClick={() => setShowSimulator(true)}
-              className="text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all"
-              title="Simulate inbound WhatsApp message"
-            >
-              <Bot size={13} className="text-emerald-600" />
-              <span>Simulator</span>
-            </button>
+            <div className="flex items-center gap-1 text-slate-500">
+              <button
+                onClick={() => setShowNewChatModal(true)}
+                className="p-2 hover:bg-transparent rounded-full transition-colors"
+                title="New Chat"
+              >
+                <Plus size={20} strokeWidth={1.5} />
+              </button>
+              <button
+                onClick={() => setShowBusinessProfile(true)}
+                className="p-2 hover:bg-transparent rounded-full transition-colors"
+                title="Business Profile"
+              >
+                <Store size={20} strokeWidth={1.5} />
+              </button>
+              <button
+                onClick={() => setShowSimulator(true)}
+                className="p-2 hover:bg-transparent rounded-full transition-colors"
+                title="Simulator"
+              >
+                <MoreVertical size={20} strokeWidth={1.5} />
+              </button>
+            </div>
           </div>
 
           {/* Search Input */}
@@ -619,7 +742,7 @@ export function WhatsAppLiveChat() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search name, phone, message..."
-              className="w-full bg-white rounded-xl border border-slate-200 py-2 pl-9 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              className="w-full bg-transparent rounded-xl border border-slate-200 py-2 pl-9 pr-7 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
             />
             {searchQuery && (
               <button
@@ -640,7 +763,7 @@ export function WhatsAppLiveChat() {
                 className={`text-[11px] font-bold capitalize px-3 py-1 rounded-lg transition-all ${
                   filterType === t
                     ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-200/60 bg-white border border-slate-200/70'
+                    : 'text-slate-600 hover:bg-slate-200/60 bg-transparent border border-slate-200/70'
                 }`}
               >
                 {t}
@@ -682,7 +805,7 @@ export function WhatsAppLiveChat() {
                   className={`p-3.5 flex items-start gap-3 cursor-pointer transition-all border-l-[3px] ${
                     isSelected
                       ? 'bg-emerald-500/10 border-emerald-600'
-                      : 'hover:bg-slate-50/90 border-transparent'
+                      : 'hover:bg-transparent border-transparent'
                   }`}
                 >
                   {/* Avatar */}
@@ -713,7 +836,7 @@ export function WhatsAppLiveChat() {
 
                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                       {conv.pipelineStage && (
-                        <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200/60">
+                        <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-transparent text-slate-700 border border-slate-200/60">
                           {conv.pipelineStage.replace(/_/g, ' ')}
                         </span>
                       )}
@@ -727,6 +850,17 @@ export function WhatsAppLiveChat() {
                           <Sparkles size={9} className="text-amber-600" /> Draft Ready
                         </span>
                       )}
+                      
+                      {/* Render Chat Labels */}
+                      {conv.labels?.map((labelId) => {
+                        const labelDef = dynamicChatLabels.find((l) => l.id === labelId);
+                        if (!labelDef) return null;
+                        return (
+                          <span key={labelId} className={`text-[9px] font-bold px-2 py-0.5 rounded-md border ${labelDef.colorClass}`}>
+                            {labelDef.text}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -745,12 +879,12 @@ export function WhatsAppLiveChat() {
         {selectedConv ? (
           <>
             {/* Chat Thread Header */}
-            <div className="bg-white border-b border-slate-200/80 px-4 py-2.5 flex items-center justify-between shadow-xs shrink-0 z-10">
+            <div className="bg-transparent border-b border-slate-200/80 px-4 py-2.5 flex items-center justify-between shadow-xs shrink-0 z-10">
               <div className="flex items-center gap-3 min-w-0">
                 {/* Back Button for mobile view */}
                 <button
                   onClick={() => setMobileView('list')}
-                  className="md:hidden p-1.5 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-slate-100"
+                  className="md:hidden p-1.5 text-slate-500 hover:text-slate-800 rounded-lg hover:bg-transparent"
                   title="Back to conversation list"
                 >
                   <ArrowLeft size={18} />
@@ -766,7 +900,7 @@ export function WhatsAppLiveChat() {
                       {selectedConv.participantName || `+${selectedConv.participantPhone}`}
                     </h3>
                     {selectedConv.pipelineStage && (
-                      <span className="hidden sm:inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                      <span className="hidden sm:inline-block text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-transparent text-slate-700 border border-slate-200">
                         {selectedConv.pipelineStage.replace(/_/g, ' ')}
                       </span>
                     )}
@@ -789,12 +923,63 @@ export function WhatsAppLiveChat() {
 
               {/* Header Right Actions */}
               <div className="flex items-center gap-2 shrink-0">
+                
+                {/* Labels Menu */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowLabelsMenu(!showLabelsMenu)}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all ${
+                      showLabelsMenu || (selectedConv.labels && selectedConv.labels.length > 0)
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 shadow-xs'
+                        : 'bg-transparent hover:bg-transparent text-slate-700 border-slate-200'
+                    }`}
+                    title="Toggle Chat Labels"
+                  >
+                    <Tag size={14} />
+                    <span className="hidden sm:inline">Labels</span>
+                  </button>
+
+                  {showLabelsMenu && (
+                    <div className="absolute top-full right-0 mt-2 bg-transparent rounded-xl shadow-xl border border-slate-200 py-2 flex flex-col z-50 min-w-[200px]">
+                      <div className="px-3 pb-2 mb-1 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Apply Labels
+                      </div>
+                      
+                      <div className="max-h-60 overflow-y-auto py-1">
+                        {dynamicChatLabels.map((label) => {
+                          const isActive = selectedConv.labels?.includes(label.id);
+                          return (
+                            <button
+                              key={label.id}
+                              onClick={() => handleToggleLabel(label.id)}
+                              className="flex items-center justify-between px-3 py-1.5 hover:bg-transparent transition-colors text-left w-full"
+                            >
+                              <span className={`text-xs font-bold px-2 py-1 rounded-md border ${label.colorClass}`}>
+                                {label.text}
+                              </span>
+                              {isActive && <Check size={14} className="text-emerald-500" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="border-t border-slate-100 mt-1 pt-1">
+                        <button
+                          onClick={() => { setShowLabelsMenu(false); setShowManageLabels(true); }}
+                          className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-500 hover:text-slate-800 hover:bg-transparent transition-colors w-full text-left"
+                        >
+                          <Settings size={14} /> Manage Labels
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setShowDetailsDrawer(!showDetailsDrawer)}
                   className={`text-xs font-semibold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all ${
                     showDetailsDrawer
                       ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                      : 'bg-transparent hover:bg-transparent text-slate-700 border-slate-200'
                   }`}
                   title="Toggle CRM Context Panel"
                 >
@@ -805,7 +990,7 @@ export function WhatsAppLiveChat() {
                 {selectedConv.leadId && (
                   <button
                     onClick={() => navigate(`/leads/${selectedConv.leadId}`)}
-                    className="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-primary border border-slate-200 flex items-center gap-1 transition-all"
+                    className="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-transparent hover:bg-transparent text-primary border border-slate-200 flex items-center gap-1 transition-all"
                     title="Open Lead file in CRM"
                   >
                     <ExternalLink size={13} />
@@ -823,7 +1008,7 @@ export function WhatsAppLiveChat() {
                 </div>
               ) : messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400 text-xs text-center space-y-2.5">
-                  <div className="w-12 h-12 rounded-2xl bg-white shadow-xs border border-slate-200/80 flex items-center justify-center text-slate-400">
+                  <div className="w-12 h-12 rounded-2xl bg-transparent shadow-xs border border-slate-200/80 flex items-center justify-center text-slate-400">
                     <MessageSquare size={24} />
                   </div>
                   <p className="font-semibold text-slate-600 text-sm">No messages recorded yet</p>
@@ -847,7 +1032,7 @@ export function WhatsAppLiveChat() {
                       {/* Date Divider Chip */}
                       {showDateDivider && (
                         <div className="flex justify-center my-2">
-                          <span className="bg-white/80 backdrop-blur-xs border border-slate-200/80 text-slate-500 text-[10px] font-bold px-3 py-0.5 rounded-full shadow-2xs">
+                          <span className="bg-transparent backdrop-blur-xs border border-slate-200/80 text-slate-500 text-[10px] font-bold px-3 py-0.5 rounded-full shadow-2xs">
                             {currDateStr}
                           </span>
                         </div>
@@ -866,10 +1051,27 @@ export function WhatsAppLiveChat() {
                           className={`max-w-[85%] md:max-w-[70%] rounded-2xl p-3 text-[13px] leading-relaxed shadow-xs relative ${
                             isOutbound
                               ? 'bg-[#005c4b] text-white rounded-tr-xs'
-                              : 'bg-white text-slate-800 border border-slate-200/80 rounded-tl-xs'
+                              : 'bg-transparent text-slate-800 border border-slate-200/80 rounded-tl-xs'
                           }`}
                         >
-                          <p className="whitespace-pre-wrap font-sans break-words">{m.content}</p>
+                          {m.type === 'image' && m.mediaUrl ? (
+                            <div className="mb-2 rounded-md overflow-hidden bg-black/20">
+                              <img src={m.mediaUrl} alt="Attachment" className="max-w-full max-h-64 object-contain" />
+                            </div>
+                          ) : m.type === 'audio' && m.mediaUrl ? (
+                            <div className="mb-2">
+                              <audio controls src={m.mediaUrl} className="max-w-[200px] h-8" />
+                            </div>
+                          ) : m.type === 'document' && m.mediaUrl ? (
+                            <div className="mb-2 p-3 bg-black/10 rounded-lg flex items-center gap-3">
+                              <FileIcon size={24} className={isOutbound ? 'text-emerald-100' : 'text-[#008069]'} />
+                              <a href={m.mediaUrl} target="_blank" rel="noreferrer" className="underline font-medium hover:text-white truncate max-w-[150px]">
+                                {m.content || 'Document'}
+                              </a>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap font-sans break-words">{m.content}</p>
+                          )}
 
                           <div
                             className={`flex items-center justify-end gap-1 mt-1 text-[10px] ${
@@ -877,7 +1079,17 @@ export function WhatsAppLiveChat() {
                             }`}
                           >
                             <span>{formatTime(m.created_at)}</span>
-                            {isOutbound && <CheckCheck size={13} className="text-emerald-300" />}
+                            {isOutbound && (
+                              <span className="inline-flex items-center ml-0.5">
+                                {m.status === 'read' ? (
+                                  <CheckCheck size={13} className="text-[#53bdeb]" />
+                                ) : m.status === 'delivered' ? (
+                                  <CheckCheck size={13} className="text-emerald-200" />
+                                ) : (
+                                  <Check size={13} className="text-emerald-200" />
+                                )}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -924,7 +1136,7 @@ export function WhatsAppLiveChat() {
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-amber-950 font-normal leading-relaxed italic bg-white/70 rounded-lg p-2.5 border border-amber-200/50">
+                <p className="text-xs text-amber-950 font-normal leading-relaxed italic bg-transparent rounded-lg p-2.5 border border-amber-200/50">
                   "{selectedConv.ai_suggested_reply}"
                 </p>
               </div>
@@ -932,7 +1144,7 @@ export function WhatsAppLiveChat() {
 
             {/* Quick Templates Floating Popover */}
             {showTemplates && (
-              <div className="absolute bottom-20 left-4 z-40 bg-white rounded-2xl border border-slate-200 shadow-2xl p-3.5 w-80 max-h-72 overflow-y-auto space-y-2 animate-fade-in custom-sidebar-scrollbar">
+              <div className="absolute bottom-20 left-4 z-40 bg-transparent rounded-2xl border border-slate-200 shadow-2xl p-3.5 w-80 max-h-72 overflow-y-auto space-y-2 animate-fade-in custom-sidebar-scrollbar">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <Zap size={14} className="text-amber-500" /> Quick Response Templates
@@ -951,7 +1163,7 @@ export function WhatsAppLiveChat() {
                         setShowTemplates(false);
                         if (textareaRef.current) textareaRef.current.focus();
                       }}
-                      className="w-full text-left p-2.5 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200 text-xs group"
+                      className="w-full text-left p-2.5 rounded-xl hover:bg-transparent transition-all border border-transparent hover:border-slate-200 text-xs group"
                     >
                       <span className="font-bold text-slate-800 group-hover:text-emerald-700 block">{tmpl.title}</span>
                       <span className="text-slate-500 line-clamp-2 text-[11px] mt-0.5">{filled}</span>
@@ -974,7 +1186,7 @@ export function WhatsAppLiveChat() {
             )}
 
             {/* Chat Input Bar */}
-            <div className="bg-white border-t border-slate-200/80 p-3 shrink-0 relative">
+            <div className="bg-transparent border-t border-slate-200/80 p-3 shrink-0 relative">
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
                   <button
@@ -983,7 +1195,7 @@ export function WhatsAppLiveChat() {
                     className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition-all flex items-center gap-1.5 ${
                       showTemplates
                         ? 'bg-amber-100 text-amber-800 border-amber-300'
-                        : 'bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border-slate-200/60'
+                        : 'bg-transparent hover:bg-slate-200/80 text-slate-600 border-slate-200/60'
                     }`}
                   >
                     <Zap size={13} className="text-amber-500" /> Quick Templates
@@ -993,7 +1205,7 @@ export function WhatsAppLiveChat() {
                     <button
                       type="button"
                       onClick={() => navigate(`/quotations?leadId=${leadDetails.id}`)}
-                      className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-100/80 hover:bg-slate-200/80 text-slate-600 border border-slate-200/60 flex items-center gap-1.5 transition-all"
+                      className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-transparent hover:bg-slate-200/80 text-slate-600 border border-slate-200/60 flex items-center gap-1.5 transition-all"
                     >
                       <FileText size={13} className="text-sky-500" /> Create Quotation
                     </button>
@@ -1001,11 +1213,43 @@ export function WhatsAppLiveChat() {
                 </div>
 
                 <span className="text-[11px] text-slate-400 hidden sm:inline font-medium">
-                  Press <kbd className="px-1.5 py-0.5 bg-slate-100 border border-slate-200 rounded font-mono text-[10px]">Enter</kbd> to send
+                  Press <kbd className="px-1.5 py-0.5 bg-transparent border border-slate-200 rounded font-mono text-[10px]">Enter</kbd> to send
                 </span>
               </div>
 
-              <div className="flex items-end gap-2">
+              <div className="flex items-end gap-2 relative">
+                <div className="relative shrink-0 mb-1">
+                  <button
+                    onClick={() => setShowAttachmentMenu(!showAttachmentMenu)}
+                    className="w-10 h-10 rounded-full hover:bg-transparent text-slate-500 flex items-center justify-center transition-colors"
+                    title="Attach"
+                  >
+                    <Paperclip size={20} />
+                  </button>
+
+                  {showAttachmentMenu && (
+                    <div className="absolute bottom-12 left-0 bg-transparent rounded-xl shadow-xl border border-slate-200 py-2 flex flex-col gap-1 z-50 min-w-[160px]">
+                      <button onClick={() => imageInputRef.current?.click()} className="flex items-center gap-3 px-4 py-2 hover:bg-transparent text-slate-700 transition-colors text-left w-full">
+                        <ImageIcon size={18} className="text-blue-500" />
+                        <span className="text-sm font-medium">Image</span>
+                      </button>
+                      <button onClick={() => docInputRef.current?.click()} className="flex items-center gap-3 px-4 py-2 hover:bg-transparent text-slate-700 transition-colors text-left w-full">
+                        <FileText size={18} className="text-purple-500" />
+                        <span className="text-sm font-medium">Document</span>
+                      </button>
+                      <button onClick={() => audioInputRef.current?.click()} className="flex items-center gap-3 px-4 py-2 hover:bg-transparent text-slate-700 transition-colors text-left w-full">
+                        <Mic size={18} className="text-orange-500" />
+                        <span className="text-sm font-medium">Voice Note</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Hidden File Inputs */}
+                <input type="file" ref={imageInputRef} className="hidden" accept="image/*" onChange={(e) => { if (e.target.files?.[0]) handleSendMedia(e.target.files[0], 'image'); }} />
+                <input type="file" ref={docInputRef} className="hidden" accept="application/pdf,.doc,.docx" onChange={(e) => { if (e.target.files?.[0]) handleSendMedia(e.target.files[0], 'document'); }} />
+                <input type="file" ref={audioInputRef} className="hidden" accept="audio/*" onChange={(e) => { if (e.target.files?.[0]) handleSendMedia(e.target.files[0], 'audio'); }} />
+
                 <textarea
                   ref={textareaRef}
                   value={inputText}
@@ -1018,7 +1262,7 @@ export function WhatsAppLiveChat() {
                   }}
                   placeholder={`Type a message to ${selectedConv.participantName || `+${selectedConv.participantPhone}`}...`}
                   rows={1}
-                  className="flex-1 bg-slate-50 rounded-xl border border-slate-200 py-2.5 px-3.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 resize-none max-h-28 min-h-[44px] leading-relaxed transition-all"
+                  className="flex-1 bg-transparent rounded-xl border border-slate-200 py-2.5 px-3.5 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 resize-none max-h-28 min-h-[44px] leading-relaxed transition-all"
                 />
 
                 <button
@@ -1035,7 +1279,7 @@ export function WhatsAppLiveChat() {
           </>
         ) : (
           <div className="h-full flex flex-col items-center justify-center text-slate-400 text-sm space-y-3">
-            <div className="w-16 h-16 rounded-2xl bg-white shadow-xs border border-slate-200/80 flex items-center justify-center text-emerald-600">
+            <div className="w-16 h-16 rounded-2xl bg-transparent shadow-xs border border-slate-200/80 flex items-center justify-center text-emerald-600">
               <MessageSquare size={32} />
             </div>
             <p className="font-semibold text-slate-700">Select a conversation</p>
@@ -1055,78 +1299,90 @@ export function WhatsAppLiveChat() {
             className="xl:hidden fixed inset-0 z-40 bg-slate-900/30 backdrop-blur-2xs transition-opacity"
           />
 
-          <div className="fixed xl:static right-0 top-0 bottom-0 z-50 xl:z-auto w-80 lg:w-[320px] bg-white border-l border-slate-200/80 p-4 overflow-y-auto space-y-4 shrink-0 shadow-2xl xl:shadow-none flex flex-col h-full animate-fade-in text-xs custom-sidebar-scrollbar">
-            {/* Drawer Header */}
-            <div className="flex items-center justify-between border-b border-slate-200/80 pb-3 shrink-0">
-              <h4 className="font-bold text-slate-800 flex items-center gap-1.5 text-sm">
-                <Info size={16} className="text-emerald-600" />
-                Customer CRM Profile
-              </h4>
+          <div className="fixed xl:static right-0 top-0 bottom-0 z-50 xl:z-auto w-80 lg:w-[320px] bg-[#f0f2f5] border-l border-slate-200/80 overflow-y-auto shrink-0 shadow-2xl xl:shadow-none flex flex-col h-full animate-fade-in text-xs custom-sidebar-scrollbar">
+            {/* Drawer Header (WhatsApp Contact Info Style) */}
+            <div className="bg-transparent flex items-center justify-start gap-5 px-4 py-3 shrink-0 shadow-xs">
               <button
                 onClick={() => setShowDetailsDrawer(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"
+                className="text-slate-500 hover:text-slate-800 transition-colors"
               >
-                <X size={16} />
+                <X size={20} />
               </button>
+              <h4 className="font-normal text-slate-800 text-base">Contact info</h4>
             </div>
 
             {/* Profile Identity Card */}
-            <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/70 space-y-2.5">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center font-bold text-emerald-800 text-sm shrink-0">
-                  {(leadDetails?.name || selectedConv.participantName || 'C').charAt(0).toUpperCase()}
+            <div className="bg-transparent px-4 py-8 flex flex-col items-center shadow-sm mb-2 relative">
+              {editContactMode ? (
+                <div className="absolute top-4 right-4 flex gap-1">
+                  <button onClick={() => setEditContactMode(false)} className="p-2 text-slate-400 hover:bg-transparent rounded-full transition-colors">
+                    <X size={18} />
+                  </button>
+                  <button onClick={handleSaveContact} disabled={savingContact} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-full transition-colors">
+                    {savingContact ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} strokeWidth={3} />}
+                  </button>
                 </div>
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-slate-900 truncate">
-                    {leadDetails?.name || selectedConv.participantName || 'WhatsApp Contact'}
-                  </div>
-                  <span className="text-[10px] text-slate-400 block font-medium">
-                    {leadDetails?.id ? 'Linked CRM Lead' : 'Unlinked Contact'}
-                  </span>
-                </div>
+              ) : (
+                <button 
+                  onClick={() => {
+                    setEditContactName(leadDetails?.name || selectedConv.participantName || '');
+                    setEditContactMode(true);
+                  }}
+                  className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-transparent rounded-full transition-colors"
+                  title="Edit Contact"
+                >
+                  <Edit2 size={18} />
+                </button>
+              )}
+              
+              <div className="w-40 h-40 rounded-full bg-slate-200 mb-5 flex items-center justify-center font-normal text-slate-500 text-6xl shrink-0 overflow-hidden shadow-sm">
+                {(leadDetails?.name || selectedConv.participantName || 'C').charAt(0).toUpperCase()}
               </div>
-
-              <div className="space-y-1.5 pt-1 text-slate-600 border-t border-slate-200/60">
-                <div className="flex items-center justify-between gap-1">
-                  <span className="flex items-center gap-1.5 font-mono text-slate-700">
-                    <Phone size={12} className="text-emerald-600 shrink-0" />
-                    +{selectedConv.participantPhone}
-                  </span>
-                  <a
-                    href={`https://wa.me/${selectedConv.participantPhone}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[10px] text-emerald-600 hover:underline font-bold"
-                  >
-                    Open WA
-                  </a>
-                </div>
-
-                {leadDetails?.email && (
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Mail size={12} className="text-sky-600 shrink-0" />
-                    <a href={`mailto:${leadDetails.email}`} className="text-sky-700 hover:underline truncate">
-                      {leadDetails.email}
-                    </a>
-                  </div>
-                )}
-
-                {leadDetails?.organization && (
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Building size={12} className="text-amber-600 shrink-0" />
-                    <span className="truncate">{leadDetails.organization}</span>
-                  </div>
-                )}
+              
+              {editContactMode ? (
+                <input 
+                  type="text"
+                  value={editContactName}
+                  onChange={(e) => setEditContactName(e.target.value)}
+                  placeholder="Enter name"
+                  className="text-xl font-medium text-slate-900 mb-1.5 text-center border-b-2 border-[#008069] focus:outline-none bg-transparent px-2 py-1 min-w-[200px]"
+                  autoFocus
+                />
+              ) : (
+                <h2 className="font-medium text-xl text-slate-900 mb-1.5 text-center">
+                  {leadDetails?.name || selectedConv.participantName || `+${selectedConv.participantPhone}`}
+                </h2>
+              )}
+              
+              <div className="text-slate-500 text-sm font-normal">
+                +{selectedConv.participantPhone}
               </div>
             </div>
 
+            {/* About / CRM Info */}
+            <div className="bg-transparent px-5 py-5 shadow-sm mb-2 space-y-5">
+              <div className="text-[#008069] font-medium text-[13px] mb-3">About and CRM info</div>
+              
+              <div className="flex flex-col">
+                <span className="text-slate-800 text-[15px]">{leadDetails?.organization || 'Individual Customer'}</span>
+                <span className="text-slate-500 text-[13px] mt-0.5">Organization</span>
+              </div>
+
+              {leadDetails?.email && (
+                <div className="flex flex-col border-t border-slate-100 pt-4">
+                  <span className="text-sky-600 text-[15px] truncate"><a href={`mailto:${leadDetails.email}`}>{leadDetails.email}</a></span>
+                  <span className="text-slate-500 text-[13px] mt-0.5">Email</span>
+                </div>
+              )}
+            </div>
+
             {/* Interactive Pipeline Stage Selector */}
-            <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200/70 space-y-2">
+            <div className="bg-transparent px-5 py-5 shadow-sm mb-2 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider">
-                  Pipeline Stage
+                <span className="text-slate-800 font-medium text-[15px]">
+                  Pipeline stage
                 </span>
-                {updatingStage && <Loader2 size={12} className="animate-spin text-emerald-600" />}
+                {updatingStage && <Loader2 size={16} className="animate-spin text-emerald-600" />}
               </div>
 
               {leadDetails?.id ? (
@@ -1135,7 +1391,7 @@ export function WhatsAppLiveChat() {
                     value={leadDetails?.status || selectedConv.pipelineStage || 'new'}
                     onChange={(e) => handleUpdateLeadStage(e.target.value)}
                     disabled={updatingStage}
-                    className="w-full bg-white rounded-lg border border-slate-200 p-2 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                    className="w-full bg-transparent rounded-lg border-b-2 border-slate-200 focus:border-[#008069] p-2.5 text-[15px] font-normal text-slate-800 focus:outline-none"
                   >
                     {availableStages.map((st) => (
                       <option key={st.id} value={st.id}>
@@ -1143,55 +1399,52 @@ export function WhatsAppLiveChat() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-[10px] text-slate-400 block mt-1">
-                    Changing stage automatically triggers enrolled WhatsApp automations.
+                  <span className="text-[12px] text-slate-400 block mt-2">
+                    Changing stage triggers WhatsApp automations.
                   </span>
                 </div>
               ) : (
-                <div className="text-[11px] text-slate-500 italic">
-                  Stage: <strong className="text-slate-800 capitalize">{selectedConv.pipelineStage || 'Inquiry'}</strong>
+                <div className="text-[14px] text-slate-500">
+                  <span className="capitalize">{selectedConv.pipelineStage || 'Inquiry'}</span>
                 </div>
               )}
             </div>
 
             {/* Order Specifications */}
-            <div className="space-y-2.5">
-              <span className="font-bold text-slate-700 block text-[11px] uppercase tracking-wider">
-                Order Specifications
+            <div className="bg-transparent px-5 py-5 shadow-sm mb-2 space-y-4">
+              <span className="text-[#008069] font-medium text-[13px]">
+                Order specifications
               </span>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-                  <span className="text-[10px] text-slate-400 block">Quantity</span>
-                  <span className="font-bold text-slate-800">
+              <div className="space-y-4">
+                <div className="flex flex-col">
+                  <span className="text-slate-500 text-[13px] mb-0.5">Quantity</span>
+                  <span className="text-slate-800 text-[15px]">
                     {leadDetails?.required_quantity ? `${leadDetails.required_quantity} pcs` : 'Not specified'}
                   </span>
                 </div>
 
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-                  <span className="text-[10px] text-slate-400 block">Trophy Specs</span>
-                  <span className="font-bold text-slate-800 truncate block">
+                <div className="flex flex-col border-t border-slate-100 pt-3">
+                  <span className="text-slate-500 text-[13px] mb-0.5">Trophy Specs</span>
+                  <span className="text-slate-800 text-[15px]">
                     {leadDetails?.trophy_size || 'Custom'}
                   </span>
                 </div>
               </div>
 
               {leadDetails?.value && (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200/80">
-                  <span className="text-[10px] text-emerald-800 block font-bold uppercase">Estimated Order Value</span>
-                  <span className="font-extrabold text-emerald-900 text-base">
+                <div className="flex flex-col border-t border-slate-100 pt-3">
+                  <span className="text-slate-500 text-[13px] mb-0.5">Order Value</span>
+                  <span className="text-emerald-700 text-[15px] font-medium">
                     ₹{Number(leadDetails.value).toLocaleString('en-IN')}
                   </span>
                 </div>
               )}
 
               {leadDetails?.event_date && (
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70 flex items-center gap-2">
-                  <Calendar size={14} className="text-slate-500 shrink-0" />
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Event Date</span>
-                    <span className="font-bold text-slate-800">{leadDetails.event_date}</span>
-                  </div>
+                <div className="flex flex-col border-t border-slate-100 pt-3">
+                  <span className="text-slate-500 text-[13px] mb-0.5">Event Date</span>
+                  <span className="text-slate-800 text-[15px]">{leadDetails.event_date}</span>
                 </div>
               )}
             </div>
@@ -1216,34 +1469,37 @@ export function WhatsAppLiveChat() {
             )}
 
             {/* Quick CRM Navigation */}
-            <div className="pt-2 border-t border-slate-200/80 space-y-2">
-              <span className="font-bold text-slate-700 block text-[11px] uppercase tracking-wider">
+            <div className="bg-transparent px-5 py-4 shadow-sm mb-4 space-y-3">
+              <span className="text-[#008069] font-medium text-[13px] block">
                 CRM Actions
               </span>
               {selectedConv.leadId ? (
                 <>
                   <button
                     onClick={() => navigate(`/leads/${selectedConv.leadId}`)}
-                    className="w-full neo-btn text-xs py-2 flex items-center justify-center gap-1.5 font-semibold"
+                    className="w-full text-left py-2 flex items-center gap-3 text-slate-700 hover:bg-transparent"
                   >
-                    <User size={13} /> Open Full Lead File
+                    <User size={20} className="text-slate-400" /> 
+                    <span className="text-[15px]">Open full lead profile</span>
                   </button>
                   <button
                     onClick={() => navigate('/pipeline')}
-                    className="w-full neo-btn text-xs py-2 flex items-center justify-center gap-1.5 font-semibold"
+                    className="w-full text-left py-2 flex items-center gap-3 text-slate-700 hover:bg-transparent"
                   >
-                    <Package size={13} /> View on Pipeline Board
+                    <Package size={20} className="text-slate-400" /> 
+                    <span className="text-[15px]">View on Pipeline Board</span>
                   </button>
                   <button
                     onClick={() => navigate(`/quotations?leadId=${selectedConv.leadId}`)}
-                    className="w-full neo-btn-primary text-xs py-2 flex items-center justify-center gap-1.5 font-semibold"
+                    className="w-full text-left py-2 flex items-center gap-3 text-slate-700 hover:bg-transparent"
                   >
-                    <FileText size={13} /> Create Quotation
+                    <FileText size={20} className="text-slate-400" /> 
+                    <span className="text-[15px]">Create quotation</span>
                   </button>
                 </>
               ) : (
-                <p className="text-[11px] text-slate-400 italic">
-                  No linked CRM lead yet. A lead is created automatically when the customer inquires.
+                <p className="text-[13px] text-slate-500">
+                  No linked CRM lead yet.
                 </p>
               )}
             </div>
@@ -1254,7 +1510,7 @@ export function WhatsAppLiveChat() {
       {/* ── TEST SIMULATOR MODAL ───────────────────────────────────────────── */}
       {showSimulator && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-fade-in">
-          <div className="neo-card w-full max-w-lg bg-white flex flex-col p-5 space-y-4 shadow-2xl rounded-2xl">
+          <div className="neo-card w-full max-w-lg bg-transparent flex flex-col p-5 space-y-4 shadow-2xl rounded-2xl">
             <div className="flex items-center justify-between border-b border-slate-200/80 pb-3">
               <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
                 <Bot size={18} className="text-emerald-600" /> Test Inbound WhatsApp Simulator
@@ -1318,6 +1574,32 @@ export function WhatsAppLiveChat() {
           </div>
         </div>
       )}
+
+      {/* ── NEW CHAT MODAL ─────────────────────────────────────────────────── */}
+      {showNewChatModal && (
+        <NewChatModal 
+          onClose={() => setShowNewChatModal(false)}
+          onChatCreated={(conv) => {
+            setConversations((prev) => [conv, ...prev]);
+            setSelectedConv(conv);
+            setMobileView('chat');
+          }}
+        />
+      )}
+
+      {/* ── BUSINESS PROFILE MODAL ─────────────────────────────────────────── */}
+      {showBusinessProfile && (
+        <BusinessProfileSettings onClose={() => setShowBusinessProfile(false)} />
+      )}
+      {showManageLabels && (
+        <ManageLabelsModal 
+          labels={dynamicChatLabels} 
+          onClose={() => setShowManageLabels(false)} 
+        />
+      )}
     </div>
   );
 }
+
+
+

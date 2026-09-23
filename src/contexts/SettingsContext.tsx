@@ -15,7 +15,7 @@ const defaultSettings: Settings = {
   companyCity: 'Tiruchengode',
   companyState: 'Tamil Nadu',
   companyPincode: '',
-  companyGstin: '',
+  companyGstin: '33AAICE2698D1ZN',
   companyPhone: '',
   companyEmail: '',
   companyWebsite: '',

@@ -65,7 +65,7 @@ import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import { openWhatsAppWebDirect } from '../services/stageNotificationService';
-
+import { PipelineQuickChatModal } from '../components/Pipeline/PipelineQuickChatModal';
 type StageDraft = {
   id: string;
   label: string;
@@ -137,7 +137,7 @@ function getStagePhase(stageId: string): StagePhase | null {
 const STORAGE_KEY = 'billpro.activePipelineId';
 
 const TONES = [
-  'bg-slate-500/10 text-slate-700 border-slate-500/20',
+  'bg-surface0/10 text-slate-700 border-slate-500/20',
   'bg-sky-500/10 text-sky-700 border-sky-500/20',
   'bg-blue-500/10 text-blue-700 border-blue-500/20',
   'bg-indigo-500/10 text-indigo-700 border-indigo-500/20',
@@ -249,8 +249,8 @@ export default function PipelineBoard() {
   const [confirmModalState, setConfirmModalState] = useState<{
     isOpen: boolean;
     lead: Lead | null;
-    fromStage: PipelineStage;
-    toStage: PipelineStage;
+    fromStage: PipelineStage | { id: string; label: string };
+    toStage: PipelineStage | { id: string; label: string };
   }>({
     isOpen: false,
     lead: null,
@@ -258,6 +258,8 @@ export default function PipelineBoard() {
     toStage: { id: '', label: '' },
   });
 
+  // Quick Chat State
+  const [quickChatLead, setQuickChatLead] = useState<Lead | null>(null);
   // Notes & Reminders Drawer State
   const [notesDrawerState, setNotesDrawerState] = useState<{
     isOpen: boolean;
@@ -629,13 +631,13 @@ export default function PipelineBoard() {
 
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* View Mode Switcher (Kanban vs Table) */}
-          <div className="flex items-center p-1 bg-slate-100 rounded-xl border border-shadow-darker/10">
+          <div className="flex items-center p-1 bg-transparent rounded-xl border border-shadow-darker/10">
             <button
               type="button"
               onClick={() => setViewMode('kanban')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                 viewMode === 'kanban'
-                  ? 'bg-white text-primary-dark shadow-sm'
+                  ? 'bg-transparent text-primary-dark shadow-sm'
                   : 'text-secondary hover:text-primary-dark'
               }`}
             >
@@ -646,7 +648,7 @@ export default function PipelineBoard() {
               onClick={() => setViewMode('table')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                 viewMode === 'table'
-                  ? 'bg-white text-primary-dark shadow-sm'
+                  ? 'bg-transparent text-primary-dark shadow-sm'
                   : 'text-secondary hover:text-primary-dark'
               }`}
             >
@@ -670,7 +672,7 @@ export default function PipelineBoard() {
       </div>
 
       {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom) */}
-      <div className="flex items-center justify-between gap-4 p-2 bg-slate-100/80 rounded-2xl border border-shadow-darker/10 flex-wrap">
+      <div className="flex items-center justify-between gap-4 p-2 bg-transparent rounded-2xl border border-shadow-darker/10 flex-wrap">
         <div className="flex items-center gap-2 overflow-x-auto py-1">
           {pipelines.map((pipe) => {
             const isSelected = pipe.id === activePipeline.id;
@@ -680,8 +682,8 @@ export default function PipelineBoard() {
                 onClick={() => handleSelectPipeline(pipe.id)}
                 className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
                   isSelected
-                    ? 'bg-white text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
-                    : 'text-secondary hover:text-primary-dark hover:bg-white/60'
+                    ? 'bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
+                    : 'text-secondary hover:text-primary-dark hover:bg-transparent'
                 }`}
               >
                 <span>{pipe.name}</span>
@@ -714,7 +716,7 @@ export default function PipelineBoard() {
       </div>
 
       {/* Stage Jump Navigator Ribbon (Bird's-Eye View across 5 Phases) */}
-      <div className="p-3 bg-white/90 rounded-2xl border border-shadow-darker/10 shadow-xs space-y-2">
+      <div className="p-3 bg-transparent rounded-2xl border border-shadow-darker/10 shadow-xs space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
             <Layers size={14} className="text-primary" />
@@ -748,13 +750,13 @@ export default function PipelineBoard() {
                 key={phase.id}
                 className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between ${
                   isPhaseActive
-                    ? 'bg-slate-50 border-shadow-darker/10 hover:border-primary/40 shadow-xs'
-                    : 'bg-slate-100/50 border-dashed border-slate-200 opacity-60'
+                    ? 'bg-transparent border-shadow-darker/10 hover:border-primary/40 shadow-xs'
+                    : 'bg-transparent border-dashed border-slate-200 opacity-60'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1 mb-1">
                   <span className="font-bold text-primary-dark truncate text-[11px]">{phase.shortLabel}</span>
-                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-white border border-shadow-darker/15 text-primary-dark">
+                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark">
                     {phase.count}
                   </span>
                 </div>
@@ -771,8 +773,8 @@ export default function PipelineBoard() {
                         onClick={() => scrollToStage(sId)}
                         className={`text-[10px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${
                           stageCount > 0
-                            ? 'bg-white font-bold text-slate-800 border-shadow-darker/20 hover:border-primary hover:text-primary'
-                            : 'bg-slate-100/80 text-secondary border-slate-200 hover:bg-white'
+                            ? 'bg-transparent font-bold text-slate-800 border-shadow-darker/20 hover:border-primary hover:text-primary'
+                            : 'bg-transparent text-secondary border-slate-200 hover:bg-transparent'
                         }`}
                         title={`Jump to ${stageObj.label} (${stageCount} leads)`}
                       >
@@ -933,7 +935,7 @@ export default function PipelineBoard() {
                     };
 
                     return (
-                      <tr key={lead.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={lead.id} className="hover:bg-transparent transition-colors">
                         <td className="py-3 px-3">
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -972,11 +974,7 @@ export default function PipelineBoard() {
                                 <span>{lead.phone}</span>
                                 <button
                                   type="button"
-                                  onClick={() =>
-                                    navigate(
-                                      `/whatsapp-automation?leadId=${lead.id}&phone=${lead.phone}`
-                                    )
-                                  }
+                                  onClick={() => setQuickChatLead(lead)}
                                   className="text-emerald-600 hover:text-emerald-700 p-0.5 rounded hover:bg-emerald-50"
                                   title="Chat in WhatsApp Live Chat"
                                 >
@@ -1027,7 +1025,7 @@ export default function PipelineBoard() {
                         <td className="py-3 px-3">
                           <select
                             aria-label={`Change stage for ${lead.name}`}
-                            className="text-[11px] font-bold bg-slate-100 rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
+                            className="text-[11px] font-bold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
                             value={lead.status || currentStageObj.id}
                             onChange={(e) => handleQuickMove(lead, e.target.value)}
                           >
@@ -1050,7 +1048,7 @@ export default function PipelineBoard() {
                                   stageName: currentStageObj.label,
                                 })
                               }
-                              className="p-1.5 rounded-lg border border-shadow-darker/10 hover:bg-slate-100 text-slate-700"
+                              className="p-1.5 rounded-lg border border-shadow-darker/10 hover:bg-transparent text-slate-700"
                               title="Notes & Alarms"
                             >
                               <StickyNote
@@ -1084,7 +1082,7 @@ export default function PipelineBoard() {
             onClick={() => scrollPipeline('left')}
             disabled={!canScrollLeft}
             aria-label="Previous stages"
-            className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 z-20 p-2.5 rounded-full bg-surface/95 backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
+            className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
               !canScrollLeft ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
             }`}
           >
@@ -1097,7 +1095,7 @@ export default function PipelineBoard() {
             onClick={() => scrollPipeline('right')}
             disabled={!canScrollRight}
             aria-label="Next stages"
-            className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 z-20 p-2.5 rounded-full bg-surface/95 backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
+            className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
               !canScrollRight ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
             }`}
           >
@@ -1128,7 +1126,7 @@ export default function PipelineBoard() {
                       e.stopPropagation();
                     }}
                     onDrop={() => handleCardDrop(stage.id)}
-                    className="flex-shrink-0 w-14 neo-card border border-shadow-darker/10 bg-slate-100/70 rounded-2xl p-2 flex flex-col items-center justify-between min-h-[360px] cursor-pointer hover:bg-slate-200/60 transition-all group"
+                    className="flex-shrink-0 w-14 neo-card border border-shadow-darker/10 bg-transparent rounded-2xl p-2 flex flex-col items-center justify-between min-h-[360px] cursor-pointer hover:bg-slate-200/60 transition-all group"
                     onClick={() => toggleStageCollapse(stage.id)}
                     title={`Click to expand ${stage.label} (${stageLeads.length} leads)`}
                   >
@@ -1139,12 +1137,12 @@ export default function PipelineBoard() {
                           e.stopPropagation();
                           toggleStageCollapse(stage.id);
                         }}
-                        className="p-1 rounded-md text-secondary hover:text-primary hover:bg-white transition-colors"
+                        className="p-1 rounded-md text-secondary hover:text-primary hover:bg-transparent transition-colors"
                         title="Expand column"
                       >
                         <Maximize2 size={12} />
                       </button>
-                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-white border border-shadow-darker/15 text-primary-dark">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark">
                         {stageLeads.length}
                       </span>
                     </div>
@@ -1169,7 +1167,7 @@ export default function PipelineBoard() {
                   id={`stage-col-${stage.id}`}
                   className={`flex-shrink-0 flex-grow-0 w-80 neo-card space-y-3 border ${stageTone(
                     index
-                  )} bg-slate-50/40 rounded-2xl transition-all`}
+                  )} bg-transparent rounded-2xl transition-all`}
                   onDragOver={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1200,13 +1198,13 @@ export default function PipelineBoard() {
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-surface border border-shadow-darker/15 text-primary-dark shadow-xs">
+                        <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark shadow-xs">
                           {stageLeads.length}
                         </span>
                         <button
                           type="button"
                           onClick={() => toggleStageCollapse(stage.id)}
-                          className="p-1 rounded-md text-secondary hover:text-primary-dark hover:bg-surface/80 transition-colors"
+                          className="p-1 rounded-md text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
                           title="Collapse this column"
                         >
                           <Minimize2 size={12} />
@@ -1232,7 +1230,7 @@ export default function PipelineBoard() {
                             setDragId(lead.id);
                           }}
                           onDragEnd={() => setDragId('')}
-                          className="rounded-2xl bg-surface border border-shadow-darker/10 p-3.5 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all relative overflow-hidden group space-y-2.5"
+                          className="rounded-2xl bg-transparent border border-shadow-darker/10 p-3.5 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all relative overflow-hidden group space-y-2.5"
                         >
                           {/* AI Qualification Accent Strip */}
                           {lead.qualification_status === 'Qualified' && (
@@ -1264,7 +1262,7 @@ export default function PipelineBoard() {
                                 )}
 
                                 {lead.source && (
-                                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-transparent text-slate-700 border border-slate-200">
                                     {lead.source}
                                   </span>
                                 )}
@@ -1290,18 +1288,14 @@ export default function PipelineBoard() {
 
                           {/* Phone & Direct 1-Click WhatsApp Trigger */}
                           {lead.phone && (
-                            <div className="text-xs text-slate-600 flex items-center justify-between font-mono bg-slate-50/80 px-2 py-1 rounded-lg border border-shadow-darker/5">
+                            <div className="text-xs text-slate-600 flex items-center justify-between font-mono bg-transparent px-2 py-1 rounded-lg border border-shadow-darker/5">
                               <div className="flex items-center gap-1.5">
                                 <Phone size={11} className="text-emerald-600" />
                                 <span>{lead.phone}</span>
                               </div>
                               <button
                                 type="button"
-                                onClick={() =>
-                                  navigate(
-                                    `/whatsapp-automation?leadId=${lead.id}&phone=${lead.phone}`
-                                  )
-                                }
+                                onClick={() => setQuickChatLead(lead)}
                                 className="text-[10px] text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-0.5 hover:underline"
                                 title="Chat in WhatsApp Live Chat"
                               >
@@ -1313,7 +1307,7 @@ export default function PipelineBoard() {
 
                           {/* Last Inbound Message Snippet (if available) */}
                           {lead.last_message && (
-                            <div className="text-[11px] text-slate-600 bg-slate-50/80 p-2 rounded-lg border border-shadow-darker/5 line-clamp-2 italic">
+                            <div className="text-[11px] text-slate-600 bg-transparent p-2 rounded-lg border border-shadow-darker/5 line-clamp-2 italic">
                               "{lead.last_message}"
                             </div>
                           )}
@@ -1321,7 +1315,7 @@ export default function PipelineBoard() {
                           {/* Order Specs Matrix (Quantity, Value, Event Date, Delivery) */}
                           <div className="grid grid-cols-2 gap-1.5 text-[11px] pt-1 border-t border-shadow-darker/5">
                             {lead.required_quantity ? (
-                              <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 font-semibold text-primary-dark">
+                              <div className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 font-semibold text-primary-dark">
                                 🎯 {lead.required_quantity} pcs
                               </div>
                             ) : null}
@@ -1334,7 +1328,7 @@ export default function PipelineBoard() {
 
                             {lead.event_name ? (
                               <div
-                                className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary truncate col-span-2"
+                                className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary truncate col-span-2"
                                 title={lead.event_name}
                               >
                                 🏆 {lead.event_name}
@@ -1342,7 +1336,7 @@ export default function PipelineBoard() {
                             ) : null}
 
                             {lead.event_date ? (
-                              <div className="bg-slate-50 px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary">
+                              <div className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary">
                                 📅 {lead.event_date}
                               </div>
                             ) : null}
@@ -1407,7 +1401,7 @@ export default function PipelineBoard() {
                                 onClick={() =>
                                   setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })
                                 }
-                                className="text-[11px] font-bold text-slate-700 hover:text-primary transition-colors flex items-center gap-1 bg-slate-100 hover:bg-primary/10 px-2 py-0.5 rounded-md border border-shadow-darker/5"
+                                className="text-[11px] font-bold text-slate-700 hover:text-primary transition-colors flex items-center gap-1 bg-transparent hover:bg-primary/10 px-2 py-0.5 rounded-md border border-shadow-darker/5"
                                 title="Open Notes, Team Mentions & Reminder Alarms"
                               >
                                 <StickyNote
@@ -1421,7 +1415,7 @@ export default function PipelineBoard() {
                             {/* Quick Stage Move Dropdown */}
                             <select
                               aria-label={`Move stage for ${lead.name}`}
-                              className="text-[11px] font-semibold bg-slate-100 rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
+                              className="text-[11px] font-semibold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
                               value={lead.status || stage.id}
                               onChange={(e) => handleQuickMove(lead, e.target.value)}
                             >
@@ -1480,6 +1474,17 @@ export default function PipelineBoard() {
           })
         }
       />
+
+      {/* Quick Chat Modal */}
+      {quickChatLead && (
+        <PipelineQuickChatModal
+          lead={quickChatLead}
+          onClose={() => setQuickChatLead(null)}
+        />
+      )}
     </div>
   );
 }
+
+
+

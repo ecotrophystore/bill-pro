@@ -624,7 +624,7 @@ export default function LeadDetail() {
 
               {/* Lead Source Badge */}
               {lead.source && (
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-transparent text-slate-700 border border-slate-200">
                   {lead.source}
                 </span>
               )}
@@ -657,7 +657,7 @@ export default function LeadDetail() {
               onChange={(e) => handleStageSelectChange(e.target.value)}
             >
               {activeStages.map((s, idx) => (
-                <option key={s.id} value={s.id} className="bg-surface text-primary-dark font-medium">
+                <option key={s.id} value={s.id} className="bg-transparent text-primary-dark font-medium">
                   {idx + 1}. {s.label}
                 </option>
               ))}
@@ -668,7 +668,7 @@ export default function LeadDetail() {
         {/* Quick Contact & Metrics Strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-shadow-darker/10 text-xs">
           {/* Phone with 1-click WhatsApp web button */}
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5 flex items-center justify-between">
+          <div className="p-2.5 rounded-xl bg-transparent border border-shadow-darker/5 flex items-center justify-between">
             <div>
               <span className="text-secondary font-medium block">Phone</span>
               <span className="font-bold text-primary-dark font-mono">{lead.phone || 'No phone'}</span>
@@ -699,7 +699,7 @@ export default function LeadDetail() {
             )}
           </div>
 
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
+          <div className="p-2.5 rounded-xl bg-transparent border border-shadow-darker/5">
             <span className="text-secondary font-medium block">Quantity</span>
             <span className="font-bold text-primary-dark">
               {lead.required_quantity ? `🎯 ${lead.required_quantity} pieces` : 'Not specified'}
@@ -713,7 +713,7 @@ export default function LeadDetail() {
             </span>
           </div>
 
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-shadow-darker/5">
+          <div className="p-2.5 rounded-xl bg-transparent border border-shadow-darker/5">
             <span className="text-secondary font-medium block">Delivery Deadline</span>
             <span className="font-bold text-primary-dark">
               {lead.delivery_date ? `🚚 ${lead.delivery_date}` : 'TBD'}
@@ -754,7 +754,7 @@ export default function LeadDetail() {
                     ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/20'
                     : isPhasePassed
                     ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                    : 'bg-slate-50 border-slate-200 text-slate-500 opacity-80'
+                    : 'bg-transparent border-slate-200 text-slate-500 opacity-80'
                 }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
@@ -787,7 +787,7 @@ export default function LeadDetail() {
                             ? 'bg-primary text-white shadow-xs font-bold'
                             : isPassed
                             ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                            : 'bg-white/80 text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
+                            : 'bg-transparent text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
                         }`}
                         title={`Click to set stage to: ${stg.label}`}
                       >
@@ -839,7 +839,7 @@ export default function LeadDetail() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'details'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <Award size={14} /> Customer & Order Specs
@@ -850,7 +850,7 @@ export default function LeadDetail() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'notes'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <StickyNote size={14} /> Notes & Reminders ({leadNotes.length || lead.notes_count || 0})
@@ -861,7 +861,7 @@ export default function LeadDetail() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'quotation'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <FileText size={14} /> Quotations ({leadQuotations.length})
@@ -872,7 +872,7 @@ export default function LeadDetail() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'conversation'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <MessageSquare size={14} /> Omnichannel Chat ({messages.length})
@@ -883,7 +883,7 @@ export default function LeadDetail() {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
             activeTab === 'history'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
           }`}
         >
           <History size={14} /> Stage History ({stageHistoryList.length + notificationHistoryList.length})
@@ -1272,7 +1272,7 @@ export default function LeadDetail() {
                     className={`p-3.5 rounded-2xl border text-xs space-y-2 transition-all ${
                       n.is_pinned
                         ? 'bg-amber-50/50 border-amber-200'
-                        : 'bg-slate-50/70 border-shadow-darker/10'
+                        : 'bg-transparent border-shadow-darker/10'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -1281,7 +1281,7 @@ export default function LeadDetail() {
                         <span className="text-[10px] text-secondary">•</span>
                         <span className="text-[10px] text-secondary">{formatDate(n.created_at)}</span>
 
-                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-white border border-shadow-darker/15 text-slate-700">
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-transparent border border-shadow-darker/15 text-slate-700">
                           {n.category || 'General'}
                         </span>
 
@@ -1300,7 +1300,7 @@ export default function LeadDetail() {
                         <button
                           type="button"
                           onClick={() => handleTogglePin(n.id, !!n.is_pinned)}
-                          className={`p-1 rounded hover:bg-white text-secondary ${
+                          className={`p-1 rounded hover:bg-transparent text-secondary ${
                             n.is_pinned ? 'text-amber-600' : 'hover:text-primary'
                           }`}
                           title={n.is_pinned ? 'Unpin note' : 'Pin note to top'}
@@ -1391,7 +1391,7 @@ export default function LeadDetail() {
                 </thead>
                 <tbody className="divide-y divide-shadow-darker/5">
                   {leadQuotations.map((q: any) => (
-                    <tr key={q.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={q.id} className="hover:bg-transparent transition-colors">
                       <td className="py-3 px-3 font-bold text-primary-dark">
                         {q.number || 'Draft Quote'}
                       </td>
@@ -1444,7 +1444,7 @@ export default function LeadDetail() {
                   Unified communication timeline across WhatsApp, Facebook Messenger, Lead Ads, and Instagram.
                 </p>
               </div>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-transparent text-slate-700 border border-slate-200">
                 {messages.length} messages
               </span>
             </div>
@@ -1459,7 +1459,7 @@ export default function LeadDetail() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-3.5 max-h-[450px] overflow-y-auto p-2 bg-slate-50/50 rounded-xl border border-shadow-darker/5">
+              <div className="space-y-3.5 max-h-[450px] overflow-y-auto p-2 bg-transparent rounded-xl border border-shadow-darker/5">
                 {messages.map((m: any, idx: number) => {
                   const isInbound = m.direction === 'inbound';
                   const platformLabel =
@@ -1501,7 +1501,7 @@ export default function LeadDetail() {
                       <div
                         className={`max-w-lg p-3.5 rounded-2xl border shadow-xs whitespace-pre-wrap leading-relaxed ${
                           isInbound
-                            ? 'bg-white text-slate-800 border-shadow-darker/10 rounded-tl-none'
+                            ? 'bg-transparent text-slate-800 border-shadow-darker/10 rounded-tl-none'
                             : 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none'
                         }`}
                       >
@@ -1547,7 +1547,7 @@ export default function LeadDetail() {
                       key={idx}
                       type="button"
                       onClick={() => setComposerText((prev) => `${prev} ${chip.value} `.trim())}
-                      className="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 border border-slate-200 text-primary-dark font-medium transition-colors"
+                      className="px-2 py-0.5 rounded-md bg-transparent hover:bg-slate-200 border border-slate-200 text-primary-dark font-medium transition-colors"
                     >
                       + {chip.label}
                     </button>
@@ -1631,7 +1631,7 @@ export default function LeadDetail() {
                 {stageHistoryList.map((entry, idx) => (
                   <div
                     key={idx}
-                    className="p-3 rounded-xl bg-slate-50 border border-shadow-darker/10 flex items-start justify-between gap-4 text-xs"
+                    className="p-3 rounded-xl bg-transparent border border-shadow-darker/10 flex items-start justify-between gap-4 text-xs"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 font-bold text-primary-dark">
@@ -1685,7 +1685,7 @@ export default function LeadDetail() {
                       <span className="text-[11px] text-secondary">{formatDate(n.sent_at)}</span>
                     </div>
 
-                    <p className="text-slate-800 leading-relaxed font-sans bg-white/80 p-2.5 rounded-lg border border-shadow-darker/5 whitespace-pre-wrap">
+                    <p className="text-slate-800 leading-relaxed font-sans bg-transparent p-2.5 rounded-lg border border-shadow-darker/5 whitespace-pre-wrap">
                       {n.message}
                     </p>
 
@@ -1737,3 +1737,6 @@ export default function LeadDetail() {
     </div>
   );
 }
+
+
+

@@ -123,7 +123,7 @@ export function StageChangeConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-surface neo-card max-w-xl w-full my-8 space-y-5 animate-scale-up border border-shadow-darker/20 shadow-2xl">
+      <div className="bg-transparent neo-card max-w-xl w-full my-8 space-y-5 animate-scale-up border border-shadow-darker/20 shadow-2xl">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-shadow-darker/10 pb-4">
           <div>
@@ -139,14 +139,14 @@ export function StageChangeConfirmModal({
           <button
             onClick={onClose}
             disabled={processing}
-            className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-slate-100 transition-colors"
+            className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Stage Change Breadcrumb */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-shadow-darker/10">
+        <div className="flex items-center justify-between p-3 rounded-xl bg-transparent border border-shadow-darker/10">
           <div className="flex-1">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block">From Stage</span>
             <span className="text-sm font-bold text-slate-700">{fromStage.label}</span>
@@ -163,7 +163,7 @@ export function StageChangeConfirmModal({
         </div>
 
         {/* Customer Summary Card */}
-        <div className="flex items-center justify-between gap-3 text-xs bg-slate-50/50 p-2.5 rounded-lg border border-shadow-darker/5">
+        <div className="flex items-center justify-between gap-3 text-xs bg-transparent p-2.5 rounded-lg border border-shadow-darker/5">
           <div>
             <span className="font-bold text-primary-dark">{lead.name}</span>
             {lead.company && <span className="text-secondary"> ({lead.company})</span>}
@@ -219,7 +219,7 @@ export function StageChangeConfirmModal({
           </div>
 
           {loadingConfig ? (
-            <div className="p-6 text-center text-xs text-secondary bg-slate-50 rounded-xl border border-shadow-darker/10">
+            <div className="p-6 text-center text-xs text-secondary bg-transparent rounded-xl border border-shadow-darker/10">
               <Loader2 size={16} className="animate-spin mx-auto mb-1 text-primary" />
               Loading template preview...
             </div>
@@ -240,7 +240,7 @@ export function StageChangeConfirmModal({
                         <button
                           type="button"
                           onClick={() => openWhatsAppWebDirect(lead.phone || '', renderedWhatsApp)}
-                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-white/90 hover:bg-white px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
+                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-transparent hover:bg-transparent px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
                           title="Open prefilled message in WhatsApp Web directly"
                         >
                           <ExternalLink size={10} /> Open WhatsApp Web
@@ -279,7 +279,7 @@ export function StageChangeConfirmModal({
               ) : null}
 
               {!hasAnyNotification && (
-                <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-shadow-darker/20 text-center text-xs text-secondary">
+                <div className="p-4 rounded-xl bg-transparent border border-dashed border-shadow-darker/20 text-center text-xs text-secondary">
                   No automated customer message configured for this stage. Stage will be updated without sending a message.
                 </div>
               )}
@@ -340,3 +340,6 @@ export function StageChangeConfirmModal({
     </div>
   );
 }
+
+
+

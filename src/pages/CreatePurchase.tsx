@@ -126,9 +126,9 @@ export default function CreatePurchase() {
         try {
           const base64Data = (reader.result as string).split(',')[1];
           await extractData(base64Data, fileToProcess.type, pId, fileToProcess.name);
-        } catch (err) {
+        } catch (err: any) {
           console.error("Extraction failed", err);
-          setErrorMsg("Extraction failed. Please try manual entry.");
+          setErrorMsg(err.message || "Extraction failed. Please try manual entry.");
           setStep('review');
         }
       };
@@ -187,7 +187,7 @@ export default function CreatePurchase() {
 
     } catch (err: any) {
       console.error("Extraction failed", err);
-      setErrorMsg("Extraction failed. You can continue with manual entry.");
+      setErrorMsg(err.message || "Extraction failed. You can continue with manual entry.");
       setStep('review'); // Allow manual entry fallback
     }
   };
@@ -351,7 +351,7 @@ export default function CreatePurchase() {
                 <p className="font-bold flex items-center gap-2"><AlertTriangle size={18}/> Possible Duplicate Detected</p>
                 <p className="text-sm mt-1">An invoice from this vendor with the same number and amount already exists.</p>
               </div>
-              <button onClick={() => setDuplicateWarning(false)} className="px-4 py-2 bg-white rounded shadow text-sm font-bold">Continue Anyway</button>
+              <button onClick={() => setDuplicateWarning(false)} className="px-4 py-2 bg-transparent rounded shadow text-sm font-bold">Continue Anyway</button>
             </div>
           )}
 
@@ -514,3 +514,5 @@ export default function CreatePurchase() {
     </div>
   );
 }
+
+

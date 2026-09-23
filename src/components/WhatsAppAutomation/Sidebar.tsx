@@ -42,7 +42,7 @@ export function Sidebar() {
   };
 
   return (
-    <div className="w-64 bg-white border-r border-shadow-darker/10 flex flex-col h-full shrink-0 z-10">
+    <div className="w-64 bg-transparent border-r border-shadow-darker/10 flex flex-col h-full shrink-0 z-10">
       <div className="p-4 border-b border-shadow-darker/10">
         <h2 className="text-sm font-bold text-primary-dark uppercase tracking-wider flex items-center gap-2">
           <Settings2 size={16} /> Workflow Nodes
@@ -82,3 +82,4 @@ export function Sidebar() {
     </div>
   );
 }
+

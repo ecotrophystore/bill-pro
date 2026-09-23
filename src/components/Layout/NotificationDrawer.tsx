@@ -248,7 +248,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       className="absolute right-0 top-14 w-80 sm:w-96 neo-card !p-0 shadow-2xl border border-shadow-darker/20 z-50 animate-scale-up overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-shadow-darker/10 bg-surface">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-shadow-darker/10 bg-transparent">
         <div className="flex items-center gap-2">
           <Bell size={18} className="text-primary" />
           <span className="font-bold text-sm text-primary-dark">Notifications</span>
@@ -287,7 +287,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       </div>
 
       {/* Notifications List */}
-      <div className="max-h-[360px] overflow-y-auto divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-surface/95">
+      <div className="max-h-[360px] overflow-y-auto divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-transparent">
         {loading ? (
           <div className="py-12 flex items-center justify-center text-secondary">
             <Loader2 size={24} className="animate-spin text-primary mr-2" />
@@ -309,7 +309,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
                 notif.is_read ? 'hover:bg-shadow-darker/5 opacity-75' : 'bg-primary/5 hover:bg-primary/10'
               )}
             >
-              <div className="w-8 h-8 rounded-lg bg-surface shadow-neo-surface flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-8 h-8 rounded-lg bg-transparent shadow-neo-surface flex items-center justify-center shrink-0 mt-0.5">
                 {getIcon(notif.type)}
               </div>
               <div className="flex-1 min-w-0">
@@ -332,7 +332,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-shadow-darker/10 bg-surface/80 flex items-center justify-between text-[11px] text-secondary">
+      <div className="px-4 py-2 border-t border-shadow-darker/10 bg-transparent flex items-center justify-between text-[11px] text-secondary">
         <span>System updates & live reminders</span>
         <button
           onClick={() => {
@@ -347,3 +347,4 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
     </div>
   );
 }
+

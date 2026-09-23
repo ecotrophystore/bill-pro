@@ -41,7 +41,7 @@ export function PipelineReassignBanner({
         <button
           type="button"
           onClick={onDismiss}
-          className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-shadow-darker/10 text-secondary hover:text-primary-dark hover:bg-slate-100 transition-colors"
+          className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-shadow-darker/10 text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
         >
           Keep Current Pipeline
         </button>
@@ -57,3 +57,4 @@ export function PipelineReassignBanner({
     </div>
   );
 }
+
