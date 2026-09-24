@@ -436,29 +436,10 @@ export function WhatsAppLiveChat() {
     try {
       const cleanPhone = String(selectedConv!.participantPhone).replace(/\D/g, '');
       const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-      let sentViaFunction = false;
-
-      // 1. Try secure backend Callable Function first
-      if (functions && messagePayload.type === 'text') {
-        try {
-          const sendFn = httpsCallable(functions, 'sendWhatsAppChatMessage');
-          await sendFn({
-            conversationId: selectedConv!.id,
-            leadId: selectedConv!.leadId || '',
-            phone: finalPhone,
-            message: textForDb
-          });
-          sentViaFunction = true;
-        } catch (fnErr: any) {
-          console.warn('Backend Cloud Function fallback to direct Meta Cloud API:', fnErr);
-        }
-      }
-
-      // 2. Direct Meta Graph API fallback if Cloud Function not yet deployed
-      if (!sentViaFunction) {
-        let phoneId = '1263075550230396';
-        let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
-        let version = 'v18.0';
+      // Direct Meta Cloud API Dispatch (Instant & No CORS / 404 errors)
+      let phoneId = '1263075550230396';
+      let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
+      let version = 'v18.0';
 
         if (db) {
           try {
@@ -531,7 +512,6 @@ export function WhatsAppLiveChat() {
             });
           }
         }
-      }
 
       setInputText('');
       scrollToBottom(true);
@@ -656,6 +636,16 @@ export function WhatsAppLiveChat() {
       return true;
     });
   }, [conversations, searchQuery, filterType]);
+
+  // Check if conversation is outside the 24-hour Meta Customer Care window
+  const isOutside24hWindow = useMemo(() => {
+    if (!selectedConv) return false;
+    const replyTime = selectedConv.lastCustomerReplyAt;
+    if (!replyTime) return true; // Customer hasn't replied yet
+    const t = replyTime.toMillis ? replyTime.toMillis() : replyTime.seconds ? replyTime.seconds * 1000 : new Date(replyTime).getTime();
+    if (!t || isNaN(t)) return true;
+    return (Date.now() - t) > (24 * 60 * 60 * 1000);
+  }, [selectedConv?.lastCustomerReplyAt, selectedConv?.id]);
 
   // Format timestamp helper
   const formatTime = (ts: any) => {
@@ -997,6 +987,20 @@ export function WhatsAppLiveChat() {
                     <span className="hidden md:inline">Open Lead</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rawP = String(selectedConv.participantPhone || '').replace(/\D/g, '');
+                    const finalP = rawP.length === 10 ? `91${rawP}` : rawP;
+                    window.open(`https://wa.me/${finalP}`, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="text-xs font-bold px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 transition-all shadow-2xs"
+                  title="Open chat directly in WhatsApp Web (bypasses Meta Cloud API 24h restrictions)"
+                >
+                  <ExternalLink size={13} />
+                  <span className="hidden sm:inline">WhatsApp Web</span>
+                </button>
               </div>
             </div>
 
@@ -1082,15 +1086,43 @@ export function WhatsAppLiveChat() {
                             {isOutbound && (
                               <span className="inline-flex items-center ml-0.5">
                                 {m.status === 'read' ? (
-                                  <CheckCheck size={13} className="text-[#53bdeb]" />
+                                  <CheckCheck size={13} className="text-[#53bdeb]" title="Read" />
                                 ) : m.status === 'delivered' ? (
-                                  <CheckCheck size={13} className="text-emerald-200" />
+                                  <CheckCheck size={13} className="text-emerald-200" title="Delivered" />
+                                ) : m.status === 'failed' ? (
+                                  <span className="inline-flex items-center gap-1 text-rose-300 font-bold" title={m.errorMessage || 'Failed to deliver'}>
+                                    <AlertCircle size={13} className="text-rose-400" />
+                                    <span className="text-[9px] text-rose-300">Undelivered</span>
+                                  </span>
                                 ) : (
-                                  <Check size={13} className="text-emerald-200" />
+                                  <Check size={13} className="text-emerald-200" title="Sent to Meta" />
                                 )}
                               </span>
                             )}
                           </div>
+
+                          {/* Failure Warning with 1-Click WhatsApp Web Resend */}
+                          {isOutbound && m.status === 'failed' && (
+                            <div className="mt-1.5 pt-1.5 border-t border-rose-400/30 text-[11px] text-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                              <span className="flex items-center gap-1">
+                                <AlertCircle size={11} className="shrink-0 text-rose-300" />
+                                {m.errorCode === 131047 || m.errorMessage?.includes('Re-engagement')
+                                  ? 'Blocked: >24h since customer reply'
+                                  : (m.errorMessage || 'Delivery failed')}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const p = String(selectedConv?.participantPhone || m.senderPhone || '').replace(/\D/g, '');
+                                  const finalP = p.length === 10 ? `91${p}` : p;
+                                  window.open(`https://wa.me/${finalP}?text=${encodeURIComponent(m.content)}`, '_blank', 'noopener,noreferrer');
+                                }}
+                                className="underline font-bold text-white hover:text-emerald-200 flex items-center gap-1 shrink-0"
+                              >
+                                Send via WhatsApp Web <ExternalLink size={10} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </React.Fragment>
@@ -1187,6 +1219,29 @@ export function WhatsAppLiveChat() {
 
             {/* Chat Input Bar */}
             <div className="bg-transparent border-t border-slate-200/80 p-3 shrink-0 relative">
+              {/* Meta 24-Hour Policy Window Notice */}
+              {isOutside24hWindow && (
+                <div className="px-3 py-2 mb-2 bg-amber-500/10 border border-amber-300/80 rounded-xl text-amber-950 text-[11px] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 animate-fade-in shadow-2xs">
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                    <span>
+                      <strong>Meta 24h Window Notice:</strong> Customer last replied &gt;24h ago. Regular Cloud API text will fail delivery.
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const p = String(selectedConv?.participantPhone || '').replace(/\D/g, '');
+                      const finalP = p.length === 10 ? `91${p}` : p;
+                      window.open(`https://wa.me/${finalP}?text=${encodeURIComponent(inputText || '')}`, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="text-emerald-700 hover:text-emerald-900 font-bold underline shrink-0 flex items-center gap-1 self-start sm:self-auto"
+                  >
+                    Open WhatsApp Web to Send <ExternalLink size={10} />
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2">
                   <button

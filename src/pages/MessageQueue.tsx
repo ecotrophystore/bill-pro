@@ -195,7 +195,7 @@ export default function MessageQueue() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm hidden md:table">
               <thead>
                 <tr className="text-left text-secondary border-b border-shadow-darker/10">
                   <th className="py-3 pr-4 font-semibold">Time</th>
@@ -240,6 +240,58 @@ export default function MessageQueue() {
                 ))}
               </tbody>
             </table>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-shadow-darker/10">
+              {items.map((item) => (
+                <div key={item.id} className="py-4 space-y-3">
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <Link to={`/leads/${item.lead_id}`} className="font-bold text-primary-dark hover:underline truncate block">
+                        {item.lead_id}
+                      </Link>
+                      <div className="text-[10px] text-secondary mt-0.5">{item.pipeline_id}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                        item.status === 'queued'
+                          ? 'bg-warning/10 text-warning'
+                          : item.status === 'sent'
+                            ? 'bg-success/10 text-success'
+                            : item.status === 'failed'
+                              ? 'bg-error/10 text-error'
+                              : 'bg-secondary/10 text-secondary'
+                      }`}>
+                        {item.status}
+                      </span>
+                      <div className="text-[10px] text-secondary mt-1">{formatTs(item.created_at)}</div>
+                    </div>
+                  </div>
+
+                  <div className="bg-shadow-darker/5 p-2 rounded-lg text-xs space-y-1">
+                    <div className="flex justify-between">
+                      <span className="text-secondary font-medium">Template:</span>
+                      <span className="font-semibold text-primary-dark">{item.template_id}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-secondary font-medium">Channel:</span>
+                      <span className="text-secondary capitalize">{item.channel}</span>
+                    </div>
+                  </div>
+
+                  {item.error && (
+                    <div className="text-[10px] text-error font-semibold bg-error/5 p-2 rounded-lg border border-error/10">
+                      Error: {item.error}
+                    </div>
+                  )}
+
+                  <div className="text-xs text-secondary bg-white p-2 border border-shadow-darker/10 rounded-lg">
+                    <div className="font-semibold text-primary-dark pb-1 border-b border-shadow-darker/5 mb-1">{item.subject || 'No subject'}</div>
+                    <div className="whitespace-pre-wrap line-clamp-3">{item.body}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

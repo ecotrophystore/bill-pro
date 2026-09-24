@@ -24,7 +24,7 @@ export default function CreateCashMemo() {
   const [isWalkIn, setIsWalkIn] = useState(true);
   const [walkInName, setWalkInName] = useState('Walk-in Customer');
   const [items, setItems] = useState<(Partial<LineItem> & { priceTier?: 'retail' | 'wholesale' })[]>([
-    { description: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 0, priceTier: 'retail' }
+    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 0, priceTier: 'retail' }
   ]);
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Cash');
@@ -95,7 +95,7 @@ export default function CreateCashMemo() {
     }
   }, [location.state, loadingData, customers, products]);
 
-  const addItem = () => setItems([...items, { description: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 0, priceTier: 'retail' }]);
+  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 0, priceTier: 'retail' }]);
   
   const removeItem = (index: number) => {
     if (items.length > 1) {
@@ -390,6 +390,17 @@ export default function CreateCashMemo() {
                         setItems(newItems);
                       }}
                       placeholder="Product or Service..."
+                    />
+                    <SpeechInput
+                      type="text"
+                      className="neo-input w-full text-xs mt-2"
+                      placeholder="Additional product notes (optional)..."
+                      value={item.desc || ''}
+                      onChange={(e: any) => {
+                        const newItems = [...items];
+                        newItems[index].desc = e.target.value;
+                        setItems(newItems);
+                      }}
                     />
                   </div>
                   <div className="w-full sm:w-28 space-y-1">

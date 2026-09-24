@@ -46,8 +46,8 @@ export function MetaSecretSetupModal({ onClose }: MetaSecretSetupModalProps) {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-shadow-darker/50 backdrop-blur-sm animate-fade-in">
-      <div className="neo-card w-full max-w-lg bg-transparent flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4 bg-shadow-darker/50 backdrop-blur-sm animate-fade-in">
+      <div className="neo-card w-full max-w-lg bg-transparent flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]">
         <div className="flex justify-between items-center p-4 border-b border-shadow-darker/10">
           <h3 className="font-bold text-primary-dark">Secret Setup Instructions</h3>
           <button onClick={onClose} className="p-2 hover:bg-shadow-darker/5 rounded-full transition-colors text-secondary">

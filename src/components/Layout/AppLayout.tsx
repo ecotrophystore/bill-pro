@@ -182,7 +182,7 @@ export function AppLayout() {
         onMouseLeave={() => setIsHovered(false)}
         className={clsx(
           'fixed z-50 transition-all duration-300 transform flex flex-col',
-          'bg-transparent backdrop-blur-xl border border-shadow-darker/20 shadow-2xl',
+          'bg-surface border border-shadow-darker/20 shadow-2xl',
           'md:left-4 md:top-4 md:bottom-4 md:rounded-2xl',
           mobileMenuOpen ? 'inset-y-0 left-0 w-64 translate-x-0' : '-translate-x-full md:translate-x-0',
           !mobileMenuOpen && (isHovered ? 'md:w-64' : 'md:w-[72px]')

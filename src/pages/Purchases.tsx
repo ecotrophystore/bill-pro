@@ -252,7 +252,8 @@ export default function Purchases() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
                 <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
@@ -312,6 +313,60 @@ export default function Purchases() {
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto mb-2" /> Loading...</div>
+            ) : filteredPurchases.length === 0 ? (
+              <div className="p-8 text-center text-secondary py-12">No purchase records found.</div>
+            ) : filteredPurchases.map((purchase) => (
+              <div key={purchase.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-primary-dark text-lg leading-tight">{purchase.vendor?.name || 'Unknown'}</div>
+                    <div className="text-xs text-secondary mt-0.5">{purchase.category || 'General'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-primary-dark text-sm">₹ {(purchase.grandTotal || purchase.amount || 0).toLocaleString()}</div>
+                    <div className="text-secondary font-medium text-xs mt-0.5">
+                      {purchase.createdAt?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) || purchase.date?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) || '-'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center text-sm">
+                  <div className="font-mono text-[11px] text-secondary">
+                    Ref: {purchase.invoice?.invoice_number || purchase.reference || 'N/A'}
+                  </div>
+                  <button 
+                    onClick={() => toggleStatus(purchase)}
+                    className={`cursor-pointer transition-colors px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                      purchase.status === 'cleared' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 
+                      purchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
+                      purchase.status === 'flagged' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                    }`}>
+                    {purchase.status}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                  <button 
+                    onClick={() => handleEditPurchase(purchase)}
+                    className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold" 
+                  >
+                     <Edit size={14} /> Edit
+                  </button>
+                  <button 
+                    onClick={() => deletePurchase(purchase.id)}
+                    className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-red-600 transition-colors" 
+                  >
+                     <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

@@ -1378,7 +1378,7 @@ export default function LeadDetail() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
+              <table className="w-full text-xs text-left hidden md:table">
                 <thead>
                   <tr className="border-b border-shadow-darker/10 text-secondary">
                     <th className="py-2.5 px-3 font-bold">Quote #</th>
@@ -1425,6 +1425,57 @@ export default function LeadDetail() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden divide-y divide-shadow-darker/10">
+                {leadQuotations.map((q: any) => (
+                  <div key={q.id} className="py-4 space-y-3">
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <div className="font-bold text-primary-dark">{q.number || 'Draft Quote'}</div>
+                        <div className="text-[10px] text-secondary mt-0.5">{formatDate(q.created_at)}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="font-bold text-emerald-800">
+                          ₹{(q.total_amount || q.total || 0).toLocaleString('en-IN')}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-shadow-darker/5 p-2 rounded-lg text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">Items:</span>
+                        <span className="text-slate-700 truncate max-w-[150px]">
+                          {q.items?.length
+                            ? `${q.items.length} item(s) (${q.items[0]?.description || 'Custom Trophy'})`
+                            : 'General Estimate'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">Advance:</span>
+                        <span>
+                          {q.advance_amount ? (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              ₹{q.advance_amount} Adv Paid
+                            </span>
+                          ) : (
+                            <span className="text-secondary text-[10px]">No advance recorded</span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end pt-2">
+                      <Link
+                        to={`/quotations/edit/${q.id}`}
+                        className="neo-btn text-[11px] px-4 py-1.5 font-bold inline-flex items-center gap-1 text-primary w-full justify-center"
+                      >
+                        View / Edit
+                      </Link>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

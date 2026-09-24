@@ -127,10 +127,10 @@ export function StageChangeConfirmModal({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-shadow-darker/10 pb-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-bold text-primary tracking-wide uppercase">
-              <span>{pipelineName}</span>
-              <span>•</span>
-              <span className="text-secondary font-medium">Stage Transition</span>
+            <div className="flex items-center flex-wrap gap-1.5 text-xs font-bold text-primary tracking-wide uppercase">
+              <span className="truncate max-w-full">{pipelineName}</span>
+              <span className="shrink-0 text-shadow-darker/20">•</span>
+              <span className="text-secondary font-medium shrink-0">Stage Transition</span>
             </div>
             <h2 className="text-xl font-bold text-primary-dark mt-1">
               Move Customer Stage
@@ -146,17 +146,17 @@ export function StageChangeConfirmModal({
         </div>
 
         {/* Stage Change Breadcrumb */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-transparent border border-shadow-darker/10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-transparent border border-shadow-darker/10 gap-3">
           <div className="flex-1">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block">From Stage</span>
-            <span className="text-sm font-bold text-slate-700">{fromStage.label}</span>
+            <span className="text-sm font-bold text-slate-700 block mt-0.5">{fromStage.label}</span>
           </div>
-          <div className="px-3 text-primary">
+          <div className="px-1 text-primary rotate-90 sm:rotate-0 self-center shrink-0">
             <ArrowRight size={18} className="animate-pulse" />
           </div>
-          <div className="flex-1 text-right">
+          <div className="flex-1 sm:text-right">
             <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">To Stage</span>
-            <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+            <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 inline-block mt-0.5">
               {toStage.label}
             </span>
           </div>
@@ -228,11 +228,11 @@ export function StageChangeConfirmModal({
               {/* WhatsApp Bubble Preview */}
               {config?.whatsapp_enabled && renderedWhatsApp ? (
                 <div className="p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs relative">
-                  <div className="flex items-center justify-between mb-1.5 text-emerald-800 font-bold">
-                    <span className="flex items-center gap-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2 text-emerald-800 font-bold">
+                    <span className="flex items-center gap-1 shrink-0">
                       <Phone size={12} /> WhatsApp Message
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[10px] text-emerald-600 font-normal">
                         To: {lead.phone || 'No phone'}
                       </span>
@@ -240,7 +240,7 @@ export function StageChangeConfirmModal({
                         <button
                           type="button"
                           onClick={() => openWhatsAppWebDirect(lead.phone || '', renderedWhatsApp)}
-                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-transparent hover:bg-transparent px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
+                          className="inline-flex items-center shrink-0 gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-transparent hover:bg-transparent px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
                           title="Open prefilled message in WhatsApp Web directly"
                         >
                           <ExternalLink size={10} /> Open WhatsApp Web

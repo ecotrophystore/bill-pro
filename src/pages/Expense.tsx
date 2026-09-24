@@ -1058,7 +1058,7 @@ export default function ExpensePage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs border-collapse hidden md:table">
               <thead>
                 <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
                   <th className="p-3">Date</th>
@@ -1153,6 +1153,97 @@ export default function ExpensePage() {
                 ))}
               </tbody>
             </table>
+
+            {/* Mobile Card View for Staged Preview */}
+            <div className="md:hidden divide-y divide-shadow-darker/10 border-t border-shadow-darker/10">
+              {previewWithRunningCash.map((row) => (
+                <div key={row.id} className="p-4 space-y-3">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <input 
+                        type="date" 
+                        value={row.date} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'date', e.target.value)} 
+                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-semibold text-primary-dark"
+                      />
+                      <input 
+                        type="text" 
+                        value={row.member} 
+                        placeholder="Member"
+                        onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
+                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary-dark"
+                      />
+                      <input 
+                        type="text" 
+                        value={row.purpose} 
+                        placeholder="Purpose"
+                        onChange={(e) => handleEditPreviewRow(row.id, 'purpose', e.target.value)} 
+                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none text-primary-dark"
+                      />
+                    </div>
+                    <div className="flex-shrink-0 text-right space-y-2 w-24">
+                      <div>
+                        <span className="text-[10px] text-secondary block">Req:</span>
+                        <input 
+                          type="number" 
+                          value={row.requested} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'requested', parseFloat(e.target.value))} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full text-right outline-none text-secondary"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-secondary block">Paid:</span>
+                        <input 
+                          type="number" 
+                          value={row.paid} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'paid', parseFloat(e.target.value))} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full text-right outline-none font-bold text-primary-dark"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-secondary">Tax Status</span>
+                      <select 
+                        value={row.taxStatus} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'taxStatus', e.target.value)}
+                        className="bg-transparent text-xs w-full outline-none border-b border-dashed border-secondary/40"
+                      >
+                        <option value="GST">GST</option>
+                        <option value="Non-GST">Non-GST</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-secondary">Mode</span>
+                      <select 
+                        value={row.paymentMode} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'paymentMode', e.target.value)}
+                        className="bg-transparent text-xs w-full outline-none border-b border-dashed border-secondary/40"
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank">Bank</option>
+                        <option value="Card">Card</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-3 border-t border-shadow-darker/5">
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] text-secondary">GST: ₹{row.gstAmount.toLocaleString('en-IN')}</div>
+                      <div className={`text-[11px] font-black ${row.runningCash < 0 ? 'text-error' : 'text-[#004D40]'}`}>
+                        Run: ₹{row.runningCash.toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                    <button onClick={() => handleRemovePreviewRow(row.id)} className="neo-btn p-2 text-secondary hover:text-error transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -1300,7 +1391,8 @@ export default function ExpensePage() {
               <p className="text-xs opacity-75 mt-1">Add a manual expense or import a spreadsheet above to begin.</p>
             </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
+            {/* Desktop Table View */}
+            <table className="w-full text-left text-xs border-collapse hidden md:table">
               <thead>
                 <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
                   <th className="p-3">Date</th>
@@ -1352,6 +1444,56 @@ export default function ExpensePage() {
                 ))}
               </tbody>
             </table>
+          )}
+          
+          {/* Mobile Card View for Saved Ledger */}
+          {!loadingExpenses && filteredReportList.length > 0 && (
+            <div className="md:hidden divide-y divide-shadow-darker/10 border-t border-shadow-darker/10">
+              {filteredReportList.map((item) => (
+                <div key={item.id} className="p-4 space-y-3 group hover:bg-shadow-darker/5 transition-colors">
+                  <div className="flex justify-between items-start gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-primary-dark text-sm truncate">{item.member}</div>
+                      <div className="text-xs text-secondary mt-0.5 truncate" title={item.purpose}>{item.purpose}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</div>
+                      <div className="text-[10px] text-secondary mt-0.5">{item.date}</div>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2 text-[10px]">
+                    <div><span className="text-secondary">Req:</span> ₹{item.requested?.toLocaleString('en-IN') || '0'}</div>
+                    <div className="text-right">
+                      <span className={`px-1.5 py-0.5 rounded font-bold ${item.taxStatus === 'GST' ? 'bg-primary/10 text-primary' : 'bg-shadow-darker/10 text-secondary'}`}>
+                        {item.taxStatus}
+                      </span>
+                    </div>
+                    <div><span className="text-secondary">GST:</span> ₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</div>
+                    <div className="text-right">
+                      <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono">{item.paymentMode}</span>
+                    </div>
+                  </div>
+
+                  {(item.billNo || item.notes) && (
+                    <div className="text-[10px] text-secondary pt-2 border-t border-shadow-darker/5 space-y-1">
+                      {item.billNo && <div><span className="font-semibold">Bill No:</span> {item.billNo}</div>}
+                      {item.notes && <div className="truncate" title={item.notes}><span className="font-semibold">Notes:</span> {item.notes}</div>}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end pt-2">
+                    <button 
+                      onClick={() => handleDeleteSavedExpense(item.id)} 
+                      className="neo-btn p-2 hover:text-error text-secondary transition-colors"
+                      title="Delete from Firestore"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       </div>

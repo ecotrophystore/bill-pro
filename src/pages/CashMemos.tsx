@@ -158,6 +158,10 @@ export default function CashMemos() {
     }
   };
 
+  const displayMemos = memos
+    .filter(m => m.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[m.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(m => statusFilter === 'all' || (m.payment_status || 'unpaid') === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -227,7 +231,8 @@ export default function CashMemos() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Cash Memo Number</th>
@@ -243,12 +248,9 @@ export default function CashMemos() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Indexing memos...
                 </td></tr>
-              ) : memos.length === 0 ? (
+              ) : displayMemos.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No cash memos found.</td></tr>
-              ) : memos
-                  .filter(m => m.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[m.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(m => statusFilter === 'all' || (m.payment_status || 'unpaid') === statusFilter)
-                  .map((memo) => (
+              ) : displayMemos.map((memo) => (
                 <tr key={memo.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{memo.number}</td>
                   <td className="p-4 text-secondary">
@@ -291,48 +293,95 @@ export default function CashMemos() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center items-center gap-2">
-                      <button 
-                        onClick={() => navigate(`/cash-memos/edit/${memo.id}`)}
-                        className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Cash Memo"
-                      >
-                        <Edit size={18} />
-                      </button>
+                      <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Cash Memo"><Edit size={18} /></button>
                       {memo.payment_status === 'paid' ? (
                         <>
-                          <button 
-                            onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)}
-                            className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                            title="View PDF"
-                          >
-                            <FileText size={18} />
-                          </button>
-                          <button 
-                            onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)}
-                            className="p-2 text-secondary hover:text-primary-dark transition-colors"
-                            title="Download"
-                          >
-                            <Download size={18} />
-                          </button>
+                          <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                          <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
                         </>
                       ) : (
-                        <span className="text-xs text-secondary/60 italic max-w-[200px] leading-tight">
-                          Mark this Cash Memo as Paid to enable PDF download.
+                        <span className="text-[10px] text-secondary/60 italic max-w-[120px] leading-tight text-center">
+                          Mark Paid to download
                         </span>
                       )}
-                      <button 
-                        onClick={() => deleteCashMemo(memo.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Cash Memo"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => deleteCashMemo(memo.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Cash Memo"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Indexing memos...
+              </div>
+            ) : displayMemos.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No cash memos found.</div>
+            ) : displayMemos.map((memo) => (
+              <div key={memo.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{memo.number}</h3>
+                    <p className="text-secondary font-medium mt-0.5">
+                      {memo.customer_id === 'walk_in' ? (
+                        <span className="flex items-center gap-1 italic"><User size={12} /> {memo.customer_name || 'Walk-in Customer'}</span>
+                      ) : (
+                        customers[memo.customer_id]?.name || 'Loading Profile...'
+                      )}
+                    </p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {memo.created_at?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {memo.grand_total?.toLocaleString()}</div>
+                    <select 
+                      value={memo.payment_status || 'unpaid'}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        const isPaid = newStatus === 'paid';
+                        try {
+                          await updateDoc(doc(db, 'cash_memos', memo.id), {
+                            payment_status: newStatus,
+                            payment_date: isPaid ? new Date().toISOString().split('T')[0] : null,
+                            advance_amount: isPaid ? (memo.grand_total || 0) : 0,
+                            balance_amount: isPaid ? 0 : (memo.grand_total || 0),
+                          });
+                        } catch (err) {
+                          alert("Failed to update payment status.");
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider cursor-pointer border-none bg-transparent ${
+                        memo.payment_status === 'paid' ? 'bg-green-100 text-green-700' : memo.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      <option value="unpaid">UNPAID</option>
+                      <option value="paid">PAID</option>
+                      <option value="partial">PARTIAL</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-1 pt-2 border-t border-shadow-darker/5">
+                  <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
+                  {memo.payment_status === 'paid' ? (
+                    <>
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
+                    </>
+                  ) : (
+                    <div className="flex-[2] flex justify-center py-2 text-[10px] text-secondary/60 italic">
+                      Mark Paid to download PDF
+                    </div>
+                  )}
+                  <button onClick={() => deleteCashMemo(memo.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

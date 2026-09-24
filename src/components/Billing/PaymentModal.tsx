@@ -154,8 +154,8 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="bg-transparent w-full max-w-2xl rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+      <div className="bg-surface w-full max-w-2xl sm:rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]">
         <div className="p-6 border-b border-shadow-darker/10 flex justify-between items-center bg-primary-light/10">
           <div>
             <h2 className="text-xl font-bold text-primary-dark">Manage Payments</h2>
@@ -170,10 +170,10 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
           {document.balance_amount !== undefined && document.balance_amount > 0 && (
             <div className="bg-shadow-darker/5 p-5 rounded-xl border border-shadow-darker/10 space-y-4">
               <h3 className="font-semibold text-primary-dark">Record New Payment</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Amount</label>
-                  <input type="number" className="neo-input w-full" value={amount || ''} onChange={e => setAmount(parseFloat(e.target.value) || 0)} max={document.balance_amount} />
+                  <input type="number" inputMode="decimal" className="neo-input w-full text-base" value={amount || ''} onChange={e => setAmount(parseFloat(e.target.value) || 0)} max={document.balance_amount} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Method</label>
@@ -191,21 +191,23 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Date</label>
-                  <input type="date" className="neo-input w-full" value={date} onChange={e => setDate(e.target.value)} />
+                  <input type="date" className="neo-input w-full text-base" value={date} onChange={e => setDate(e.target.value)} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Reference</label>
-                  <input type="text" className="neo-input w-full" placeholder="Optional" value={reference} onChange={e => setReference(e.target.value)} />
+                  <input type="text" className="neo-input w-full text-base" placeholder="Optional" value={reference} onChange={e => setReference(e.target.value)} />
                 </div>
               </div>
-              <button 
-                onClick={handleAddPayment}
-                disabled={isSubmitting || amount <= 0}
-                className="neo-btn-primary w-full flex items-center justify-center gap-2"
-              >
-                {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-                Add Payment
-              </button>
+              <div className="pt-2">
+                <button 
+                  onClick={handleAddPayment}
+                  disabled={isSubmitting || amount <= 0}
+                  className="neo-btn-primary w-full flex items-center justify-center gap-2 sticky bottom-4 z-10 shadow-xl min-h-[48px]"
+                >
+                  {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                  Add Payment
+                </button>
+              </div>
             </div>
           )}
 
@@ -248,6 +250,9 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
               </div>
             )}
           </div>
+        </div>
+        <div className="p-4 border-t border-shadow-darker/10 flex justify-end bg-primary-light/5">
+          <button onClick={onClose} className="neo-btn">Close</button>
         </div>
       </div>
     </div>

@@ -334,7 +334,7 @@ export default function CustomerLibrary() {
       {/* Modern Modal Dialog for Adding/Editing Customer */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-          <div className="bg-transparent w-full max-w-lg rounded-card shadow-neo-hover p-6 border border-shadow-darker/10">
+          <div className="bg-surface w-full max-w-lg rounded-card shadow-neo-hover p-6 border border-shadow-darker/10">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-primary-dark">{editingCustomer ? 'Edit Customer' : 'Add New Customer'}</h2>
               <button 

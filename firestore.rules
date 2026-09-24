@@ -132,10 +132,16 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
     
+    // PAYMENTS COLLECTION
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
     // TRANSACTIONS COLLECTION (Bank Recon)
     match /transactions/{transactionId} {
-      allow read: if isAdmin() || isAccounts();
-      allow write: if isAdmin() || isAccounts();
+      allow read: if isAdmin() || isAccounts() || isSales();
+      allow write: if isAdmin() || isAccounts() || isSales();
     }
     
     // STATEMENT LOGS (Bank Recon)

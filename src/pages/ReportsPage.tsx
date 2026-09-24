@@ -326,7 +326,7 @@ export default function ReportsPage() {
 
       {showConfig && (
         <div className="fixed inset-0 bg-shadow-darker/20 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-transparent rounded-2xl shadow-neo-raised w-full max-w-md p-6 border border-shadow-darker/10">
+          <div className="bg-surface rounded-2xl shadow-neo-raised w-full max-w-md p-6 border border-shadow-darker/10">
              <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold text-primary-dark tracking-tight">Report Configuration</h3>
                 <button onClick={() => setShowConfig(false)} className="p-2 hover:bg-shadow-darker/5 rounded-full transition-colors text-secondary">

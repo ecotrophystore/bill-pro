@@ -72,8 +72,8 @@ export function BusinessProfileSettings({ onClose }: BusinessProfileSettingsProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-      <div className="neo-card w-full max-w-md bg-transparent flex flex-col shadow-2xl rounded-2xl overflow-hidden h-[90vh] md:h-auto md:max-h-[85vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+      <div className="neo-card w-full max-w-md bg-transparent flex flex-col shadow-2xl sm:rounded-2xl overflow-hidden h-[100dvh] md:h-auto md:max-h-[85vh]">
         
         {/* Header */}
         <div className="bg-[#008069] text-white p-4 flex items-center justify-between shrink-0">

@@ -314,7 +314,7 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
         </div>
 
         {/* Results List */}
-        <div className="max-h-[60vh] overflow-y-auto p-2 divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-transparent">
+        <div className="max-h-[calc(100dvh-140px)] sm:max-h-[60vh] overflow-y-auto p-2 divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-transparent">
           {allResults.length === 0 ? (
             <div className="py-12 text-center text-secondary">
               <Sparkles size={32} className="mx-auto mb-2 opacity-30 text-primary" />

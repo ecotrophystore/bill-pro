@@ -394,7 +394,7 @@ export default function VoiceDictation({ onParsedItems, functionName = 'parseVoi
 
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div className="bg-transparent border border-shadow-darker/10 rounded-3xl w-full max-w-lg shadow-neo-raised flex flex-col overflow-hidden animate-fade-in">
+          <div className="bg-surface border border-shadow-darker/10 rounded-3xl w-full max-w-lg shadow-neo-raised flex flex-col overflow-hidden animate-fade-in">
             {/* Modal Header */}
             <div className="flex justify-between items-center p-6 border-b border-shadow-darker/5 bg-primary-light/10">
               <div className="flex items-center gap-2">

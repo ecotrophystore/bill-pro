@@ -615,21 +615,21 @@ export default function PipelineBoard() {
   return (
     <div className="space-y-5 animate-fade-in max-w-full">
       {/* Top Header & Global Actions */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold uppercase tracking-wider text-primary">CRM Workspace</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 flex items-center gap-1">
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 flex items-center gap-1 shrink-0">
               <CheckCircle2 size={11} /> Manual Stage Control
             </span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-primary-dark mt-1">Pipeline Board</h1>
-          <p className="text-secondary text-xs sm:text-sm">
+          <p className="text-secondary text-xs sm:text-sm mt-1">
             Track customer orders through all 16 production & fulfillment milestones with instant stage navigation.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
           {/* View Mode Switcher (Kanban vs Table) */}
           <div className="flex items-center p-1 bg-transparent rounded-xl border border-shadow-darker/10">
             <button
@@ -672,15 +672,15 @@ export default function PipelineBoard() {
       </div>
 
       {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom) */}
-      <div className="flex items-center justify-between gap-4 p-2 bg-transparent rounded-2xl border border-shadow-darker/10 flex-wrap">
-        <div className="flex items-center gap-2 overflow-x-auto py-1">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-2 bg-transparent rounded-2xl border border-shadow-darker/10 w-full min-w-0">
+        <div className="w-full sm:flex-1 flex items-center gap-2 overflow-x-auto py-1 custom-sidebar-scrollbar snap-x">
           {pipelines.map((pipe) => {
             const isSelected = pipe.id === activePipeline.id;
             return (
               <button
                 key={pipe.id}
                 onClick={() => handleSelectPipeline(pipe.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 ${
+                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 shrink-0 snap-start ${
                   isSelected
                     ? 'bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
                     : 'text-secondary hover:text-primary-dark hover:bg-transparent'
@@ -702,7 +702,7 @@ export default function PipelineBoard() {
         </div>
 
         {/* Pipeline Quick Summary */}
-        <div className="flex items-center gap-4 text-xs font-semibold px-3 py-1 text-secondary ml-auto">
+        <div className="flex items-center gap-4 text-xs font-semibold px-3 py-1 text-secondary shrink-0">
           <span>
             Total Customers: <strong className="text-primary-dark">{totalPipelineLeads}</strong>
           </span>
@@ -742,13 +742,13 @@ export default function PipelineBoard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-1">
+        <div className="flex sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-1 pb-1 overflow-x-auto custom-sidebar-scrollbar snap-x">
           {phaseStats.map((phase) => {
             const isPhaseActive = phaseFilter === 'all' || phaseFilter === phase.id;
             return (
               <div
                 key={phase.id}
-                className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between ${
+                className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between min-w-[220px] sm:min-w-0 shrink-0 snap-start ${
                   isPhaseActive
                     ? 'bg-transparent border-shadow-darker/10 hover:border-primary/40 shadow-xs'
                     : 'bg-transparent border-dashed border-slate-200 opacity-60'
@@ -791,12 +791,12 @@ export default function PipelineBoard() {
       </div>
 
       {/* Search & Advanced Filter Bar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[240px]">
-          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-secondary" />
+      <div className="flex flex-col lg:flex-row lg:items-center gap-3 w-full min-w-0">
+        <div className="relative w-full lg:flex-1 min-w-0 shrink-0">
+          <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-secondary shrink-0" />
           <input
             type="text"
-            className="neo-input w-full pl-10 text-xs"
+            className="neo-input w-full pl-10 text-xs min-w-0"
             placeholder="Search by customer name, phone, company, event, sales person..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -804,61 +804,63 @@ export default function PipelineBoard() {
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary-dark"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-primary-dark shrink-0 p-1"
             >
               <X size={14} />
             </button>
           )}
         </div>
 
-        {/* Sales Rep Filter */}
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-secondary font-bold">Rep:</span>
-          <select
-            aria-label="Filter by assigned sales representative"
-            className="neo-input !py-1.5 !text-xs"
-            value={salesPersonFilter}
-            onChange={(e) => setSalesPersonFilter(e.target.value)}
-          >
-            <option value="all">All Sales Reps</option>
-            {salesPersons.map((rep) => (
-              <option key={rep} value={rep}>
-                {rep}
-              </option>
-            ))}
-          </select>
-        </div>
+        <div className="flex flex-wrap items-center gap-3 min-w-0">
+          {/* Sales Rep Filter */}
+          <div className="flex items-center gap-1.5 text-xs shrink-0">
+            <span className="text-secondary font-bold">Rep:</span>
+            <select
+              aria-label="Filter by assigned sales representative"
+              className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
+              value={salesPersonFilter}
+              onChange={(e) => setSalesPersonFilter(e.target.value)}
+            >
+              <option value="all">All Sales Reps</option>
+              {salesPersons.map((rep) => (
+                <option key={rep} value={rep}>
+                  {rep}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        {/* Urgency Filter */}
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-secondary font-bold">Urgency:</span>
-          <select
-            aria-label="Filter by deal urgency"
-            className="neo-input !py-1.5 !text-xs"
-            value={urgencyFilter}
-            onChange={(e) => setUrgencyFilter(e.target.value)}
-          >
-            <option value="all">All Urgencies</option>
-            <option value="high">🔥 High Urgency</option>
-            <option value="medium">⚡ Medium Urgency</option>
-            <option value="low">🌱 Low Urgency</option>
-          </select>
-        </div>
+          {/* Urgency Filter */}
+          <div className="flex items-center gap-1.5 text-xs shrink-0">
+            <span className="text-secondary font-bold">Urgency:</span>
+            <select
+              aria-label="Filter by deal urgency"
+              className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
+              value={urgencyFilter}
+              onChange={(e) => setUrgencyFilter(e.target.value)}
+            >
+              <option value="all">All Urgencies</option>
+              <option value="high">🔥 High Urgency</option>
+              <option value="medium">⚡ Medium Urgency</option>
+              <option value="low">🌱 Low Urgency</option>
+            </select>
+          </div>
 
-        {/* AI Qualification Filter */}
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-secondary font-bold">AI Status:</span>
-          <select
-            aria-label="Filter by AI qualification status"
-            className="neo-input !py-1.5 !text-xs"
-            value={qualificationFilter}
-            onChange={(e) => setQualificationFilter(e.target.value)}
-          >
-            <option value="all">All Qualifications</option>
-            <option value="Qualified">✨ Qualified</option>
-            <option value="Needs Follow-up">⏳ Needs Follow-up</option>
-            <option value="Not Qualified">❌ Not Qualified</option>
-          </select>
+          {/* AI Qualification Filter */}
+          <div className="flex items-center gap-1.5 text-xs shrink-0">
+            <span className="text-secondary font-bold">AI Status:</span>
+            <select
+              aria-label="Filter by AI qualification status"
+              className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
+              value={qualificationFilter}
+              onChange={(e) => setQualificationFilter(e.target.value)}
+            >
+              <option value="all">All Qualifications</option>
+              <option value="Qualified">✨ Qualified</option>
+              <option value="Needs Follow-up">⏳ Needs Follow-up</option>
+              <option value="Not Qualified">❌ Not Qualified</option>
+            </select>
+          </div>
         </div>
 
         {(searchQuery ||
@@ -875,7 +877,7 @@ export default function PipelineBoard() {
               setSalesPersonFilter('all');
               setPhaseFilter('all');
             }}
-            className="text-xs text-rose-600 hover:text-rose-700 font-bold px-2 py-1 underline"
+            className="text-xs text-rose-600 hover:text-rose-700 font-bold px-2 py-1 underline shrink-0"
           >
             Reset Filters
           </button>
@@ -915,7 +917,8 @@ export default function PipelineBoard() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
+              {/* Desktop Table View */}
+              <table className="w-full text-xs text-left hidden md:table">
                 <thead>
                   <tr className="border-b border-shadow-darker/10 text-secondary">
                     <th className="py-3 px-3 font-bold">Customer & Company</th>
@@ -1070,6 +1073,92 @@ export default function PipelineBoard() {
                   })}
                 </tbody>
               </table>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden divide-y divide-shadow-darker/10">
+                {filteredLeadsList.map((lead) => {
+                  const currentStageObj = activeStages.find((s) => s.id === lead.status) || {
+                    id: lead.status || 'new_enquiry',
+                    label: lead.status || 'New Enquiry',
+                  };
+
+                  return (
+                    <div key={lead.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Link to={`/leads/${lead.id}`} className="font-bold text-primary-dark hover:text-primary transition-colors text-lg leading-tight">
+                              {lead.name}
+                            </Link>
+                            {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200">Repeat</span>
+                            ) : lead.customer_lifecycle === 'existing_customer' ? (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">Existing</span>
+                            ) : (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">New</span>
+                            )}
+                          </div>
+                          {lead.company && <div className="text-[11px] text-secondary flex items-center gap-1 mt-0.5"><Building size={11} /> {lead.company}</div>}
+                        </div>
+                        <div className="text-right">
+                          {lead.required_quantity && <div className="font-semibold text-primary-dark text-xs">🎯 {lead.required_quantity} pcs</div>}
+                          {lead.value && <div className="font-bold text-emerald-800 text-sm mt-0.5">₹{Number(lead.value).toLocaleString('en-IN')}</div>}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-end text-sm">
+                        <div className="space-y-1">
+                          {lead.phone ? (
+                            <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-700">
+                              <Phone size={11} /> {lead.phone}
+                              <button onClick={() => setQuickChatLead(lead)} className="text-emerald-600 hover:text-emerald-700 ml-1"><MessageSquare size={12} /></button>
+                            </div>
+                          ) : null}
+                          <div className="text-secondary text-[10px]">Rep: {lead.sales_person || 'EcoTrophy Rep'}</div>
+                        </div>
+                        
+                        <div className="text-right flex flex-col items-end gap-1">
+                          <select
+                            aria-label={`Change stage for ${lead.name}`}
+                            className="text-[10px] font-bold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/20 text-primary-dark focus:ring-1 focus:ring-primary w-32"
+                            value={lead.status || currentStageObj.id}
+                            onChange={(e) => handleQuickMove(lead, e.target.value)}
+                          >
+                            {activeStages.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                        <Link 
+                          to={`/leads/${lead.id}`}
+                          className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-primary-dark font-bold text-xs"
+                        >
+                          <Eye size={14} /> 360° Profile
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNotesDrawerState({
+                              isOpen: true,
+                              lead,
+                              stageName: currentStageObj.label,
+                            })
+                          }
+                          className="neo-btn flex justify-center items-center p-2.5 text-secondary hover:text-primary transition-colors"
+                          title="Notes & Alarms"
+                        >
+                          <StickyNote size={16} className={lead.notes_count ? 'text-primary fill-primary/20' : ''} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

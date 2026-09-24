@@ -32,7 +32,7 @@ export default function CreateQuotation() {
   const [advancePaymentDate, setAdvancePaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [advanceReferenceNumber, setAdvanceReferenceNumber] = useState('');
   const [items, setItems] = useState<any[]>([
-    { description: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: 18, priceTier: 'retail' }
+    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: 18, priceTier: 'retail' }
   ]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
@@ -214,7 +214,7 @@ export default function CreateQuotation() {
     }
   }, [location.state, loadingData, customers, products]);
 
-  const addItem = () => setItems([...items, { description: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: companySettings?.defaultGst ?? 18, priceTier: 'retail' }]);
+  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: companySettings?.defaultGst ?? 18, priceTier: 'retail' }]);
   
   const removeItem = (index: number) => {
     if (items.length > 1) {
@@ -584,6 +584,17 @@ export default function CreateQuotation() {
                           setItems(newItems);
                         }}
                         placeholder="Product description..."
+                      />
+                      <SpeechInput
+                        type="text"
+                        className="neo-input w-full text-xs mt-2"
+                        placeholder="Additional product notes (optional)..."
+                        value={item.desc || ''}
+                        onChange={(e: any) => {
+                          const newItems = [...items];
+                          newItems[index].desc = e.target.value;
+                          setItems(newItems);
+                        }}
                       />
                     </div>
                     

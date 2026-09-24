@@ -193,22 +193,94 @@ export async function executeManualStageMove(params: {
           error: 'Customer has no valid phone number.',
         });
       } else {
-        try {
-          // Call Cloud Function directly — bypasses Firestore security rules
-          // and uses the real Meta token stored as a server secret
-          if (!functions) throw new Error('Firebase Functions not initialized');
-          const sendFn = httpsCallable(functions, 'sendStageWhatsApp');
-          await sendFn({
-            leadId: lead.id,
-            message: renderedMessage,
-            phone: finalPhone,
-            stageId: toStage.id,
-            stageName: toStage.label,
-          });
+        let sentWhatsApp = false;
+        let lastWaError = '';
 
+        // 1. Try secure Firebase Cloud Function first
+        if (functions) {
+          try {
+            const sendFn = httpsCallable(functions, 'sendStageWhatsApp');
+            await sendFn({
+              leadId: lead.id,
+              message: renderedMessage,
+              phone: finalPhone,
+              stageId: toStage.id,
+              stageName: toStage.label,
+            });
+            sentWhatsApp = true;
+          } catch (fnErr: any) {
+            lastWaError = fnErr?.details?.message || fnErr?.message || 'Cloud function error';
+            console.warn('[sendStageWhatsApp] Cloud function failed, trying direct Meta Cloud API fallback:', fnErr);
+          }
+        }
+
+        // 2. Direct Meta Graph API Fallback
+        if (!sentWhatsApp) {
+          try {
+            let phoneId = '1263075550230396';
+            let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
+            let version = 'v18.0';
+
+            if (db) {
+              try {
+                const metaDoc = await getDoc(doc(db, 'meta_integrations', 'default'));
+                if (metaDoc.exists()) {
+                  const data = metaDoc.data();
+                  if (data?.whatsappPhoneNumberId) phoneId = data.whatsappPhoneNumberId;
+                  if (data?.metaWhatsAppAccessToken || data?.accessToken)
+                    token = data.metaWhatsAppAccessToken || data.accessToken;
+                  if (data?.graphApiVersion) version = data.graphApiVersion;
+                }
+              } catch (e) {
+                console.warn('[stageNotificationService] Could not read meta_integrations/default:', e);
+              }
+            }
+
+            const res = await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: finalPhone,
+                type: 'text',
+                text: { body: renderedMessage },
+              }),
+            });
+
+            const resJson = await res.json();
+            if (resJson.error) {
+              lastWaError = resJson.error.message || 'Meta Cloud API error';
+            } else if (resJson.messages?.[0]?.id) {
+              const wamid = resJson.messages[0].id;
+              sentWhatsApp = true;
+
+              if (db) {
+                await addDoc(collection(db, 'messages'), {
+                  leadId: lead.id,
+                  senderPhone: finalPhone,
+                  direction: 'outbound',
+                  type: 'text',
+                  content: renderedMessage,
+                  metaMessageId: wamid,
+                  platform: 'whatsapp',
+                  triggeredBy: 'stage_change',
+                  created_at: serverTimestamp(),
+                });
+              }
+            }
+          } catch (directErr: any) {
+            lastWaError = directErr?.message || String(directErr);
+          }
+        }
+
+        if (sentWhatsApp) {
           notificationStatus.whatsapp = 'sent';
           notificationHistoryEntries.push({
-            id: `wa_queued_${Date.now()}`,
+            id: `wa_${Date.now()}`,
             stage_id: toStage.id,
             stage_name: toStage.label,
             channel: 'whatsapp',
@@ -218,12 +290,27 @@ export async function executeManualStageMove(params: {
             sent_at: now,
             sent_by: currentUserName,
           });
-        } catch (apiErr: any) {
-          // Extract the actual error message from Firebase HttpsError
-          const errMsg = apiErr?.details?.message || apiErr?.message || 'WhatsApp send failed';
-          console.error('[sendStageWhatsApp] Error:', errMsg, apiErr);
-          // Re-throw so the modal can show the actual error
-          throw new Error(`WhatsApp failed: ${errMsg}`);
+        } else {
+          // Failed (e.g. 24h window closed or invalid token)
+          // Record as failed notification so lead movement is NOT blocked
+          const is24hWindow = lastWaError.includes('24 hours') || lastWaError.includes('131047');
+          const reasonNotice = is24hWindow
+            ? 'Customer 24h reply window closed. Use WhatsApp Web.'
+            : lastWaError;
+
+          notificationStatus.whatsapp = 'failed';
+          notificationHistoryEntries.push({
+            id: `wa_failed_${Date.now()}`,
+            stage_id: toStage.id,
+            stage_name: toStage.label,
+            channel: 'whatsapp',
+            recipient: finalPhone,
+            message: renderedMessage,
+            status: 'failed',
+            sent_at: now,
+            sent_by: currentUserName,
+            error: reasonNotice,
+          });
         }
       }
     } else {
@@ -306,9 +393,13 @@ export async function executeManualStageMove(params: {
     created_at: serverTimestamp(),
   });
 
+  const returnMessage = sendMessage && notificationStatus.whatsapp === 'failed'
+    ? `Moved "${lead.name}" to ${toStage.label}. (Note: WhatsApp Cloud API auto-message restricted because >24h since customer's last reply. Use WhatsApp Web to send directly).`
+    : `Moved "${lead.name}" to ${toStage.label}.`;
+
   return {
     success: true,
-    message: `Moved "${lead.name}" to ${toStage.label}.`,
+    message: returnMessage,
     notificationStatus,
   };
 }

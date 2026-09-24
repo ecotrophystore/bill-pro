@@ -159,8 +159,8 @@ export default function CustomerBulkImportModal({
   const visibleSteps: ImportStep[] = [1, 2, 3, 5];
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-      <div className="bg-transparent w-full max-w-3xl rounded-card shadow-neo-hover border border-shadow-darker/10 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 sm:p-4 animate-fade-in">
+      <div className="bg-surface w-full max-w-3xl sm:rounded-card shadow-neo-hover border border-shadow-darker/10 flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]">
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-5 border-b border-shadow-darker/10 shrink-0">
           <div>

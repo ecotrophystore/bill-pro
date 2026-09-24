@@ -160,6 +160,7 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
   const [checklists, setChecklists] = useState<NoteChecklistItem[]>([]);
   const [newChecklistText, setNewChecklistText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [isComposerOpen, setIsComposerOpen] = useState(true);
 
   // Autocomplete state for @mentions
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -434,27 +435,39 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
         {/* Scrollable Main Area */}
         <div className="flex-1 overflow-y-auto p-5 space-y-6 custom-sidebar-scrollbar">
           {/* Note Creation Composer Box */}
-          <form onSubmit={handleSubmitNote} className="neo-card space-y-4 border border-shadow-darker/10">
+          {isComposerOpen ? (
+          <form onSubmit={handleSubmitNote} className="neo-card space-y-4 border border-shadow-darker/10 relative">
             <div className="flex items-center justify-between gap-2 border-b border-shadow-darker/10 pb-2.5">
               <span className="text-xs font-bold text-primary-dark flex items-center gap-1.5">
                 <MessageSquare size={14} className="text-primary" />
                 Add Stage Note / Follow-up Task
               </span>
 
-              {/* Pin Note Toggle */}
-              <button
-                type="button"
-                onClick={() => setIsPinned(!isPinned)}
-                className={`text-xs px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all ${
-                  isPinned
-                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                    : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-                }`}
-                title={isPinned ? 'Note will be pinned to top' : 'Pin note'}
-              >
-                {isPinned ? <Pin size={13} className="fill-amber-600 text-amber-600" /> : <Pin size={13} />}
-                <span>{isPinned ? 'Pinned' : 'Pin'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Pin Note Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setIsPinned(!isPinned)}
+                  className={`text-xs px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 transition-all ${
+                    isPinned
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                      : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+                  }`}
+                  title={isPinned ? 'Note will be pinned to top' : 'Pin note'}
+                >
+                  {isPinned ? <Pin size={13} className="fill-amber-600 text-amber-600" /> : <Pin size={13} />}
+                  <span>{isPinned ? 'Pinned' : 'Pin'}</span>
+                </button>
+                {/* Close Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsComposerOpen(false)}
+                  className="p-1 rounded hover:bg-shadow-darker/10 text-secondary transition-colors"
+                  title="Close Composer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
 
             {/* Note Category & Priority Strip */}
@@ -779,6 +792,15 @@ export function LeadNotesDrawer({ isOpen, lead, stageName, onClose, onNoteAdded 
               </button>
             </div>
           </form>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsComposerOpen(true)}
+              className="neo-btn-primary w-full py-3 flex items-center justify-center gap-2 text-sm font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md rounded-xl"
+            >
+              <Plus size={16} /> Open Note Composer
+            </button>
+          )}
 
           {/* Notes History Stream Filter Header */}
           <div className="space-y-3">

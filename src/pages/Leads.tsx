@@ -138,34 +138,34 @@ export default function Leads() {
   return (
     <div className="space-y-6 animate-fade-in max-w-full">
       {/* Top Header */}
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+        <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-primary">CRM Directory</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-primary-dark mt-1">Customer Leads</h1>
-          <p className="text-secondary text-xs sm:text-sm mt-0.5">
+          <p className="text-secondary text-xs sm:text-sm mt-1">
             Comprehensive tabular index with stage status, quantities, order values, and direct contact actions.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <Link to="/pipeline" className="neo-btn inline-flex items-center gap-2 text-xs font-bold px-3.5 py-2">
-            <Columns3 size={14} /> Pipeline Board
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <Link to="/pipeline" className="neo-btn flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5">
+            <Columns3 size={16} /> Pipeline Board
           </Link>
           {hasPermission('create_lead') && (
             <Link
               to="/leads/new"
-              className="neo-btn-primary inline-flex items-center gap-2 text-xs font-bold px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+              className="neo-btn-primary flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5"
             >
-              <UserPlus size={14} /> Add Customer Lead
+              <UserPlus size={16} /> Add Lead
             </Link>
           )}
         </div>
       </div>
 
       {/* Pipeline Filter Bar */}
-      <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-transparent rounded-2xl border border-shadow-darker/10">
+      <div className="w-full flex items-center gap-2 overflow-x-auto p-1.5 bg-transparent rounded-2xl border border-shadow-darker/10 custom-sidebar-scrollbar pb-2 snap-x">
         <button
           type="button"
           onClick={() => setSelectedPipelineId('all')}
@@ -206,7 +206,7 @@ export default function Leads() {
       </div>
 
       {/* KPI Summary Ribbon */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs w-full">
         <div className="p-3 rounded-2xl bg-transparent border border-shadow-darker/10 shadow-xs">
           <span className="text-secondary font-medium block">Total Leads</span>
           <span className="text-xl font-black text-primary-dark">{kpis.total}</span>
@@ -228,29 +228,29 @@ export default function Leads() {
       {/* Table Card */}
       <div className="neo-card space-y-4">
         {/* Filters */}
-        <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
-          <div className="flex items-center gap-2 neo-input w-full lg:max-w-xl">
-            <Search size={16} className="text-secondary" />
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-center justify-between">
+          <div className="flex items-center gap-2 neo-input flex-1 min-w-0">
+            <Search size={18} className="text-secondary shrink-0" />
             <input
-              className="bg-transparent border-none outline-none w-full text-xs"
-              placeholder="Search name, phone, email, company, event, sales rep..."
+              className="bg-transparent border-none outline-none w-full text-sm min-w-0"
+              placeholder="Search leads..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             {search && (
-              <button onClick={() => setSearch('')} className="text-secondary hover:text-primary-dark">
-                <X size={14} />
+              <button onClick={() => setSearch('')} className="text-secondary hover:text-primary-dark shrink-0 p-1">
+                <X size={16} />
               </button>
             )}
           </div>
 
-          <div className="flex flex-wrap gap-2.5 text-xs">
+          <div className="flex gap-3 min-w-0">
             {/* Real Pipeline Stages Filter */}
-            <div className="neo-input flex items-center gap-1.5 !py-1 !px-2.5">
-              <Filter size={14} className="text-secondary" />
+            <div className="neo-input flex items-center gap-2 flex-1 min-w-0 !px-3">
+              <Filter size={16} className="text-secondary shrink-0" />
               <select
                 aria-label="Filter by stage"
-                className="bg-transparent border-none outline-none text-xs font-semibold"
+                className="bg-transparent border-none outline-none text-sm font-semibold w-full min-w-0 cursor-pointer"
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
               >
@@ -264,19 +264,18 @@ export default function Leads() {
             </div>
 
             {/* Platform Filter */}
-            <div className="neo-input flex items-center gap-1.5 !py-1 !px-2.5">
-              <Filter size={14} className="text-secondary" />
+            <div className="neo-input flex items-center gap-2 flex-1 min-w-0 !px-3">
+              <Filter size={16} className="text-secondary shrink-0" />
               <select
                 aria-label="Filter by platform"
-                className="bg-transparent border-none outline-none text-xs font-semibold"
+                className="bg-transparent border-none outline-none text-sm font-semibold w-full min-w-0 cursor-pointer"
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value)}
               >
                 <option value="all">All Platforms</option>
                 <option value="manual">Manual</option>
-                <option value="meta">Meta (WhatsApp/Ads)</option>
+                <option value="meta">Meta Ads</option>
                 <option value="google">Google</option>
-                <option value="test">Test</option>
               </select>
             </div>
           </div>
@@ -290,7 +289,8 @@ export default function Leads() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-xs">
+            {/* Desktop Table View */}
+            <table className="w-full text-xs hidden md:table">
               <thead>
                 <tr className="text-left text-secondary border-b border-shadow-darker/10">
                   <th className="py-3 pr-4 font-semibold">Customer & Lifecycle</th>
@@ -417,6 +417,73 @@ export default function Leads() {
                 })}
               </tbody>
             </table>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-shadow-darker/10">
+              {filtered.map((lead) => {
+                const currentStageObj = stageOptions.find((s) => s.id === lead.status) || {
+                  id: lead.status || 'new_enquiry',
+                  label: lead.status || 'New Enquiry',
+                };
+                return (
+                  <div key={lead.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link to={`/leads/${lead.id}`} className="font-bold text-primary-dark hover:text-primary transition-colors text-lg leading-tight">
+                            {lead.name}
+                          </Link>
+                          {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200">Repeat</span>
+                          ) : lead.customer_lifecycle === 'existing_customer' ? (
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">Existing</span>
+                          ) : (
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">New</span>
+                          )}
+                        </div>
+                        {lead.company && <div className="text-[11px] text-secondary flex items-center gap-1 mt-0.5"><Building size={11} /> {lead.company}</div>}
+                      </div>
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-primary/10 text-primary-dark border border-primary/20 shrink-0">
+                        {currentStageObj.label}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-end text-sm">
+                      <div className="space-y-1">
+                        {lead.phone ? (
+                          <div className="flex items-center gap-1.5 font-mono text-[11px] text-slate-700">
+                            <Phone size={11} /> {lead.phone}
+                            <button onClick={() => openWhatsAppWebDirect(lead.phone || '', `Hi ${lead.name},`)} className="text-emerald-600 hover:text-emerald-700 ml-1"><ExternalLink size={12} /></button>
+                          </div>
+                        ) : null}
+                        <div className="text-secondary text-[10px]">Added: {formatDate(lead.created_at)}</div>
+                      </div>
+                      <div className="text-right">
+                        {lead.required_quantity && <div className="font-semibold text-primary-dark text-xs">🎯 {lead.required_quantity} pcs</div>}
+                        {lead.value && <div className="font-bold text-emerald-800 text-sm mt-0.5">₹{Number(lead.value).toLocaleString('en-IN')}</div>}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                      <Link 
+                        to={`/leads/${lead.id}`}
+                        className="flex-1 neo-btn flex justify-center items-center gap-2 py-2.5 text-primary-dark font-bold text-sm"
+                      >
+                        360° Profile <ArrowRight size={16} />
+                      </Link>
+                      {hasPermission('edit_lead') && (
+                        <button 
+                          onClick={() => setDeleteConfirmId(lead.id)} 
+                          className="neo-btn flex justify-center items-center p-2.5 text-error hover:text-error hover:bg-error/10 transition-colors"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

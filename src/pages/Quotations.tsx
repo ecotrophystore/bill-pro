@@ -278,6 +278,10 @@ export default function Quotations() {
     }
   };
 
+  const displayQuotations = quotations
+    .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(q => statusFilter === 'all' || q.status === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
@@ -357,7 +361,8 @@ export default function Quotations() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="border-b border-shadow-darker/20 text-sm font-semibold text-secondary">
                 <th className="pb-3 px-4 pl-0 w-32">Quotation ID</th>
@@ -373,12 +378,9 @@ export default function Quotations() {
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Loading quotations...
                 </td></tr>
-              ) : quotations.length === 0 ? (
+              ) : displayQuotations.length === 0 ? (
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">No quotations found.</td></tr>
-              ) : quotations
-                  .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(q => statusFilter === 'all' || q.status === statusFilter)
-                  .map((q) => (
+              ) : displayQuotations.map((q) => (
                 <tr key={q.id} className="border-b border-shadow-darker/10 hover:bg-shadow-darker/5 transition-colors group">
                   <td className="py-4 px-4 pl-0 font-medium text-primary-dark">{q.number}</td>
                   <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id]?.name || 'Loading...'}</td>
@@ -416,40 +418,71 @@ export default function Quotations() {
                             <span>→</span>
                           </button>
                         )}
-                        <button 
-                          onClick={() => navigate(`/quotations/edit/${q.id}`)}
-                          className="p-2 text-secondary hover:text-primary transition-colors"
-                          title="Edit Quotation"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button 
-                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)}
-                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                          title="View PDF"
-                        >
-                          <FileText size={18} />
-                        </button>
-                        <button 
-                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)}
-                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                          title="Download PDF"
-                        >
-                          <Download size={18} />
-                        </button>
-                        <button 
-                          onClick={() => deleteQuotation(q)}
-                          className="p-2 text-secondary hover:text-red-600 transition-colors"
-                          title="Delete Quotation"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                        <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Quotation"><Edit size={18} /></button>
+                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="View PDF"><FileText size={18} /></button>
+                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Download PDF"><Download size={18} /></button>
+                        <button onClick={() => deleteQuotation(q)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Quotation"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Loading quotations...
+              </div>
+            ) : displayQuotations.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No quotations found.</div>
+            ) : displayQuotations.map((q) => (
+              <div key={q.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{q.number}</h3>
+                    <p className="text-secondary font-medium mt-0.5">{customers[q.customer_id]?.name || 'Loading...'}</p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {q.grand_total?.toLocaleString() || '0'}</div>
+                    <div className="mt-1">{getStatusBadge(q)}</div>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col gap-2 pt-2 border-t border-shadow-darker/5">
+                  <div className="flex justify-between items-center w-full">
+                    {q.status !== 'converted' && (q as any).conversion_status !== 'converted' ? (
+                      <button 
+                        onClick={() => handleConvert(q)}
+                        disabled={convertingId === q.id}
+                        className="neo-btn !p-2 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center justify-center gap-1 text-xs font-bold w-full mr-2"
+                      >
+                        {convertingId === q.id ? <><Loader2 size={14} className="animate-spin" /><span>Converting...</span></> : <><Sparkles size={14} /><span>Convert</span></>}
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handleViewOrConvert(q)}
+                        className="neo-btn !p-2 text-xs text-primary font-semibold hover:text-primary-dark transition-all flex items-center justify-center gap-1 w-full mr-2"
+                      >
+                        <span>View {(q.customer_type === 'gst' || !q.customer_type) ? 'PI' : 'Memo'}</span><span>→</span>
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-1 w-full mt-1">
+                    <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
+                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
+                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
+                    <button onClick={() => deleteQuotation(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

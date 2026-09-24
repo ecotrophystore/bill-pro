@@ -361,4 +361,3 @@ export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, 
   await html2pdf().set(opt).from(element as HTMLElement).save();
   document.body.removeChild(container);
 }
-

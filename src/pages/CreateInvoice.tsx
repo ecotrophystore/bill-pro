@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, ShieldCheck } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, functions } from '../lib/firebase';
-import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
@@ -22,7 +22,7 @@ export default function CreateInvoice() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedCustomerName, setSelectedCustomerName] = useState('');
   const [items, setItems] = useState<(Partial<LineItem> & { priceTier?: 'retail' | 'wholesale' })[]>([
-    { description: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }
+    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }
   ]);
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Bank Transfer');
@@ -31,6 +31,7 @@ export default function CreateInvoice() {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
   const [documentNumber, setDocumentNumber] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [isGstInfo, setIsGstInfo] = useState({ isIgst: false });
   const [applyGst, setApplyGst] = useState(true);
@@ -46,7 +47,7 @@ export default function CreateInvoice() {
           getDocs(collection(db, 'customers')),
           getDocs(collection(db, 'products'))
         ]);
-        
+
         const loadedCustomers = custSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
         setCustomers(loadedCustomers);
         setProducts(prodSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
@@ -95,14 +96,14 @@ export default function CreateInvoice() {
     }
   }, [location.state, loadingData, customers, products]);
 
-  const addItem = () => setItems([...items, { description: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }]);
-  
+  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }]);
+
   const removeItem = (index: number) => {
     if (items.length > 1) {
       setItems(items.filter((_, i) => i !== index));
     }
   };
-  
+
   const handleVoiceParsed = (customerName: string | null, parsedItems: any[]) => {
     if (customerName && !selectedCustomerId && !selectedCustomerName) {
       const matched = customers.find(c => c.name.toLowerCase().includes(customerName.toLowerCase()));
@@ -113,20 +114,20 @@ export default function CreateInvoice() {
         setSelectedCustomerName(customerName);
       }
     }
-    
+
     if (parsedItems && parsedItems.length > 0) {
       const newLines = parsedItems.map(pItem => {
         const matchedProduct = products.find(prod => prod.name.toLowerCase().includes((pItem.description || '').toLowerCase()));
         return {
           description: pItem.description || matchedProduct?.name || '',
           quantity: pItem.quantity || 1,
-          priceTier: (pItem.priceTier as 'retail'|'wholesale') || 'retail',
+          priceTier: (pItem.priceTier as 'retail' | 'wholesale') || 'retail',
           rate: pItem.rate || (pItem.priceTier === 'wholesale' ? matchedProduct?.wholesale_price : matchedProduct?.retail_price) || 0,
           hsn_code: pItem.hsn_code || matchedProduct?.hsn_code || '',
           tax_percentage: pItem.tax_percentage || matchedProduct?.tax_percentage || 18,
         };
       });
-      
+
       if (items.length === 1 && !items[0].description) {
         setItems(newLines);
       } else {
@@ -138,7 +139,7 @@ export default function CreateInvoice() {
   const calculateTotals = () => {
     let subtotal = 0;
     let taxTotal = 0;
-    
+
     items.forEach(item => {
       const lineTotal = (item.quantity || 0) * (item.rate || 0);
       const discountedLine = exactRound(lineTotal - (lineTotal * discountPercent) / 100);
@@ -170,6 +171,32 @@ export default function CreateInvoice() {
       alert("Please select a customer and ensure you are logged in.");
       return;
     }
+
+    if (!documentNumber.trim()) {
+      alert("Invoice Number is required.");
+      return;
+    }
+
+    if (!invoiceDate.trim()) {
+      alert("Invoice Date is required.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Duplicate Check
+      const q = query(collection(db!, 'invoices'), where('number', '==', documentNumber.trim()));
+      const snap = await getDocs(q);
+      const isDuplicate = snap.docs.some(d => d.id !== id);
+      if (isDuplicate) {
+        alert("An invoice with this number already exists. Please use a different Invoice Number.");
+        setIsSaving(false);
+        return;
+      }
+    } catch (err) {
+      console.error("Duplicate check failed", err);
+    }
+    setIsSaving(false);
 
     const mappedItems = items.map(item => ({
       ...item,
@@ -233,6 +260,7 @@ export default function CreateInvoice() {
         advance_reference_number: advanceReferenceNumber,
         payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
         balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+        custom_date: invoiceDate,
         ...totals
       };
 
@@ -322,53 +350,53 @@ export default function CreateInvoice() {
                   <span>Invoice No</span>
                   <span className="text-xs text-primary font-normal">Editable</span>
                 </label>
-                <SpeechInput 
-                  type="text" 
-                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-transparent" 
-                  placeholder="e.g. INV/25/26/0001" 
-                  value={documentNumber} 
-                  onChange={(e: any) => setDocumentNumber(e.target.value)} 
+                <SpeechInput
+                  type="text"
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-transparent"
+                  placeholder="e.g. INV/25/26/0001"
+                  value={documentNumber}
+                  onChange={(e: any) => setDocumentNumber(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-semibold text-primary-dark px-1">Invoice Date</label>
-                <input type="date" className="neo-input w-full" defaultValue={new Date().toISOString().split('T')[0]} />
+                <input type="date" className="neo-input w-full" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
               </div>
             </div>
             <div className="mt-4 flex flex-col sm:flex-row gap-4">
               <div className="flex items-center gap-2">
-                 <input 
-                   type="checkbox" 
-                   id="applyGst" 
-                   className="rounded text-primary focus:ring-primary border-shadow-darker/20" 
-                   checked={applyGst && !isGstInfo.isIgst} 
-                   onChange={e => {
-                     if (e.target.checked) {
-                       setApplyGst(true);
-                       setIsGstInfo({ isIgst: false });
-                     } else {
-                       setApplyGst(false);
-                     }
-                   }} 
-                 />
-                 <label htmlFor="applyGst" className="text-sm font-medium text-secondary">Apply GST (18%)</label>
+                <input
+                  type="checkbox"
+                  id="applyGst"
+                  className="rounded text-primary focus:ring-primary border-shadow-darker/20"
+                  checked={applyGst && !isGstInfo.isIgst}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setApplyGst(true);
+                      setIsGstInfo({ isIgst: false });
+                    } else {
+                      setApplyGst(false);
+                    }
+                  }}
+                />
+                <label htmlFor="applyGst" className="text-sm font-medium text-secondary">Apply GST (18%)</label>
               </div>
               <div className="flex items-center gap-2">
-                 <input 
-                   type="checkbox" 
-                   id="igst" 
-                   className="rounded text-primary focus:ring-primary border-shadow-darker/20" 
-                   checked={applyGst && isGstInfo.isIgst} 
-                   onChange={e => {
-                     if (e.target.checked) {
-                       setApplyGst(true);
-                       setIsGstInfo({ isIgst: true });
-                     } else {
-                       setApplyGst(false);
-                     }
-                   }} 
-                 />
-                 <label htmlFor="igst" className="text-sm font-medium text-secondary">Apply IGST (Inter-state)</label>
+                <input
+                  type="checkbox"
+                  id="igst"
+                  className="rounded text-primary focus:ring-primary border-shadow-darker/20"
+                  checked={applyGst && isGstInfo.isIgst}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setApplyGst(true);
+                      setIsGstInfo({ isIgst: true });
+                    } else {
+                      setApplyGst(false);
+                    }
+                  }}
+                />
+                <label htmlFor="igst" className="text-sm font-medium text-secondary">Apply IGST (Inter-state)</label>
               </div>
             </div>
           </div>
@@ -376,114 +404,125 @@ export default function CreateInvoice() {
           <div className="neo-card p-8 sm:p-10">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
               <h3 className="mb-0">Line Items</h3>
-                          </div>
+            </div>
             <div className="overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-0 sm:px-0">
               <div className="min-w-[850px] space-y-8">
                 {items.map((item, index) => (
-                <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-transparent border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
-                  <div className="flex-[2] space-y-1 w-full">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Product & Description</label>}
-                    <SearchableAutocomplete
-                      items={products.map(p => ({ 
-                        id: p.id, 
-                        label: p.name, 
-                        subLabel: `${p.category || ''} | ${p.size || ''}` 
-                      }))}
-                      value={item.description || ''}
-                      onSelect={(id: string, label: string) => {
-                        const product = products.find(p => p.id === id);
-                        const newItems = [...items];
-                        newItems[index] = {
-                          ...newItems[index],
-                          description: label,
-                          hsn_code: product?.hsn_code || newItems[index].hsn_code || '',
-                          tax_percentage: product?.tax_percentage || newItems[index].tax_percentage || 18,
-                          rate: item.priceTier === 'wholesale' 
-                            ? (product?.wholesale_price || 0) 
-                            : (product?.retail_price || 0)
-                        };
-                        setItems(newItems);
-                      }}
-                      onCustomChange={(val: string) => {
-                        const newItems = [...items];
-                        newItems[index].description = val;
-                        setItems(newItems);
-                      }}
-                      placeholder="Product description..."
-                    />
-                  </div>
-                  <div className="w-full sm:w-28 space-y-1">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Price Tier</label>}
-                    <select 
-                      className="neo-input w-full bg-transparent text-xs"
-                      value={item.priceTier}
-                      onChange={(e) => {
-                        const tier = e.target.value as 'retail' | 'wholesale';
-                        const newItems = [...items];
-                        newItems[index].priceTier = tier;
-                        // Find matching product in library to update price if already selected
-                        const product = products.find(p => p.name === item.description);
-                        if (product) {
-                          newItems[index].rate = tier === 'wholesale' ? product.wholesale_price : product.retail_price;
-                        }
-                        setItems(newItems);
-                      }}
-                    >
-                      <option value="retail">Retail</option>
-                      <option value="wholesale">Wholesale</option>
-                    </select>
-                  </div>
-                  <div className="w-full sm:w-24 space-y-1">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">HSN</label>}
-                    <SpeechInput 
-                      type="text" 
-                      className="neo-input w-full" 
-                      placeholder="HSN" 
-                      value={item.hsn_code}
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].hsn_code = e.target.value;
-                        setItems(newItems);
-                      }}
-                    />
-                  </div>
-                  <div className="w-full sm:w-20 space-y-1">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
-                    <SpeechInput 
-                      type="number" 
-                      className="neo-input w-full font-bold" 
-                      placeholder="1" 
-                      value={item.quantity} 
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].quantity = parseInt(e.target.value) || 0;
-                        setItems(newItems);
-                      }} 
-                    />
-                  </div>
-                  <div className="w-full sm:w-28 space-y-1">
-                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
-                    <SpeechInput 
-                      type="number" 
-                      className="neo-input w-full font-mono text-primary-dark" 
-                      placeholder="0.00" 
-                      value={item.rate || ''} 
-                      onChange={(e) => {
-                        const newItems = [...items];
-                        newItems[index].rate = parseFloat(e.target.value) || 0;
-                        setItems(newItems);
-                      }} 
-                    />
-                  </div>
+                  <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-transparent border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
+                    <div className="flex-[2] space-y-1 w-full">
+                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Product & Description</label>}
+                      <SearchableAutocomplete
+                        items={products.map(p => ({
+                          id: p.id,
+                          label: p.name,
+                          subLabel: `${p.category || ''} | ${p.size || ''}`
+                        }))}
+                        value={item.description || ''}
+                        onSelect={(id: string, label: string) => {
+                          const product = products.find(p => p.id === id);
+                          const newItems = [...items];
+                          newItems[index] = {
+                            ...newItems[index],
+                            description: label,
+                            hsn_code: product?.hsn_code || newItems[index].hsn_code || '',
+                            tax_percentage: product?.tax_percentage || newItems[index].tax_percentage || 18,
+                            rate: item.priceTier === 'wholesale'
+                              ? (product?.wholesale_price || 0)
+                              : (product?.retail_price || 0)
+                          };
+                          setItems(newItems);
+                        }}
+                        onCustomChange={(val: string) => {
+                          const newItems = [...items];
+                          newItems[index].description = val;
+                          setItems(newItems);
+                        }}
+                        placeholder="Product description..."
+                      />
+                      <SpeechInput
+                        type="text"
+                        className="neo-input w-full text-xs mt-2"
+                        placeholder="Additional product notes (optional)..."
+                        value={item.desc || ''}
+                        onChange={(e: any) => {
+                          const newItems = [...items];
+                          newItems[index].desc = e.target.value;
+                          setItems(newItems);
+                        }}
+                      />
+                    </div>
+                    <div className="w-full sm:w-28 space-y-1">
+                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Price Tier</label>}
+                      <select
+                        className="neo-input w-full bg-transparent text-xs"
+                        value={item.priceTier}
+                        onChange={(e) => {
+                          const tier = e.target.value as 'retail' | 'wholesale';
+                          const newItems = [...items];
+                          newItems[index].priceTier = tier;
+                          // Find matching product in library to update price if already selected
+                          const product = products.find(p => p.name === item.description);
+                          if (product) {
+                            newItems[index].rate = tier === 'wholesale' ? product.wholesale_price : product.retail_price;
+                          }
+                          setItems(newItems);
+                        }}
+                      >
+                        <option value="retail">Retail</option>
+                        <option value="wholesale">Wholesale</option>
+                      </select>
+                    </div>
+                    <div className="w-full sm:w-24 space-y-1">
+                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">HSN</label>}
+                      <SpeechInput
+                        type="text"
+                        className="neo-input w-full"
+                        placeholder="HSN"
+                        value={item.hsn_code}
+                        onChange={(e) => {
+                          const newItems = [...items];
+                          newItems[index].hsn_code = e.target.value;
+                          setItems(newItems);
+                        }}
+                      />
+                    </div>
+                    <div className="w-full sm:w-20 space-y-1">
+                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
+                      <SpeechInput
+                        type="number"
+                        className="neo-input w-full font-bold"
+                        placeholder="1"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const newItems = [...items];
+                          newItems[index].quantity = parseInt(e.target.value) || 0;
+                          setItems(newItems);
+                        }}
+                      />
+                    </div>
+                    <div className="w-full sm:w-28 space-y-1">
+                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
+                      <SpeechInput
+                        type="number"
+                        className="neo-input w-full font-mono text-primary-dark"
+                        placeholder="0.00"
+                        value={item.rate || ''}
+                        onChange={(e) => {
+                          const newItems = [...items];
+                          newItems[index].rate = parseFloat(e.target.value) || 0;
+                          setItems(newItems);
+                        }}
+                      />
+                    </div>
 
-                  <button onClick={() => removeItem(index)} className="p-2 neo-btn !px-3 !py-2 text-error h-[42px] mb-[2px]">
-                    <Trash2 size={18} />
-                  </button>
-                </div>
-              ))}
+                    <button onClick={() => removeItem(index)} className="p-2 neo-btn !px-3 !py-2 text-error h-[42px] mb-[2px]">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-            
+
             <button onClick={addItem} className="neo-btn mt-6 flex items-center gap-2 text-sm text-secondary hover:text-primary-dark">
               <Plus size={16} /> Add Item
             </button>
@@ -492,7 +531,7 @@ export default function CreateInvoice() {
 
         <div className="space-y-10">
           <div className="neo-card p-8 sm:p-10">
-            <h3 className="mb-8 flex items-center gap-2"><Calculator size={18}/> Summary</h3>
+            <h3 className="mb-8 flex items-center gap-2"><Calculator size={18} /> Summary</h3>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between text-secondary">
                 <span>Subtotal</span>
@@ -572,15 +611,15 @@ export default function CreateInvoice() {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary px-1">Amount</label>
-                  <SpeechInput 
-                    type="number" 
-                    className="neo-input w-full" 
-                    value={advanceAmount === 0 ? '0' : (advanceAmount || '')} 
+                  <SpeechInput
+                    type="number"
+                    className="neo-input w-full"
+                    value={advanceAmount === 0 ? '0' : (advanceAmount || '')}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);
                       setAdvanceAmount(isNaN(val) ? 0 : val);
-                    }} 
-                    max={totals.grandTotal} 
+                    }}
+                    max={totals.grandTotal}
                   />
                 </div>
                 <div className="animate-fade-in space-y-3">
@@ -624,14 +663,14 @@ export default function CreateInvoice() {
               <ShieldCheck size={18} className="mt-0.5 shrink-0" />
               <span><strong>Rule #2:</strong> Fiscal year numbering is atomic. Invoices are <strong>permanently locked</strong> upon creation.</span>
             </div>
-            <button 
-                className="w-full neo-btn-primary flex justify-center items-center gap-2"
-                onClick={handleGenerateInvoice}
-                disabled={isSaving}
-              >
-                {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                {isSaving ? (id ? 'Updating...' : 'Generating...') : (id ? 'Update Invoice' : 'Generate Invoice')}
-              </button>
+            <button
+              className="w-full neo-btn-primary flex justify-center items-center gap-2"
+              onClick={handleGenerateInvoice}
+              disabled={isSaving}
+            >
+              {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {isSaving ? (id ? 'Updating...' : 'Generating...') : (id ? 'Update Invoice' : 'Generate Invoice')}
+            </button>
           </div>
         </div>
       </div>

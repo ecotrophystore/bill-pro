@@ -280,25 +280,46 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="h-full flex items-center justify-center">
-        <Loader2 className="animate-spin text-primary-dark" size={48} />
+      <div className="space-y-6 animate-pulse">
+        <div className="flex justify-between items-center mb-8">
+          <div>
+            <div className="h-8 w-48 bg-shadow-darker/10 rounded-lg mb-2"></div>
+            <div className="h-4 w-64 bg-shadow-darker/10 rounded-lg"></div>
+          </div>
+          <div className="flex gap-4">
+            <div className="h-10 w-32 bg-shadow-darker/10 rounded-xl"></div>
+            <div className="h-10 w-32 bg-shadow-darker/10 rounded-xl hidden sm:block"></div>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="neo-card h-36 bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl"></div>
+          ))}
+        </div>
+
+        <div className="neo-card h-24 bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl mt-6"></div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
+          <div className="neo-card lg:col-span-3 min-h-[400px] bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl"></div>
+        </div>
       </div>
     );
   }
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Dashboard</h1>
           <p className="text-secondary mt-1">Overview of EcoBill financial activity.</p>
         </div>
-        <div className="flex gap-4 items-center">
-          <div className="flex items-center gap-2 bg-transparent p-1 rounded-xl shadow-neo-raised border border-shadow-darker/10">
+        <div className="flex flex-wrap gap-4 items-center w-full sm:w-auto">
+          <div className="flex items-center gap-2 bg-transparent p-1 rounded-xl shadow-neo-raised border border-shadow-darker/10 flex-1 sm:flex-none">
             <Calendar size={16} className="text-secondary ml-2" />
             <select 
               value={dateFilter} 
               onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-              className="bg-transparent border-none text-sm font-semibold text-primary-dark focus:ring-0 py-1.5 cursor-pointer"
+              className="bg-transparent border-none text-sm font-semibold text-primary-dark focus:ring-0 py-1.5 cursor-pointer w-full sm:w-auto"
             >
               <option value="today">Today</option>
               <option value="week">This Week</option>
@@ -378,12 +399,12 @@ export default function Dashboard() {
             <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Quick Actions</span>
             <FileText size={18} className="text-primary-dark opacity-30" />
           </div>
-          <div className="flex gap-2">
-            <button onClick={() => navigate('/invoices/new')} title="Create Invoice" className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
-              <Plus size={14} className="text-primary-dark" />
+          <div className="flex gap-3">
+            <button onClick={() => navigate('/invoices/new')} title="Create Invoice" className="flex-1 h-12 rounded-xl bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors shadow-sm border border-shadow-darker/10">
+              <Plus size={20} className="text-primary-dark" />
             </button>
-            <button onClick={() => navigate('/cash-memos/new')} title="Create Cash Memo" className="w-8 h-8 rounded-lg bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors">
-              <IndianRupee size={14} className="text-primary-dark" />
+            <button onClick={() => navigate('/cash-memos/new')} title="Create Cash Memo" className="flex-1 h-12 rounded-xl bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors shadow-sm border border-shadow-darker/10">
+              <IndianRupee size={20} className="text-primary-dark" />
             </button>
           </div>
         </div>

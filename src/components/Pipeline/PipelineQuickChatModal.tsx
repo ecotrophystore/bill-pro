@@ -177,29 +177,10 @@ export function PipelineQuickChatModal({ lead, onClose }: PipelineQuickChatModal
     try {
       const cleanPhone = String(lead.phone || '').replace(/\D/g, '');
       const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-      let sentViaFunction = false;
-
-      // 1. Try secure backend Callable Function first (only works for text currently)
-      if (messagePayload.type === 'text') {
-        try {
-          const sendWhatsAppMessage = httpsCallable(functions, 'sendWhatsAppChatMessage');
-          await sendWhatsAppMessage({
-            conversationId: conversation.id,
-            leadId: lead.id,
-            phone: finalPhone,
-            message: textForDb
-          });
-          sentViaFunction = true;
-        } catch (fnErr: any) {
-          console.warn('Backend Cloud Function fallback to direct Meta Cloud API:', fnErr);
-        }
-      }
-
-      // 2. Direct Meta Graph API fallback for text, or Primary for Media
-      if (!sentViaFunction) {
-        let phoneId = '1263075550230396';
-        let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
-        let version = 'v18.0';
+      // Direct Meta Cloud API Dispatch (Instant & No CORS / 404 errors)
+      let phoneId = '1263075550230396';
+      let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
+      let version = 'v18.0';
 
         if (db) {
           try {
@@ -265,7 +246,6 @@ export function PipelineQuickChatModal({ lead, onClose }: PipelineQuickChatModal
             created_at: serverTimestamp()
           });
         }
-      }
     } catch (err: any) {
       console.error('Failed to send message:', err);
       alert(`Error sending message: ${err.message}`);
@@ -292,8 +272,8 @@ export function PipelineQuickChatModal({ lead, onClose }: PipelineQuickChatModal
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-      <div className="neo-card w-full max-w-lg bg-[#111b21] border border-slate-700/50 flex flex-col shadow-2xl rounded-2xl overflow-hidden h-[80vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+      <div className="w-full max-w-lg bg-[#111b21] border border-slate-700/50 flex flex-col shadow-2xl sm:rounded-2xl overflow-hidden h-[100dvh] sm:h-[80vh]">
         
         {/* Header */}
         <div className="bg-[#202c33] text-white p-4 flex items-center justify-between shrink-0">
@@ -375,6 +355,21 @@ export function PipelineQuickChatModal({ lead, onClose }: PipelineQuickChatModal
               </div>
             )}
 
+            {lead.phone && (
+              <button
+                type="button"
+                onClick={() => {
+                  const rawP = String(lead.phone || '').replace(/\D/g, '');
+                  const finalP = rawP.length === 10 ? `91${rawP}` : rawP;
+                  window.open(`https://wa.me/${finalP}`, '_blank', 'noopener,noreferrer');
+                }}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 text-xs font-bold flex items-center gap-1 transition-colors"
+                title="Open directly in WhatsApp Web"
+              >
+                <span>WhatsApp Web ↗</span>
+              </button>
+            )}
+
             <button onClick={onClose} className="p-2 hover:bg-transparent rounded-full transition-colors">
               <X size={20} />
             </button>
@@ -434,15 +429,43 @@ export function PipelineQuickChatModal({ lead, onClose }: PipelineQuickChatModal
                         {isOutbound && (
                           <span className="inline-flex items-center ml-0.5">
                             {msg.status === 'read' ? (
-                              <CheckCheck size={14} className="text-[#53bdeb]" />
+                              <span title="Read"><CheckCheck size={14} className="text-[#53bdeb]" /></span>
                             ) : msg.status === 'delivered' ? (
-                              <CheckCheck size={14} className="text-gray-400" />
+                              <span title="Delivered"><CheckCheck size={14} className="text-gray-400" /></span>
+                            ) : msg.status === 'failed' ? (
+                              <span className="inline-flex items-center gap-1 text-rose-300 font-bold" title={msg.errorMessage || 'Failed to deliver'}>
+                                <AlertCircle size={13} className="text-rose-400" />
+                                <span className="text-[9px] text-rose-300">Undelivered</span>
+                              </span>
                             ) : (
-                              <Check size={14} className="text-gray-400" />
+                              <span title="Sent to Meta"><Check size={14} className="text-gray-400" /></span>
                             )}
                           </span>
                         )}
                       </div>
+
+                      {/* Failure Warning with 1-Click WhatsApp Web Resend */}
+                      {isOutbound && msg.status === 'failed' && (
+                        <div className="mt-1.5 pt-1.5 border-t border-rose-400/30 text-[11px] text-rose-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                          <span className="flex items-center gap-1">
+                            <AlertCircle size={11} className="shrink-0 text-rose-300" />
+                            {msg.errorCode === 131047 || msg.errorMessage?.includes('Re-engagement')
+                              ? 'Blocked: >24h since customer reply'
+                              : (msg.errorMessage || 'Delivery failed')}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const p = String(lead.phone || '').replace(/\D/g, '');
+                              const finalP = p.length === 10 ? `91${p}` : p;
+                              window.open(`https://wa.me/${finalP}?text=${encodeURIComponent(msg.content)}`, '_blank', 'noopener,noreferrer');
+                            }}
+                            className="underline font-bold text-white hover:text-emerald-200 flex items-center gap-1 shrink-0"
+                          >
+                            Send via WhatsApp Web ↗
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

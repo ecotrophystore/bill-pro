@@ -265,13 +265,14 @@ export default function ProductLibrary() {
           <div className="text-center py-8 text-secondary">No products found.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full hidden md:table">
               <thead>
                 <tr className="border-b-2 border-secondary/20">
                   <th className="text-left py-3 px-4 text-primary-dark font-semibold">Name</th>
                   <th className="text-left py-3 px-4 text-primary-dark font-semibold">HSN Code</th>
                   <th className="text-right py-3 px-4 text-primary-dark font-semibold">Retail Price</th>
-                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Wholesale Price</th>
+                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Cost Price</th>
+                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Stock</th>
                   <th className="text-right py-3 px-4 text-primary-dark font-semibold">Tax %</th>
                   <th className="text-right py-3 px-4 text-primary-dark font-semibold">Actions</th>
                 </tr>
@@ -282,7 +283,15 @@ export default function ProductLibrary() {
                     <td className="py-3 px-4 font-medium">{product.name}</td>
                     <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
                     <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
-                    <td className="py-3 px-4 text-right">₹{product.wholesale_price}</td>
+                    <td className="py-3 px-4 text-right text-secondary">₹{product.costPrice || 0}</td>
+                    <td className="py-3 px-4 text-right">
+                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${
+                        (product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' : 
+                        (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                      }`}>
+                        {product.stockQuantity || 0} {product.unit || 'nos'}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 text-right">{product.tax_percentage}%</td>
                     <td className="py-3 px-4 flex justify-end gap-2">
                       <button 
@@ -304,6 +313,49 @@ export default function ProductLibrary() {
                 ))}
               </tbody>
             </table>
+
+            {/* Mobile Card View */}
+            <div className="md:hidden divide-y divide-shadow-darker/10">
+              {filteredProducts.map(product => (
+                <div key={product.id} className="p-4 space-y-3 hover:bg-shadow-darker/5 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="font-bold text-primary-dark">{product.name}</div>
+                      <div className="text-xs text-secondary mt-0.5">HSN: {product.hsn_code || 'N/A'}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-primary-dark">₹{product.retail_price}</div>
+                      <div className="text-xs text-secondary mt-0.5">Cost: ₹{product.costPrice || 0}</div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center text-sm">
+                    <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${
+                      (product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' : 
+                      (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                    }`}>
+                      Stock: {product.stockQuantity || 0} {product.unit || 'nos'}
+                    </span>
+                    <span className="text-xs font-semibold text-secondary">Tax: {product.tax_percentage}%</span>
+                  </div>
+
+                  <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                    <button 
+                      onClick={() => handleOpenEditModal(product)}
+                      className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold"
+                    >
+                      <Edit size={14} /> Edit
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteProduct(product.id!)}
+                      className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-error transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

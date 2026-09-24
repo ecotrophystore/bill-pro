@@ -56,12 +56,22 @@ export interface Product {
   category?: string;       // New: for nature (e.g., Trophy)
   size?: string;           // New: for specifications
   specifications?: string[]; // New: list of tags (Nature, Specs)
+  stockQuantity?: number;
+  costPrice?: number;
+  unit?: string;
+  priceHistory?: {
+    date: any;
+    price: number;
+    vendorName: string;
+    purchaseId: string;
+  }[];
   created_at: Timestamp;
 }
 
 export interface LineItem {
   product_id?: string;
   description: string;
+  desc?: string;
   hsn_code: string;
   quantity: number;
   rate: number;

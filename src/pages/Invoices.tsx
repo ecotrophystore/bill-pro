@@ -160,6 +160,10 @@ export default function Invoices() {
     }
   };
 
+  const displayInvoices = invoices
+    .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -229,7 +233,8 @@ export default function Invoices() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Invoice Number</th>
@@ -245,12 +250,9 @@ export default function Invoices() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Loading invoices...
                 </td></tr>
-              ) : invoices.length === 0 ? (
+              ) : displayInvoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No invoices found.</td></tr>
-              ) : invoices
-                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
-                  .map((inv) => (
+              ) : displayInvoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
@@ -274,40 +276,61 @@ export default function Invoices() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
-                      <button 
-                        onClick={() => navigate(`/invoices/edit/${inv.id}`)}
-                        className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Invoice"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="View PDF"
-                      >
-                        <FileText size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="Download"
-                      >
-                        <Download size={18} />
-                      </button>
-                      <button 
-                        onClick={() => deleteInvoice(inv.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Invoice"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                      <button onClick={() => deleteInvoice(inv.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Loading invoices...
+              </div>
+            ) : displayInvoices.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No invoices found.</div>
+            ) : displayInvoices.map((inv) => (
+              <div key={inv.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
+                    <p className="text-secondary font-medium mt-0.5">{customers[inv.customer_id]?.name || 'Loading...'}</p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <button 
+                      onClick={() => openPaymentModal(inv)}
+                      className={`mt-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                      inv.payment_status === 'paid' ? 'bg-green-100 text-green-700' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {inv.payment_status?.toUpperCase() || 'UNPAID'}
+                    </button>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-bold mt-1">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-1 pt-2 border-t border-shadow-darker/5">
+                  <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
+                  <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                  <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                  <button onClick={() => deleteInvoice(inv.id)} className="flex-1 flex justify-center py-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 

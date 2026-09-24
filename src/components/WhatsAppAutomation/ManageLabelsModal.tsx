@@ -70,8 +70,8 @@ export function ManageLabelsModal({ onClose, labels }: ManageLabelsModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
-      <div className="bg-transparent border border-slate-200 w-full max-w-md shadow-2xl rounded-2xl overflow-hidden flex flex-col h-[70vh]">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center sm:p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+      <div className="bg-transparent border border-slate-200 w-full max-w-md shadow-2xl sm:rounded-2xl overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[70vh]">
         
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0 bg-transparent">

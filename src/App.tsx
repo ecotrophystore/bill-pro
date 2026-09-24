@@ -35,6 +35,7 @@ const MessageQueue = lazy(() => import('./pages/MessageQueue'));
 const CRMDashboard = lazy(() => import('./pages/CRMDashboard'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const WhatsAppAutomation = lazy(() => import('./pages/WhatsAppAutomation'));
+const PurchaseAnalytics = lazy(() => import('./pages/PurchaseAnalytics'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, dbUser, loading, logout } = useAuth();
@@ -56,7 +57,14 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 function RouteFallback() {
-  return <div className="min-h-[50vh] flex items-center justify-center text-secondary font-semibold">Loading page...</div>;
+  return (
+    <div className="h-full min-h-[calc(100vh-64px)] w-full flex items-center justify-center text-secondary font-semibold">
+      <div className="flex flex-col items-center gap-3 animate-fade-in">
+        <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+        <span>Loading...</span>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -111,6 +119,7 @@ export default function App() {
 
                 <Route path="purchases" element={<Purchases />} />
                 <Route path="purchases/new" element={<CreatePurchase />} />
+                <Route path="purchase-analytics" element={<PurchaseAnalytics />} />
                 <Route path="reconciliation" element={<Reconciliation />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="auditor" element={<AuditorPage />} />
