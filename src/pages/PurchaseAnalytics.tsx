@@ -74,7 +74,8 @@ export default function PurchaseAnalytics() {
 
   purchases.forEach(p => {
     if (!p.createdAt) return;
-    const date = new Date((p.createdAt as any).seconds ? (p.createdAt as any).seconds * 1000 : p.createdAt);
+    const ts = p.createdAt as any;
+    const date = ts?.toDate ? ts.toDate() : new Date(ts?.seconds ? ts.seconds * 1000 : ts);
     const monthKey = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
     if (monthMap[monthKey] !== undefined) {
       monthMap[monthKey] += (p.grandTotal || 0);
@@ -142,7 +143,7 @@ export default function PurchaseAnalytics() {
                   cx="50%"
                   cy="50%"
                   labelLine={false}
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                  label={({ name, percent }) => `${name} ${((percent || 0) * 100).toFixed(0)}%`}
                   outerRadius={120}
                   fill="#8884d8"
                   dataKey="value"
@@ -151,7 +152,7 @@ export default function PurchaseAnalytics() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => `₹ ${value.toLocaleString()}`} />
+                <Tooltip formatter={(value: any) => `₹ ${Number(value).toLocaleString()}`} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
@@ -167,7 +168,7 @@ export default function PurchaseAnalytics() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
                 <XAxis dataKey="name" tick={{fontSize: 12}} interval={0} angle={-15} textAnchor="end" height={60} />
                 <YAxis tickFormatter={(val) => `₹${val/1000}k`} />
-                <Tooltip formatter={(value: number) => `₹ ${value.toLocaleString()}`} cursor={{fill: 'rgba(0,0,0,0.05)'}} />
+                <Tooltip formatter={(value: any) => `₹ ${Number(value).toLocaleString()}`} cursor={{fill: 'rgba(0,0,0,0.05)'}} />
                 <Bar dataKey="total" fill="#00C49F" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -183,7 +184,7 @@ export default function PurchaseAnalytics() {
                 <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
                 <XAxis dataKey="month" />
                 <YAxis tickFormatter={(val) => `₹${val/1000}k`} />
-                <Tooltip formatter={(value: number) => `₹ ${value.toLocaleString()}`} />
+                <Tooltip formatter={(value: any) => `₹ ${Number(value).toLocaleString()}`} />
                 <Line type="monotone" dataKey="spend" stroke="#0088FE" strokeWidth={3} activeDot={{ r: 8 }} />
               </LineChart>
             </ResponsiveContainer>

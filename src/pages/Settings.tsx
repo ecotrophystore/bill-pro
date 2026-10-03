@@ -362,7 +362,12 @@ export default function Settings() {
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-xs font-black text-secondary tracking-widest uppercase">Company Logo</label>
                   <div className="flex items-center gap-4">
-                    {localSettings.companyLogo && <img src={localSettings.companyLogo} alt="Logo" className="h-16 object-contain bg-transparent rounded p-1 border" />}
+                    {localSettings.companyLogo && (
+                      <div className="flex flex-col gap-2 items-center shrink-0">
+                        <img src={localSettings.companyLogo} alt="Logo" className="h-16 object-contain bg-transparent rounded p-1 border" />
+                        <button type="button" onClick={() => setLocalSettings({...localSettings, companyLogo: ''})} className="text-[10px] text-error hover:underline font-bold uppercase tracking-wider">Remove</button>
+                      </div>
+                    )}
                     <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'companyLogo')} className="neo-input w-full" />
                   </div>
                 </div>
@@ -500,7 +505,18 @@ export default function Settings() {
                 <div className="space-y-2">
                   <label className="text-xs font-black text-secondary tracking-widest uppercase">Authorized Signature Upload</label>
                   <div className="flex items-center gap-4">
-                    {localSettings.authorizedSignature && <img src={localSettings.authorizedSignature} alt="Signature" className="h-16 object-contain bg-transparent rounded p-1 border" />}
+                    {localSettings.authorizedSignature && (
+                      <div className="flex flex-col items-center gap-2">
+                        <img src={localSettings.authorizedSignature} alt="Signature" className="h-16 object-contain bg-transparent rounded p-1 border border-shadow-darker/10" />
+                        <button 
+                          type="button" 
+                          onClick={() => setLocalSettings({ ...localSettings, authorizedSignature: '' })}
+                          className="text-[10px] text-rose-500 hover:text-rose-600 font-bold underline"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
                     <input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, 'authorizedSignature')} className="neo-input w-full" />
                   </div>
                 </div>

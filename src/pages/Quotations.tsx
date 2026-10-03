@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Filter, Loader2, Sparkles, FileText, Download, Trash2, Edit, ChevronDown } from 'lucide-react';
+import { Plus, Search, Filter, Loader2, Sparkles, FileText, Download, Trash2, Edit, ChevronDown, Share2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { db, functions } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
 
 export default function Quotations() {
   const navigate = useNavigate();
@@ -19,7 +20,7 @@ export default function Quotations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [convertingId, setConvertingId] = useState<string | null>(null);
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
  
   useEffect(() => {
@@ -234,10 +235,65 @@ export default function Quotations() {
     navigate('/quotations/new', { state: { voiceData: { customerName, items, customerType } } });
   };
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredQuotations = quotations
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filteredQuotations = quotations
       .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(q => statusFilter === 'all' || q.status === statusFilter);
+
+    const now = new Date();
+    filteredQuotations = filteredQuotations.filter(q => {
+      const date = q.created_at ? q.created_at.toDate() : new Date();
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filteredQuotations.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              const { downloadPDF } = await import('../utils/pdfGenerator');
+              for (const item of filteredQuotations) {
+                const blob = await downloadPDF(item, customers[item.customer_id] || 'Unknown Customer', 'Quotation', 'blob', settings);
+                if (blob) {
+                  const customerName = customers[item.customer_id]?.name || 'Unknown';
+                  const filename = `Quotation_${item.number}_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                  zip.file(filename, blob);
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'Quotations_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
 
     if (format === 'excel') {
       const reportData = filteredQuotations.map(q => ({
@@ -290,33 +346,17 @@ export default function Quotations() {
           <p className="text-secondary mt-1">Manage standard quotes and conversion requests.</p>
         </div>
         <div className="flex gap-4 items-center">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button 
             onClick={() => navigate('/quotations/new')}
             className="neo-btn-primary flex items-center gap-2"
@@ -421,6 +461,7 @@ export default function Quotations() {
                         <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Quotation"><Edit size={18} /></button>
                         <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="View PDF"><FileText size={18} /></button>
                         <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Download PDF"><Download size={18} /></button>
+                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'share', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Share PDF"><Share2 size={18} /></button>
                         <button onClick={() => deleteQuotation(q)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Quotation"><Trash2 size={18} /></button>
                     </div>
                   </td>
@@ -477,6 +518,7 @@ export default function Quotations() {
                     <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
                     <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
                     <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
+                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'share', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Share2 size={16} /></button>
                     <button onClick={() => deleteQuotation(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
                   </div>
                 </div>

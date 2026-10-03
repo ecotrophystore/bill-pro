@@ -123,7 +123,7 @@ export function StageChangeConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-transparent neo-card max-w-xl w-full my-8 space-y-5 animate-scale-up border border-shadow-darker/20 shadow-2xl">
+      <div className="bg-surface neo-card max-w-xl w-full my-8 space-y-5 animate-scale-up border border-shadow-darker/20 shadow-2xl">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-shadow-darker/10 pb-4">
           <div>

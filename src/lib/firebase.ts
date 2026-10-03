@@ -35,4 +35,4 @@ if (!isAnyConfigMissing) {
   console.warn("Firebase configuration is missing. Review your .env file.");
 }
 
-export { auth, db, storage, functions };
+export { app, auth, db, storage, functions };

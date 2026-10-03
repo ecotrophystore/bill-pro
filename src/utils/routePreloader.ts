@@ -10,6 +10,9 @@ export const preloadRoute = (path: string) => {
       case '/leads':
         import('../pages/Leads');
         break;
+      case '/company-intelligence':
+        import('../pages/CompanyIntelligence');
+        break;
       case '/crm-dashboard':
         import('../pages/CRMDashboard');
         break;
@@ -18,12 +21,6 @@ export const preloadRoute = (path: string) => {
         break;
       case '/whatsapp-automation':
         import('../pages/WhatsAppAutomation');
-        break;
-      case '/message-templates':
-        import('../pages/MessageTemplates');
-        break;
-      case '/message-queue':
-        import('../pages/MessageQueue');
         break;
       case '/lead-intake':
         import('../pages/LeadIntake');

@@ -324,7 +324,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
   `;
 }
 
-export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   const { docData, customer, docType } = ctx;
   if (docType === 'Cash Memo' && (docData as any).payment_status !== 'paid') {
     alert('Mark this Cash Memo as Paid to enable PDF download.');
@@ -356,6 +356,15 @@ export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, 
       document.body.removeChild(container);
     });
     return;
+  }
+  
+  if (action === 'share' || action === 'blob') {
+    return new Promise<Blob>((resolve) => {
+      html2pdf().set(opt).from(element as HTMLElement).output('blob').then((blob: Blob) => {
+        document.body.removeChild(container);
+        resolve(blob);
+      });
+    });
   }
 
   await html2pdf().set(opt).from(element as HTMLElement).save();

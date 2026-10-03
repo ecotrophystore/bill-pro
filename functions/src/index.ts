@@ -17,6 +17,8 @@ export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
 export * from './meta/facebook.js';
 export * from './meta/instagram.js';
+export * from './enrichment.js';
+export * from './ai/gateway.js';
 
 
 function getAI() {

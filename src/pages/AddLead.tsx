@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { collection, onSnapshot, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ArrowRight, Loader2, Save, Sparkles, UserPlus, Building, Phone, Mail, MapPin, Calendar, Clock, DollarSign } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
@@ -7,8 +8,9 @@ import { useCRMPermission } from '../hooks/useCRMPermission';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 
 export default function AddLead() {
+  const locationState = useLocation();
   const [name, setName] = useState('');
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState((locationState.state as any)?.predefinedCompany || '');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [location, setLocation] = useState('');
@@ -145,6 +147,16 @@ export default function AddLead() {
       };
 
       const docRef = await addDoc(collection(db, 'leads'), newLeadData);
+
+      // Automatically add to Customer Library
+      await addDoc(collection(db, 'customers'), {
+        name: name.trim() || 'New Customer',
+        phone: phone.trim(),
+        email: email.trim(),
+        billing_address: location.trim(),
+        type: 'individual',
+        created_at: serverTimestamp()
+      });
 
       // Record activity
       await addDoc(collection(db, 'activities'), {

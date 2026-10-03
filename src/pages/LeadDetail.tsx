@@ -40,7 +40,8 @@ import {
   CircleAlert,
   ChevronRight,
 } from 'lucide-react';
-import { db, auth } from '../lib/firebase';
+import { db, auth, functions } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import {
   type Lead,
   type LeadActivity,
@@ -139,6 +140,28 @@ export default function LeadDetail() {
   const [newNoteCategory, setNewNoteCategory] = useState<NoteCategory>('general');
   const [newNotePriority, setNewNotePriority] = useState<NotePriority>('medium');
   const [addingNote, setAddingNote] = useState(false);
+  const [isEnriching, setIsEnriching] = useState(false);
+
+  const handleEnrichCompany = async () => {
+    if (!functions || !id || !lead) return;
+    const companyName = lead.company || lead.organization || lead.name;
+    if (!companyName) {
+      setFeedback('No company name to enrich');
+      return;
+    }
+    
+    setIsEnriching(true);
+    try {
+      const enrich = httpsCallable(functions, 'enrichCompanyManual');
+      await enrich({ leadId: id, companyName });
+      setFeedback('Company intelligence successfully fetched!');
+    } catch (err: any) {
+      console.error('Enrichment failed:', err);
+      setFeedback('Failed to enrich company data.');
+    } finally {
+      setIsEnriching(false);
+    }
+  };
 
   // Stage change modal state
   const [stageModalState, setStageModalState] = useState<{
@@ -831,6 +854,66 @@ export default function LeadDetail() {
           )}
         </div>
       )}
+
+      {/* Company Intelligence Widget */}
+      {((lead as any).company_intelligence || lead.company || lead.organization) && (
+         <div className="neo-card space-y-3 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-surface border border-indigo-500/20">
+            <div className="flex items-center justify-between gap-3 border-b border-shadow-darker/10 pb-2.5">
+               <div className="flex items-center gap-2">
+                 <Building size={16} className="text-indigo-600" />
+                 <h2 className="text-sm font-bold text-primary-dark">Company Intelligence</h2>
+               </div>
+               
+               <div className="flex items-center gap-2">
+                 {(lead as any).company_intelligence?.status === 'success' ? (
+                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                     <CheckCircle2 size={12}/> Enriched
+                   </span>
+                 ) : (lead as any).company_intelligence?.status === 'not_found' ? (
+                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                     Not Found
+                   </span>
+                 ) : null}
+
+                 <button
+                    onClick={handleEnrichCompany}
+                    disabled={isEnriching}
+                    className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 disabled:opacity-50"
+                 >
+                    {isEnriching ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                    { (lead as any).company_intelligence ? 'Re-enrich' : 'Enrich Data' }
+                 </button>
+               </div>
+            </div>
+
+            {(lead as any).company_intelligence?.status === 'success' && (lead as any).company_intelligence?.data && (
+               <div className="space-y-3">
+                  <div className="flex gap-4">
+                     { (lead as any).company_intelligence.data.logo_url && (
+                        <div className="w-12 h-12 rounded-xl bg-white border border-shadow-darker/10 flex items-center justify-center shrink-0 p-1">
+                           <img src={(lead as any).company_intelligence.data.logo_url} alt="Logo" className="w-full h-full object-contain" />
+                        </div>
+                     )}
+                     <div className="flex-1">
+                        <h3 className="font-bold text-primary-dark">{(lead as any).company_intelligence.data.name}</h3>
+                        <p className="text-xs text-secondary mt-1 line-clamp-3">
+                           {(lead as any).company_intelligence.data.description}
+                        </p>
+                     </div>
+                  </div>
+                  
+                  {(lead as any).company_intelligence.data.website && (
+                     <div className="pt-2 border-t border-shadow-darker/5">
+                        <a href={(lead as any).company_intelligence.data.website} target="_blank" rel="noreferrer" className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                           <ExternalLink size={12} /> Visit Website
+                        </a>
+                     </div>
+                  )}
+               </div>
+            )}
+         </div>
+      )}
+
 
       {/* Tab Navigation Ribbon (5 Complete Tabs) */}
       <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2 flex-wrap">

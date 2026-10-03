@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Outlet, NavLink, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   FileText,
@@ -27,6 +27,7 @@ import {
   Bot,
   ChevronDown,
   Command,
+  Plus,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
@@ -64,11 +65,11 @@ const navCategories: NavCategory[] = [
     items: [
       { path: '/pipeline', label: 'Pipeline Board', icon: Columns3 },
       { path: '/leads', label: 'Leads Directory', icon: Users },
+      { path: '/company-intelligence', label: 'Company Intelligence', icon: Building2 },
       { path: '/crm-dashboard', label: 'CRM Analytics', icon: BarChart3 },
       { path: '/library/customers', label: 'Customer Library', icon: Building2 },
       { path: '/whatsapp-automation', label: 'WhatsApp Automation', icon: Bot },
-      { path: '/message-templates', label: 'Message Templates', icon: MessageSquare },
-      { path: '/message-queue', label: 'Message Queue', icon: Send },
+      { path: '/stage-automation', label: 'Stage Automation', icon: Settings },
       { path: '/lead-intake', label: 'Lead Intake Logs', icon: Inbox },
       { path: '/audit-logs', label: 'Audit Logs', icon: Shield },
     ],
@@ -108,6 +109,18 @@ export function AppLayout() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const navigate = useNavigate();
+  
+  useEffect(() => {
+    const handleNavigate = (e: any) => {
+      if (e.detail) {
+        navigate(e.detail);
+      }
+    };
+    window.addEventListener('app:navigate', handleNavigate);
+    return () => window.removeEventListener('app:navigate', handleNavigate);
+  }, [navigate]);
+
   const { logout, dbUser } = useAuth();
 
   // Helper to identify category for path
@@ -342,8 +355,8 @@ export function AppLayout() {
       </aside>
 
       {/* Main App Content Area */}
-      <main className={clsx('flex-1 flex flex-col min-h-screen transition-all duration-300', 'md:ml-[104px]')}>
-        <header className="h-16 flex items-center justify-between px-6 bg-transparent border-b border-shadow-darker/20 sticky top-0 z-40">
+      <main className={clsx('flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden', 'md:ml-[104px]')}>
+        <header className="h-16 flex items-center justify-between px-4 sm:px-6 bg-transparent border-b border-shadow-darker/20 sticky top-0 z-40 shrink-0">
           <div className="flex items-center gap-4">
             <button onClick={() => setMobileMenuOpen(true)} className="p-2 text-primary-dark block md:hidden">
               <Menu size={24} />
@@ -362,7 +375,7 @@ export function AppLayout() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 sm:gap-4 relative">
+          <div className="flex items-center gap-2 sm:gap-4 relative shrink-0">
             {/* Mobile search trigger */}
             <button
               onClick={() => setSearchOpen(true)}
@@ -397,23 +410,87 @@ export function AppLayout() {
             </div>
 
             {/* User Avatar */}
-            <div className="w-10 h-10 rounded-full neo-card !p-0 overflow-hidden flex items-center justify-center">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full neo-card !p-0 overflow-hidden flex items-center justify-center shrink-0">
               <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold text-xs" title={`Role: ${dbUser?.role || 'User'}`}>
                 {dbUser?.name ? dbUser.name.substring(0, 2).toUpperCase() : 'AD'}
               </div>
             </div>
 
             {/* Logout */}
-            <button onClick={logout} className="p-2 text-error hover:bg-error/10 rounded-full transition-colors ml-1" title="Logout">
+            <button onClick={logout} className="p-2 text-error hover:bg-error/10 rounded-full transition-colors hidden sm:block" title="Logout">
               <LogOut size={20} />
             </button>
           </div>
         </header>
 
-        <div className="p-6 md:p-8 flex-1 w-full max-w-[1440px] mx-auto">
+        <div className="p-3 sm:p-4 md:p-8 flex-1 w-full max-w-[1440px] mx-auto min-w-0 pb-24 md:pb-8">
           <Outlet />
         </div>
       </main>
+
+      {/* Mobile Floating Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-4 left-4 right-4 z-50 bg-white/80 dark:bg-black/80 backdrop-blur-xl border border-white/40 dark:border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.12)] rounded-[2rem] p-2 flex items-center justify-between px-6">
+        <NavLink
+          to="/dashboard"
+          className={({ isActive }) =>
+            clsx(
+              'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14',
+              isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+            )
+          }
+        >
+          <LayoutDashboard size={22} strokeWidth={2.5} />
+          <span className="text-[9px] font-bold mt-1 tracking-wide">Home</span>
+        </NavLink>
+
+        <NavLink
+          to="/pipeline"
+          className={({ isActive }) =>
+            clsx(
+              'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 mr-4',
+              isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+            )
+          }
+        >
+          <Columns3 size={22} strokeWidth={2.5} />
+          <span className="text-[9px] font-bold mt-1 tracking-wide">Pipeline</span>
+        </NavLink>
+
+        {/* Center Floating Action Button (New Quotation/Action) */}
+        <div className="absolute left-1/2 -translate-x-1/2 -top-6">
+          <NavLink
+            to="/quotations/new"
+            className="flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-dark text-white shadow-lg shadow-primary/40 transform transition-transform duration-300 hover:scale-110 active:scale-95 border-4 border-surface"
+          >
+            <Plus size={28} strokeWidth={3} />
+          </NavLink>
+        </div>
+
+        <NavLink
+          to="/whatsapp-automation"
+          className={({ isActive }) =>
+            clsx(
+              'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 ml-4',
+              isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+            )
+          }
+        >
+          <Bot size={22} strokeWidth={2.5} />
+          <span className="text-[9px] font-bold mt-1 tracking-wide">Chat</span>
+        </NavLink>
+
+        <button
+          onClick={() => setMobileMenuOpen(true)}
+          className={clsx(
+            'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14',
+            mobileMenuOpen ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+          )}
+        >
+          <Menu size={22} strokeWidth={2.5} />
+          <span className="text-[9px] font-bold mt-1 tracking-wide">Menu</span>
+        </button>
+      </nav>
+
       <Toaster position="top-right" />
     </div>
   );

@@ -3,7 +3,10 @@ import { lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { ReminderAlarmProvider } from './contexts/ReminderAlarmContext';
+import { AiProvider } from './contexts/AiContext';
 import { AppLayout } from './components/Layout/AppLayout';
+import { VoiceAssistantButton } from './components/AI/VoiceAssistantButton';
+import { VoiceAssistantPanel } from './components/AI/VoiceAssistantPanel';
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 
@@ -24,18 +27,18 @@ const CustomerLibrary = lazy(() => import('./pages/CustomerLibrary'));
 const Purchases = lazy(() => import('./pages/Purchases'));
 const CreatePurchase = lazy(() => import('./pages/CreatePurchase'));
 const Settings = lazy(() => import('./pages/Settings'));
+const StageAutomation = lazy(() => import('./pages/StageAutomation'));
 const Reconciliation = lazy(() => import('./pages/Reconciliation'));
 const AuditorPage = lazy(() => import('./pages/AuditorPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const ProformaInvoices = lazy(() => import('./pages/ProformaInvoices'));
 const CreateProformaInvoice = lazy(() => import('./pages/CreateProformaInvoice'));
 const ExpensePage = lazy(() => import('./pages/Expense'));
-const MessageTemplates = lazy(() => import('./pages/MessageTemplates'));
-const MessageQueue = lazy(() => import('./pages/MessageQueue'));
 const CRMDashboard = lazy(() => import('./pages/CRMDashboard'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const WhatsAppAutomation = lazy(() => import('./pages/WhatsAppAutomation'));
 const PurchaseAnalytics = lazy(() => import('./pages/PurchaseAnalytics'));
+const CompanyIntelligence = lazy(() => import('./pages/CompanyIntelligence'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, dbUser, loading, logout } = useAuth();
@@ -73,7 +76,8 @@ export default function App() {
       <SettingsProvider>
         <ReminderAlarmProvider>
           <BrowserRouter>
-            <Suspense fallback={<RouteFallback />}>
+            <AiProvider>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
               <Route path="/login" element={<Login />} />
 
@@ -92,10 +96,10 @@ export default function App() {
                 <Route path="leads/:id" element={<LeadDetail />} />
                 <Route path="pipeline" element={<PipelineBoard />} />
                 <Route path="lead-intake" element={<LeadIntake />} />
-                <Route path="message-templates" element={<MessageTemplates />} />
-                <Route path="message-queue" element={<MessageQueue />} />
                 <Route path="whatsapp-automation" element={<WhatsAppAutomation />} />
                 <Route path="crm-dashboard" element={<CRMDashboard />} />
+                <Route path="company-intelligence" element={<CompanyIntelligence />} />
+                <Route path="stage-automation" element={<StageAutomation />} />
                 <Route path="audit-logs" element={<AuditLogs />} />
 
                 <Route path="quotations" element={<Quotations />} />
@@ -130,6 +134,9 @@ export default function App() {
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </Suspense>
+          <VoiceAssistantButton />
+          <VoiceAssistantPanel />
+          </AiProvider>
         </BrowserRouter>
         </ReminderAlarmProvider>
       </SettingsProvider>

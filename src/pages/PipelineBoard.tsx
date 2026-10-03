@@ -811,7 +811,7 @@ export default function PipelineBoard() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 min-w-0">
+        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-3 min-w-0 w-full lg:w-auto">
           {/* Sales Rep Filter */}
           <div className="flex items-center gap-1.5 text-xs shrink-0">
             <span className="text-secondary font-bold">Rep:</span>

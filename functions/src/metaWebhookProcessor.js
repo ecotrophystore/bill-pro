@@ -410,6 +410,7 @@ export async function processWebhookPayload(eventId, data) {
             const required_quantity = fields.required_quantity || fields["require quantity"] || fields.quantity || "";
             const event_date = fields.event_date || fields["event date"] || "";
             const delivery_date = fields.delivery_date || fields["delivery date"] || fields["when the delivery want"] || fields.when_the_delivery_want || "";
+            const company = fields.company_name || fields.company || fields["company name"] || fields.business_name || fields["business name"] || "";
             const newLeadRef = db.collection("leads").doc();
             const leadId = newLeadRef.id;
             const newLeadData = {
@@ -441,6 +442,8 @@ export async function processWebhookPayload(eventId, data) {
                 newLeadData.event_date = event_date;
             if (delivery_date)
                 newLeadData.delivery_date = delivery_date;
+            if (company)
+                newLeadData.company = company;
             await newLeadRef.set(newLeadData);
             // Create in-app notification
             await db.collection("notifications").add({

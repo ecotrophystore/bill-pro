@@ -148,6 +148,7 @@ export function WhatsAppLiveChat() {
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<{ url: string; name: string } | null>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
@@ -239,6 +240,8 @@ export function WhatsAppLiveChat() {
         // If URL has leadId or phone, auto-select matching conversation
         const targetLeadId = searchParams.get('leadId');
         const targetPhone = searchParams.get('phone');
+        const targetAttachmentUrl = searchParams.get('attachmentUrl');
+        const targetAttachmentName = searchParams.get('attachmentName');
 
         if (targetLeadId || targetPhone) {
           const match = list.find((c) =>
@@ -248,6 +251,10 @@ export function WhatsAppLiveChat() {
           if (match) {
             setSelectedConv(match);
             setMobileView('chat');
+            if (targetAttachmentUrl && targetAttachmentName) {
+              setPendingAttachment({ url: targetAttachmentUrl, name: targetAttachmentName });
+              window.history.replaceState({}, '', `/whatsapp-automation?phone=${targetPhone || match.participantPhone}`);
+            }
             return;
           }
         }
@@ -393,10 +400,24 @@ export function WhatsAppLiveChat() {
   // ── 4. Send Message via Backend Cloud Function / Direct Meta Fallback ────────
   const handleSendMessage = async (textToSend?: string) => {
     const content = (textToSend || inputText).trim();
-    if (!content || !selectedConv || isSending) return;
+    if ((!content && !pendingAttachment) || !selectedConv || isSending) return;
     setIsSending(true);
     setSendError('');
-    await sendMessagePayload({ type: 'text', text: { body: content } }, content);
+    
+    if (pendingAttachment) {
+      try {
+        const payload = { type: 'document', document: { link: pendingAttachment.url, filename: pendingAttachment.name } };
+        await sendMessagePayload(payload, `📄 ${pendingAttachment.name}`, pendingAttachment.url);
+        setPendingAttachment(null);
+      } catch (err: any) {
+        setSendError(err.message || 'Failed to send document');
+      }
+    }
+    
+    if (content) {
+      await sendMessagePayload({ type: 'text', text: { body: content } }, content);
+    }
+    
     setInputText('');
     setIsSending(false);
   };
@@ -1068,7 +1089,7 @@ export function WhatsAppLiveChat() {
                             </div>
                           ) : m.type === 'document' && m.mediaUrl ? (
                             <div className="mb-2 p-3 bg-black/10 rounded-lg flex items-center gap-3">
-                              <FileIcon size={24} className={isOutbound ? 'text-emerald-100' : 'text-[#008069]'} />
+                              <FileText size={24} className={isOutbound ? 'text-emerald-100' : 'text-[#008069]'} />
                               <a href={m.mediaUrl} target="_blank" rel="noreferrer" className="underline font-medium hover:text-white truncate max-w-[150px]">
                                 {m.content || 'Document'}
                               </a>
@@ -1299,6 +1320,21 @@ export function WhatsAppLiveChat() {
                     </div>
                   )}
                 </div>
+                
+                {pendingAttachment && (
+                  <div className="mb-3 p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <FileText size={18} className="text-[#008069]" />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800 line-clamp-1">{pendingAttachment.name}</div>
+                        <div className="text-xs text-slate-500">Ready to send via WhatsApp</div>
+                      </div>
+                    </div>
+                    <button onClick={() => setPendingAttachment(null)} className="p-1 hover:bg-emerald-100 rounded-full text-slate-500 hover:text-red-500 transition-colors">
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
 
                 {/* Hidden File Inputs */}
                 <input type="file" ref={imageInputRef} className="hidden" accept="image/*" onChange={(e) => { if (e.target.files?.[0]) handleSendMedia(e.target.files[0], 'image'); }} />
@@ -1322,7 +1358,7 @@ export function WhatsAppLiveChat() {
 
                 <button
                   onClick={() => handleSendMessage()}
-                  disabled={isSending || !inputText.trim()}
+                  disabled={isSending || (!inputText.trim() && !pendingAttachment)}
                   className="neo-btn-primary !rounded-xl !px-4 !py-2.5 text-xs flex items-center justify-center gap-1.5 shrink-0 min-h-[44px] font-semibold disabled:opacity-40 shadow-sm transition-all"
                   title="Send via WhatsApp Cloud API"
                 >
@@ -1545,7 +1581,7 @@ export function WhatsAppLiveChat() {
                     <span className="text-[15px]">View on Pipeline Board</span>
                   </button>
                   <button
-                    onClick={() => navigate(`/quotations?leadId=${selectedConv.leadId}`)}
+                    onClick={() => navigate(`/quotations/new?leadId=${selectedConv.leadId || ''}&phone=${selectedConv.participantPhone}&name=${encodeURIComponent(leadDetails?.name || selectedConv.participantName || '')}`)}
                     className="w-full text-left py-2 flex items-center gap-3 text-slate-700 hover:bg-transparent"
                   >
                     <FileText size={20} className="text-slate-400" /> 

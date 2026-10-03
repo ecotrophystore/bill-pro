@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Search, ArrowUpRight, ArrowDownLeft, Loader2, Sparkles, AlertCircle, Upload, ArrowLeft, FolderOpen, Download, ChevronDown } from 'lucide-react';
 import { db, functions } from '../lib/firebase';
-import { collection, query, orderBy, onSnapshot, where, limit } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, where, limit, deleteDoc, doc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import StatementUploadModal from '../components/Reconciliation/StatementUploadModal';
 import type { Transaction, StatementUploadLog } from '../types';
@@ -20,6 +20,8 @@ export default function Reconciliation() {
   const [isAutoMatching, setIsAutoMatching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [selectedTransactions, setSelectedTransactions] = useState<string[]>([]);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   const filteredTransactions = transactions.filter(tx => {
     if (!searchQuery) return true;
@@ -128,6 +130,32 @@ export default function Reconciliation() {
     }
   };
 
+
+  const handleBulkDelete = async () => {
+    try {
+      const batchPromises = selectedTransactions.map(id => deleteDoc(doc(db, 'transactions', id)));
+      await Promise.all(batchPromises);
+      setSelectedTransactions([]);
+      setShowBulkDeleteConfirm(false);
+    } catch (error) {
+      console.error('Failed to bulk delete transactions:', error);
+      alert('Failed to delete transactions.');
+    }
+  };
+
+  const toggleSelectAll = (categoryTransactions: Transaction[]) => {
+    if (selectedTransactions.length === categoryTransactions.length) {
+      setSelectedTransactions([]);
+    } else {
+      setSelectedTransactions(categoryTransactions.map(t => t.id));
+    }
+  };
+
+  const toggleSelectTransaction = (id: string) => {
+    setSelectedTransactions(prev => 
+      prev.includes(id) ? prev.filter(txId => txId !== id) : [...prev, id]
+    );
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -415,21 +443,50 @@ export default function Reconciliation() {
       )}
 
       {/* Category Drill-down Header */}
-      {selectedCategory && (
-         <div className="flex items-center gap-4 pb-6 border-b border-shadow-darker/30">
-           <button 
-             onClick={() => setSelectedCategory(null)} 
-             className="px-4 py-2 text-sm font-bold bg-transparent hover:bg-transparent text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
-           >
-             <ArrowLeft size={16} />
-             Back to Categories
-           </button>
-           <div>
-             <h2 className="text-2xl font-black text-primary-dark">{selectedCategory} Payments</h2>
-             <p className="text-xs text-secondary font-semibold mt-1">{groupedTransactions[selectedCategory]?.transactions.length || 0} transactions</p>
+      {selectedCategory && (() => {
+         const categoryTransactions = transactions.filter(tx => (tx.category || 'Uncategorized') === selectedCategory);
+         return (
+         <div className="flex flex-col md:flex-row items-start md:items-center justify-between pb-6 border-b border-shadow-darker/30 gap-4">
+           <div className="flex items-center gap-4">
+             <button 
+               onClick={() => setSelectedCategory(null)} 
+               className="px-4 py-2 text-sm font-bold bg-transparent hover:bg-transparent text-primary-dark border border-black/5 hover:border-black/10 rounded-xl shadow-sm transition-all duration-200 flex items-center gap-2"
+             >
+               <ArrowLeft size={16} />
+               Back to Categories
+             </button>
+             <div>
+               <h2 className="text-2xl font-black text-primary-dark">{selectedCategory} Payments</h2>
+               <p className="text-xs text-secondary font-semibold mt-1">{groupedTransactions[selectedCategory]?.transactions.length || 0} transactions</p>
+             </div>
+           </div>
+           
+           <div className="flex items-center gap-4 w-full md:w-auto px-1 md:px-0">
+             <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-secondary">
+               <input
+                 type="checkbox"
+                 checked={selectedTransactions.length > 0 && selectedTransactions.length === categoryTransactions.length}
+                 ref={(el) => {
+                   if (el) {
+                     el.indeterminate = selectedTransactions.length > 0 && selectedTransactions.length < categoryTransactions.length;
+                   }
+                 }}
+                 onChange={() => toggleSelectAll(categoryTransactions)}
+                 className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+               />
+               Select All
+             </label>
+             {selectedTransactions.length > 0 && (
+               <button
+                 onClick={() => setShowBulkDeleteConfirm(true)}
+                 className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow-sm transition-all duration-200"
+               >
+                 Delete Selected ({selectedTransactions.length})
+               </button>
+             )}
            </div>
          </div>
-      )}
+      );})()}
 
       {/* Categories Grid or Detailed Table View */}
       {loading ? (
@@ -490,6 +547,12 @@ export default function Reconciliation() {
             >
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
+                  <input
+                    type="checkbox"
+                    checked={selectedTransactions.includes(tx.id)}
+                    onChange={() => toggleSelectTransaction(tx.id)}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary shrink-0"
+                  />
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
                     tx.type === 'credit' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'
                   }`}>
@@ -570,6 +633,37 @@ export default function Reconciliation() {
                )}
              </div>
           ))}
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
+          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-neo-bg rounded-2xl shadow-xl">
+            <div className="flex items-center gap-2.5 text-rose-600">
+               <AlertCircle size={20} />
+               <h3 className="font-bold text-sm">Delete {selectedTransactions.length} Transactions?</h3>
+            </div>
+            <p className="text-xs text-secondary leading-relaxed">
+              Are you sure you want to delete these transactions? This action cannot be undone and will permanently remove them from your records.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                className="neo-btn text-xs px-3.5 py-1.5 font-bold text-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="neo-btn-primary text-xs px-4 py-1.5 font-bold bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                Delete All
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

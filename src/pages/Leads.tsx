@@ -42,6 +42,8 @@ export default function Leads() {
   const [selectedPipelineId, setSelectedPipelineId] = useState('all');
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const { hasPermission } = useCRMPermission();
 
   const handleDelete = async (id: string) => {
@@ -56,6 +58,36 @@ export default function Leads() {
       console.error('Failed to delete lead', error);
       alert('Failed to delete lead.');
     }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!hasPermission('edit_lead')) {
+      alert('You do not have permission to delete leads.');
+      return;
+    }
+    try {
+      const batchPromises = selectedLeads.map(id => deleteDoc(doc(db, 'leads', id)));
+      await Promise.all(batchPromises);
+      setSelectedLeads([]);
+      setShowBulkDeleteConfirm(false);
+    } catch (error) {
+      console.error('Failed to bulk delete leads', error);
+      alert('Failed to bulk delete leads.');
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLeads.length === filtered.length) {
+      setSelectedLeads([]);
+    } else {
+      setSelectedLeads(filtered.map(l => l.id));
+    }
+  };
+
+  const toggleSelectLead = (id: string) => {
+    setSelectedLeads(prev => 
+      prev.includes(id) ? prev.filter(leadId => leadId !== id) : [...prev, id]
+    );
   };
 
   useEffect(() => {
@@ -150,6 +182,14 @@ export default function Leads() {
         </div>
 
         <div className="flex items-center gap-3 w-full sm:w-auto">
+          {selectedLeads.length > 0 && hasPermission('edit_lead') && (
+            <button
+              onClick={() => setShowBulkDeleteConfirm(true)}
+              className="neo-btn-primary bg-rose-600 hover:bg-rose-700 text-white flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5"
+            >
+              <Trash2 size={16} /> Delete Selected ({selectedLeads.length})
+            </button>
+          )}
           <Link to="/pipeline" className="neo-btn flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5">
             <Columns3 size={16} /> Pipeline Board
           </Link>
@@ -293,6 +333,19 @@ export default function Leads() {
             <table className="w-full text-xs hidden md:table">
               <thead>
                 <tr className="text-left text-secondary border-b border-shadow-darker/10">
+                  <th className="py-3 pl-4 pr-2 w-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedLeads.length > 0 && selectedLeads.length === filtered.length}
+                      ref={(el) => {
+                        if (el) {
+                          el.indeterminate = selectedLeads.length > 0 && selectedLeads.length < filtered.length;
+                        }
+                      }}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+                    />
+                  </th>
                   <th className="py-3 pr-4 font-semibold">Customer & Lifecycle</th>
                   <th className="py-3 pr-4 font-semibold">Contact</th>
                   <th className="py-3 pr-4 font-semibold">Order Specs</th>
@@ -310,6 +363,14 @@ export default function Leads() {
 
                   return (
                     <tr key={lead.id} className="hover:bg-transparent transition-colors">
+                      <td className="py-3.5 pl-4 pr-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeads.includes(lead.id)}
+                          onChange={() => toggleSelectLead(lead.id)}
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+                        />
+                      </td>
                       <td className="py-3.5 pr-4">
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -420,6 +481,22 @@ export default function Leads() {
 
             {/* Mobile Card View */}
             <div className="md:hidden divide-y divide-shadow-darker/10">
+              <div className="p-4 border-b border-shadow-darker/10 bg-transparent flex items-center justify-between">
+                <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-secondary">
+                  <input
+                    type="checkbox"
+                    checked={selectedLeads.length > 0 && selectedLeads.length === filtered.length}
+                    ref={(el) => {
+                      if (el) {
+                        el.indeterminate = selectedLeads.length > 0 && selectedLeads.length < filtered.length;
+                      }
+                    }}
+                    onChange={toggleSelectAll}
+                    className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary"
+                  />
+                  Select All
+                </label>
+              </div>
               {filtered.map((lead) => {
                 const currentStageObj = stageOptions.find((s) => s.id === lead.status) || {
                   id: lead.status || 'new_enquiry',
@@ -428,8 +505,15 @@ export default function Leads() {
                 return (
                   <div key={lead.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
                     <div className="flex justify-between items-start">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex gap-3 flex-1 items-start">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeads.includes(lead.id)}
+                          onChange={() => toggleSelectLead(lead.id)}
+                          className="w-4 h-4 mt-1 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer accent-primary shrink-0"
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
                           <Link to={`/leads/${lead.id}`} className="font-bold text-primary-dark hover:text-primary transition-colors text-lg leading-tight">
                             {lead.name}
                           </Link>
@@ -443,9 +527,10 @@ export default function Leads() {
                         </div>
                         {lead.company && <div className="text-[11px] text-secondary flex items-center gap-1 mt-0.5"><Building size={11} /> {lead.company}</div>}
                       </div>
-                      <span className="inline-flex px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-primary/10 text-primary-dark border border-primary/20 shrink-0">
-                        {currentStageObj.label}
-                      </span>
+                    </div>
+                    <span className="inline-flex px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-primary/10 text-primary-dark border border-primary/20 shrink-0">
+                      {currentStageObj.label}
+                    </span>
                     </div>
 
                     <div className="flex justify-between items-end text-sm">
@@ -491,10 +576,10 @@ export default function Leads() {
       {/* Styled In-App Deletion Confirmation Modal */}
       {deleteConfirmId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
-          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-transparent rounded-2xl shadow-xl">
+          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-neo-bg rounded-2xl shadow-xl">
             <div className="flex items-center gap-2.5 text-rose-600">
-              <AlertTriangle size={20} />
-              <h3 className="font-bold text-sm">Delete Customer Lead?</h3>
+               <AlertTriangle size={20} />
+               <h3 className="font-bold text-sm">Delete Customer Lead?</h3>
             </div>
             <p className="text-xs text-secondary leading-relaxed">
               Are you sure you want to delete this lead record? This action cannot be undone.
@@ -513,6 +598,37 @@ export default function Leads() {
                 className="neo-btn-primary text-xs px-4 py-1.5 font-bold bg-rose-600 hover:bg-rose-700 text-white"
               >
                 Delete Lead
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Delete Confirmation Modal */}
+      {showBulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-fade-in">
+          <div className="neo-card max-w-sm w-full space-y-4 p-5 bg-neo-bg rounded-2xl shadow-xl">
+            <div className="flex items-center gap-2.5 text-rose-600">
+               <AlertTriangle size={20} />
+               <h3 className="font-bold text-sm">Delete {selectedLeads.length} Leads?</h3>
+            </div>
+            <p className="text-xs text-secondary leading-relaxed">
+              Are you sure you want to delete these lead records? This action cannot be undone.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkDeleteConfirm(false)}
+                className="neo-btn text-xs px-3.5 py-1.5 font-bold text-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkDelete}
+                className="neo-btn-primary text-xs px-4 py-1.5 font-bold bg-rose-600 hover:bg-rose-700 text-white"
+              >
+                Delete All
               </button>
             </div>
           </div>

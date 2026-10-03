@@ -1391,59 +1391,61 @@ export default function ExpensePage() {
               <p className="text-xs opacity-75 mt-1">Add a manual expense or import a spreadsheet above to begin.</p>
             </div>
           ) : (
-            {/* Desktop Table View */}
-            <table className="w-full text-left text-xs border-collapse hidden md:table">
-              <thead>
-                <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Member</th>
-                  <th className="p-3">Purpose</th>
-                  <th className="p-3 text-right">Requested</th>
-                  <th className="p-3 text-right">Paid Amount</th>
-                  <th className="p-3">Tax Type</th>
-                  <th className="p-3 text-right">GST Amount</th>
-                  <th className="p-3">Mode</th>
-                  <th className="p-3">Bill No</th>
-                  <th className="p-3">Notes</th>
-                  <th className="p-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-shadow-darker/5 font-medium">
-                {filteredReportList.map((item) => (
-                  <tr key={item.id} className="hover:bg-primary/5 transition-colors group">
-                    <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
-                    <td className="p-3 font-bold text-primary-dark">{item.member}</td>
-                    <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
-                    <td className="p-3 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
-                      }`}>
-                        {item.taxStatus}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3">
-                      <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[10px]">
-                        {item.paymentMode}
-                      </span>
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-secondary">{item.billNo || '-'}</td>
-                    <td className="p-3 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
-                    <td className="p-3 text-center">
-                      <button 
-                        onClick={() => handleDeleteSavedExpense(item.id)} 
-                        className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete from Firestore"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
+            <>
+              {/* Desktop Table View */}
+              <table className="w-full text-left text-xs border-collapse hidden md:table">
+                <thead>
+                  <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
+                    <th className="p-3">Date</th>
+                    <th className="p-3">Member</th>
+                    <th className="p-3">Purpose</th>
+                    <th className="p-3 text-right">Requested</th>
+                    <th className="p-3 text-right">Paid Amount</th>
+                    <th className="p-3">Tax Type</th>
+                    <th className="p-3 text-right">GST Amount</th>
+                    <th className="p-3">Mode</th>
+                    <th className="p-3">Bill No</th>
+                    <th className="p-3">Notes</th>
+                    <th className="p-3 text-center">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-shadow-darker/5 font-medium">
+                  {filteredReportList.map((item) => (
+                    <tr key={item.id} className="hover:bg-primary/5 transition-colors group">
+                      <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
+                      <td className="p-3 font-bold text-primary-dark">{item.member}</td>
+                      <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
+                      <td className="p-3 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
+                      <td className="p-3 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
+                      <td className="p-3">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
+                        }`}>
+                          {item.taxStatus}
+                        </span>
+                      </td>
+                      <td className="p-3 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
+                      <td className="p-3">
+                        <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[10px]">
+                          {item.paymentMode}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono text-[10px] text-secondary">{item.billNo || '-'}</td>
+                      <td className="p-3 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
+                      <td className="p-3 text-center">
+                        <button 
+                          onClick={() => handleDeleteSavedExpense(item.id)} 
+                          className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Delete from Firestore"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
           
           {/* Mobile Card View for Saved Ledger */}
