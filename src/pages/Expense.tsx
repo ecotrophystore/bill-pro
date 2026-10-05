@@ -33,6 +33,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
 import { extractDataFromDocument } from '../services/ai';
 import { db, auth } from '../lib/firebase';
 import { 
@@ -114,6 +115,7 @@ export default function ExpensePage() {
   const [filterTaxStatus, setFilterTaxStatus] = useState('all');
   const [filterPaymentMode, setFilterPaymentMode] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   // 1. Real-time Firestore sync for Expenses & Opening Cash
   useEffect(() => {
@@ -170,6 +172,31 @@ export default function ExpensePage() {
       unsubExpenses();
     };
   }, []);
+
+  // Auto-fix 2023 dates to 2026
+  useEffect(() => {
+    if (!db || savedExpenses.length === 0) return;
+    const fixDates = async () => {
+      let count = 0;
+      try {
+        const batch = writeBatch(db);
+        savedExpenses.forEach(expense => {
+          if (expense.date && expense.date.startsWith('2023')) {
+            const newDate = expense.date.replace('2023', '2026');
+            batch.update(doc(db, 'expenses', expense.id), { date: newDate });
+            count++;
+          }
+        });
+        if (count > 0) {
+          await batch.commit();
+          console.log(`Auto-fixed ${count} expense dates from 2023 to 2026.`);
+        }
+      } catch (err) {
+        console.warn("Failed to auto-fix dates:", err);
+      }
+    };
+    fixDates();
+  }, [savedExpenses]);
 
   // Update opening cash in Firestore
   const handleSaveOpeningCash = async () => {
@@ -330,22 +357,27 @@ export default function ExpensePage() {
           try {
             const base64Data = (e.target?.result as string).split(',')[1];
             const data = await extractDataFromDocument(base64Data, file.type, 'expense');
-            const ocrRow: ExpenseItem = {
-              id: `ocr-${Date.now()}`,
-              date: data.date || new Date().toISOString().split('T')[0],
+            
+            // Handle both legacy format (single object) and new format (array of expenses)
+            const expensesList = data.expenses || (data.amount ? [data] : []);
+            
+            const newRows = expensesList.map((item: any, idx: number) => ({
+              id: `ocr-${Date.now()}-${idx}`,
+              date: item.date || new Date().toISOString().split('T')[0],
               member: 'Imported Vendor',
-              purpose: data.description || 'Parsed from AI',
-              requested: parseFloat(data.amount) || 0,
-              paid: parseFloat(data.amount) || 0,
+              purpose: item.description || 'Parsed from AI',
+              requested: parseFloat(item.amount) || 0,
+              paid: parseFloat(item.amount) || 0,
               taxStatus: 'Non-GST',
               gstPercent: 0,
               gstAmount: 0,
-              nonGstAmount: parseFloat(data.amount) || 0,
+              nonGstAmount: parseFloat(item.amount) || 0,
               paymentMode: 'UPI',
               billNo: '',
-              notes: (data.notes || 'AI OCR Extraction') + (data.category ? ` [Category: ${data.category}]` : '')
-            };
-            setPreviewRows(prev => [...prev, ocrRow]);
+              notes: (item.notes || 'AI OCR Extraction') + (item.category ? ` [Category: ${item.category}]` : '')
+            }));
+            
+            setPreviewRows(prev => [...prev, ...newRows]);
           } catch(err) {
             console.error(err);
             alert("Failed to extract data with AI.");
@@ -569,57 +601,87 @@ export default function ExpensePage() {
   });
 
   // Export functions
-  const handleExportExcel = () => {
-    const dataToExport = filteredReportList.map(item => ({
-      Date: item.date,
-      Member: item.member,
-      Purpose: item.purpose,
-      'Requested Amount (₹)': item.requested,
-      'Paid Amount (₹)': item.paid,
-      'Tax Status': item.taxStatus,
-      'GST Amount (₹)': item.gstAmount,
-      'Non-GST Amount (₹)': item.nonGstAmount,
-      'Payment Mode': item.paymentMode,
-      'Bill Number': item.billNo || 'N/A',
-      Notes: item.notes || ''
-    }));
+  const handleExportReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let listToExport = savedExpenses;
+    
+    if (options.type === 'month') {
+      const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const end = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= start && d <= end;
+      });
+    } else if (options.type === 'custom' && options.startDate && options.endDate) {
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= options.startDate! && d <= options.endDate!;
+      });
+    } else if (options.type === 'fy') {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+      const start = new Date(startYear, 3, 1);
+      const end = new Date(startYear + 1, 2, 31, 23, 59, 59);
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= start && d <= end;
+      });
+    }
 
-    const ws = XLSX.utils.json_to_sheet(dataToExport);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Expenses");
-    XLSX.writeFile(wb, "Expense_Report.xlsx");
-  };
+    if (options.format === 'bulk_pdf') {
+      alert("Bulk PDF generation is not supported for expenses yet.");
+      return;
+    }
 
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("Expense Ledger Report", 14, 22);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
-    doc.text(`Opening Balance: Rs. ${openingCash.toLocaleString()}`, 14, 34);
+    if (options.format === 'excel') {
+      const dataToExport = listToExport.map(item => ({
+        Date: item.date,
+        Member: item.member,
+        Purpose: item.purpose,
+        'Requested Amount (₹)': item.requested,
+        'Paid Amount (₹)': item.paid,
+        'Tax Status': item.taxStatus,
+        'GST Amount (₹)': item.gstAmount,
+        'Non-GST Amount (₹)': item.nonGstAmount,
+        'Payment Mode': item.paymentMode,
+        'Bill Number': item.billNo || 'N/A',
+        Notes: item.notes || ''
+      }));
 
-    const tableData = filteredReportList.map(item => [
-      item.date,
-      item.member,
-      item.purpose,
-      `Rs. ${item.requested.toLocaleString()}`,
-      `Rs. ${item.paid.toLocaleString()}`,
-      item.taxStatus,
-      `Rs. ${item.gstAmount.toLocaleString()}`,
-      item.paymentMode,
-      item.billNo || '-'
-    ]);
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Expenses");
+      XLSX.writeFile(wb, "Expense_Report.xlsx");
+    } else if (options.format === 'pdf') {
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text("Expense Ledger Report", 14, 22);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
 
-    autoTable(doc, {
-      startY: 40,
-      head: [['Date', 'Member', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [0, 77, 64] },
-    });
+      const tableData = listToExport.map(item => [
+        item.date,
+        item.member,
+        item.purpose,
+        `Rs. ${item.requested.toLocaleString()}`,
+        `Rs. ${item.paid.toLocaleString()}`,
+        item.taxStatus,
+        `Rs. ${item.gstAmount.toLocaleString()}`,
+        item.paymentMode,
+        item.billNo || '-'
+      ]);
 
-    doc.save("Expense_Ledger_Report.pdf");
+      autoTable(doc, {
+        startY: 40,
+        head: [['Date', 'Member', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 77, 64] },
+      });
+
+      doc.save("Expense_Ledger_Report.pdf");
+    }
   };
 
   // Analytics Helpers
@@ -1260,12 +1322,14 @@ export default function ExpensePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={handleExportExcel} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold">
-              <Download size={14} /> Excel
+            <button onClick={() => setIsExportModalOpen(true)} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold">
+              <Download size={14} /> Export Report
             </button>
-            <button onClick={handleExportPDF} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-primary-dark">
-              <FileText size={14} /> PDF Report
-            </button>
+            <ExportReportModal 
+              isOpen={isExportModalOpen}
+              onClose={() => setIsExportModalOpen(false)}
+              onExport={handleExportReport}
+            />
           </div>
         </div>
 
@@ -1583,9 +1647,26 @@ export default function ExpensePage() {
               <p className="text-xs text-secondary py-8 text-center">No monthly trend data available.</p>
             ) : (
               monthlyExpenses.map(item => (
-                <div key={item.month} className="space-y-1">
+                <div 
+                  key={item.month} 
+                  className="space-y-1 cursor-pointer hover:bg-primary/5 p-2 rounded-xl transition-colors"
+                  onClick={() => {
+                    const y = parseInt(item.month.split('-')[0]);
+                    const m = parseInt(item.month.split('-')[1]);
+                    // Pad month and date with zero if needed
+                    const startStr = `${y}-${m.toString().padStart(2, '0')}-01`;
+                    const end = new Date(y, m, 0);
+                    const endStr = `${y}-${m.toString().padStart(2, '0')}-${end.getDate().toString().padStart(2, '0')}`;
+                    setFilterFromDate(startStr);
+                    setFilterToDate(endStr);
+                    window.scrollTo({ top: 400, behavior: 'smooth' });
+                  }}
+                  title="Click to view expenses for this month"
+                >
                   <div className="flex justify-between text-[11px] font-bold">
-                    <span className="text-secondary font-mono">{item.month}</span>
+                    <span className="text-secondary font-semibold group-hover:text-primary transition-colors">
+                      {new Date(item.month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                    </span>
                     <span className="text-primary-dark">₹{item.total.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="w-full h-2 bg-shadow-darker/10 rounded-full overflow-hidden">

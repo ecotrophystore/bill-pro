@@ -72,11 +72,11 @@ export default function ProductLibrary() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return alert("Product name is required.");
-    
+
     const rPrice = parseFloat(retailPrice || "0");
     const wPrice = parseFloat(wholesalePrice || "0");
     const tax = parseFloat(taxPercentage || "0");
-    
+
     if (isNaN(rPrice) || isNaN(wPrice) || isNaN(tax)) {
       return alert("Please enter valid numbers for prices and tax percentage.");
     }
@@ -92,7 +92,7 @@ export default function ProductLibrary() {
           hsn_code: hsnCode.trim() || '0000',
           created_at: new Date()
         });
-        
+
         const newProduct: Product = {
           id: docRef.id,
           name: name.trim(),
@@ -113,7 +113,7 @@ export default function ProductLibrary() {
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000'
         });
-        
+
         setProducts(products.map(p => p.id === editingProductId ? {
           ...p,
           name: name.trim(),
@@ -211,25 +211,25 @@ export default function ProductLibrary() {
           <p className="text-secondary mt-1">Manage your products and pricing</p>
         </div>
         <div className="flex gap-4 items-center">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
+          <div className="relative">
+            <button
+              onClick={() => setShowReportDropdown(!showReportDropdown)}
               className="neo-btn flex items-center gap-2"
             >
               <Download size={18} /> Report <ChevronDown size={14} />
             </button>
             {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+              <div
+                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
                   Excel (.xlsx)
                 </button>
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
@@ -249,9 +249,9 @@ export default function ProductLibrary() {
         <div className="flex justify-between items-center mb-4">
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={20} />
-            <SpeechInput 
-              type="text" 
-              placeholder="Search products..." 
+            <SpeechInput
+              type="text"
+              placeholder="Search products..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="neo-input w-full pl-10"
@@ -285,23 +285,22 @@ export default function ProductLibrary() {
                     <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
                     <td className="py-3 px-4 text-right text-secondary">₹{product.costPrice || 0}</td>
                     <td className="py-3 px-4 text-right">
-                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${
-                        (product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' : 
-                        (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
-                      }`}>
+                      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${(product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' :
+                          (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                        }`}>
                         {product.stockQuantity || 0} {product.unit || 'nos'}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right">{product.tax_percentage}%</td>
                     <td className="py-3 px-4 flex justify-end gap-2">
-                      <button 
+                      <button
                         onClick={() => handleOpenEditModal(product)}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="Edit Product"
                       >
                         <Edit size={18} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => handleDeleteProduct(product.id!)}
                         className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                         title="Delete Product"
@@ -330,23 +329,22 @@ export default function ProductLibrary() {
                   </div>
 
                   <div className="flex justify-between items-center text-sm">
-                    <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${
-                      (product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' : 
-                      (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
-                    }`}>
+                    <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${(product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' :
+                        (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                      }`}>
                       Stock: {product.stockQuantity || 0} {product.unit || 'nos'}
                     </span>
                     <span className="text-xs font-semibold text-secondary">Tax: {product.tax_percentage}%</span>
                   </div>
 
                   <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
-                    <button 
+                    <button
                       onClick={() => handleOpenEditModal(product)}
                       className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold"
                     >
                       <Edit size={14} /> Edit
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleDeleteProduct(product.id!)}
                       className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-error transition-colors"
                     >
@@ -368,7 +366,7 @@ export default function ProductLibrary() {
               <h2 className="text-xl font-bold text-primary-dark">
                 {modalMode === 'add' ? 'Add Product' : 'Edit Product'}
               </h2>
-              <button 
+              <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-secondary hover:text-primary-dark transition-colors"
               >
@@ -379,10 +377,10 @@ export default function ProductLibrary() {
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
-                <SpeechInput 
-                  type="text" 
-                  value={name} 
-                  onChange={(e) => setName(e.target.value)} 
+                <SpeechInput
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   required
                   placeholder="e.g. Acrylic Trophy"
                   className="neo-input w-full"
@@ -391,22 +389,22 @@ export default function ProductLibrary() {
 
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
-                <SpeechInput 
-                  type="text" 
-                  value={hsnCode} 
-                  onChange={(e) => setHsnCode(e.target.value)} 
+                <SpeechInput
+                  type="text"
+                  value={hsnCode}
+                  onChange={(e) => setHsnCode(e.target.value)}
                   placeholder="e.g. 39269099"
                   className="neo-input w-full"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                 <div>
+                <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Retail Price (₹) *</label>
-                  <SpeechInput 
-                    type="number" 
-                    value={retailPrice} 
-                    onChange={(e) => setRetailPrice(e.target.value)} 
+                  <SpeechInput
+                    type="number"
+                    value={retailPrice}
+                    onChange={(e) => setRetailPrice(e.target.value)}
                     required
                     min="0"
                     step="any"
@@ -416,10 +414,10 @@ export default function ProductLibrary() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Wholesale Price (₹) *</label>
-                  <SpeechInput 
-                    type="number" 
-                    value={wholesalePrice} 
-                    onChange={(e) => setWholesalePrice(e.target.value)} 
+                  <SpeechInput
+                    type="number"
+                    value={wholesalePrice}
+                    onChange={(e) => setWholesalePrice(e.target.value)}
                     required
                     min="0"
                     step="any"
@@ -431,8 +429,8 @@ export default function ProductLibrary() {
 
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">Tax Percentage (%) *</label>
-                <select 
-                  value={taxPercentage} 
+                <select
+                  value={taxPercentage}
                   onChange={(e) => setTaxPercentage(e.target.value)}
                   className="neo-input w-full bg-transparent"
                 >
@@ -445,15 +443,15 @@ export default function ProductLibrary() {
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-secondary/10">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-secondary hover:text-primary-dark font-medium transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSaving}
                   className="neo-btn-primary px-6"
                 >

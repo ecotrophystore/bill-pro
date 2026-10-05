@@ -30,6 +30,7 @@ export default function CreatePurchase() {
   const [originalData, setOriginalData] = useState<any>(null);
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [inputKey, setInputKey] = useState(getApiKey());
+  const [isDragging, setIsDragging] = useState(false);
 
   const [formData, setFormData] = useState<Partial<Purchase>>({
     status: 'draft',
@@ -49,6 +50,31 @@ export default function CreatePurchase() {
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
+      if (selectedFile.size > 20 * 1024 * 1024) {
+        alert("File size exceeds 20MB limit.");
+        return;
+      }
+      setFile(selectedFile);
+      setStep('upload');
+      uploadFileAndProcess(selectedFile);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const selectedFile = e.dataTransfer.files[0];
       if (selectedFile.size > 20 * 1024 * 1024) {
         alert("File size exceeds 20MB limit.");
         return;
@@ -380,7 +406,10 @@ export default function CreatePurchase() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
             <div 
               onClick={() => fileInputRef.current?.click()}
-              className="neo-card flex flex-col items-center justify-center p-12 cursor-pointer hover:bg-primary/5 transition-colors border-2 border-dashed border-primary/30 hover:border-primary"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`neo-card flex flex-col items-center justify-center p-12 cursor-pointer transition-colors border-2 border-dashed ${isDragging ? 'bg-primary/10 border-primary' : 'hover:bg-primary/5 border-primary/30 hover:border-primary'}`}
             >
               <Upload size={48} className="text-primary mb-4" />
               <h3 className="text-xl font-bold text-primary-dark mb-2">Upload Invoice</h3>

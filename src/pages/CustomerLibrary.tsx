@@ -140,8 +140,8 @@ export default function CustomerLibrary() {
     }
   };
 
-  const filtered = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filtered = customers.filter(c =>
+    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (c.gst_number && c.gst_number.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
@@ -204,24 +204,24 @@ export default function CustomerLibrary() {
         </div>
         <div className="flex flex-wrap gap-3 items-center w-full sm:w-auto">
           <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
+            <button
+              onClick={() => setShowReportDropdown(!showReportDropdown)}
               className="neo-btn flex items-center gap-2"
             >
               <Download size={18} /> Report <ChevronDown size={14} />
             </button>
             {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
+              <div
+                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
                   Excel (.xlsx)
                 </button>
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
@@ -246,9 +246,9 @@ export default function CustomerLibrary() {
 
       <div className="neo-card flex items-center gap-3">
         <Search className="text-secondary" size={20} />
-        <input 
-          type="text" 
-          placeholder="Search by name or GSTIN..." 
+        <input
+          type="text"
+          placeholder="Search by name or GSTIN..."
           className="bg-transparent border-none outline-none w-full text-primary-dark"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
@@ -257,7 +257,7 @@ export default function CustomerLibrary() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {loading ? (
-          [1,2,3].map(i => <div key={i} className="neo-card h-48 animate-pulse bg-shadow-darker/5"></div>)
+          [1, 2, 3].map(i => <div key={i} className="neo-card h-48 animate-pulse bg-shadow-darker/5"></div>)
         ) : filtered.length > 0 ? (
           filtered.map(customer => (
             <div key={customer.id} className="neo-card group hover:scale-[1.02] transition-transform duration-300">
@@ -273,14 +273,14 @@ export default function CustomerLibrary() {
                     {customer.type || 'Standard'}
                   </div>
                   <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                    <button 
+                    <button
                       onClick={() => handleEditCustomerClick(customer)}
                       className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                       title="Edit Customer"
                     >
                       <Edit size={16} />
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleDeleteCustomer(customer.id)}
                       className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                       title="Delete Customer"
@@ -290,7 +290,7 @@ export default function CustomerLibrary() {
                   </div>
                 </div>
               </div>
-              
+
               <h3 className="text-lg font-bold text-primary-dark truncate">{customer.name}</h3>
               <p className="text-xs font-mono text-secondary mb-4">{customer.gst_number || 'NO GSTIN'}</p>
 
@@ -314,7 +314,7 @@ export default function CustomerLibrary() {
 
               <div className="mt-6 pt-4 border-t border-shadow-darker/10 flex justify-between items-center">
                 <span className="text-[10px] text-secondary/50 uppercase font-bold tracking-tight">Active since {customer.created_at?.toDate ? new Date(customer.created_at.toDate()).toLocaleDateString() : 'N/A'}</span>
-                <button 
+                <button
                   onClick={() => navigate(`/invoices?customer=${encodeURIComponent(customer.name)}`)}
                   className="text-primary hover:underline flex items-center gap-1 text-sm font-semibold"
                 >
@@ -337,21 +337,21 @@ export default function CustomerLibrary() {
           <div className="bg-surface w-full max-w-lg rounded-card shadow-neo-hover p-6 border border-shadow-darker/10">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-primary-dark">{editingCustomer ? 'Edit Customer' : 'Add New Customer'}</h2>
-              <button 
+              <button
                 onClick={handleCloseModal}
                 className="p-1 rounded-lg text-secondary hover:text-primary transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
-            
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-primary-dark mb-1">
                   Customer Name <span className="text-red-500">*</span>
                 </label>
-                <SpeechInput 
-                  type="text" 
+                <SpeechInput
+                  type="text"
                   required
                   placeholder="Enter name"
                   className="neo-input w-full"
@@ -364,8 +364,8 @@ export default function CustomerLibrary() {
                 <label className="block text-sm font-semibold text-primary-dark mb-1">
                   GST Number (Optional)
                 </label>
-                <SpeechInput 
-                  type="text" 
+                <SpeechInput
+                  type="text"
                   placeholder="Enter 15-digit GSTIN"
                   className="neo-input w-full"
                   value={gstNumber}
@@ -378,8 +378,8 @@ export default function CustomerLibrary() {
                   <label className="block text-sm font-semibold text-primary-dark mb-1">
                     Phone Number
                   </label>
-                  <SpeechInput 
-                    type="tel" 
+                  <SpeechInput
+                    type="tel"
                     placeholder="Enter phone number"
                     className="neo-input w-full"
                     value={phone}
@@ -391,8 +391,8 @@ export default function CustomerLibrary() {
                   <label className="block text-sm font-semibold text-primary-dark mb-1">
                     Email ID (Optional)
                   </label>
-                  <SpeechInput 
-                    type="email" 
+                  <SpeechInput
+                    type="email"
                     placeholder="Enter email address"
                     className="neo-input w-full"
                     value={email}
@@ -406,7 +406,7 @@ export default function CustomerLibrary() {
                   Billing Address
                 </label>
                 <div className="relative flex items-center w-full">
-                  <textarea 
+                  <textarea
                     placeholder="Enter billing address"
                     className="neo-input w-full min-h-[80px] resize-none pr-8"
                     value={billingAddress}
@@ -421,15 +421,15 @@ export default function CustomerLibrary() {
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-shadow-darker/10">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={handleCloseModal}
                   className="neo-btn px-6 py-2"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className="neo-btn-primary px-6 py-2"
                 >
                   {editingCustomer ? 'Update Customer' : 'Save Customer'}

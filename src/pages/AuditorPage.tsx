@@ -108,7 +108,7 @@ export default function AuditorPage() {
                    Filter
                 </button>
                 {showFilterDropdown && (
-                  <div className="absolute right-0 mt-2 w-64 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 p-4 space-y-4">
+                  <div className="absolute right-0 mt-2 w-64 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 p-4 space-y-4">
                     <div>
                       <label className="block text-[10px] font-bold uppercase tracking-wider text-secondary mb-1">Document Type</label>
                       <select 

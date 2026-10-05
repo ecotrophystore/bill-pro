@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Calendar, Filter, Loader2, Edit, Trash2, Download, ChevronDown } from 'lucide-react';
+import { Plus, Search, Calendar, Filter, Loader2, Edit, Trash2, Download, ChevronDown, Eye } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import type { Purchase } from '../types';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
 
 export default function Purchases() {
   const navigate = useNavigate();
@@ -14,12 +15,13 @@ export default function Purchases() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [previewPurchase, setPreviewPurchase] = useState<Purchase | null>(null);
 
   useEffect(() => {
     if (!db) return;
     const q = query(collection(db, 'purchases'), orderBy('date', 'desc'));
-    const unsubscribe = onSnapshot(q, 
+    const unsubscribe = onSnapshot(q,
       (snapshot) => {
         setPurchases(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Purchase)));
         setLoading(false);
@@ -66,7 +68,7 @@ export default function Purchases() {
     if (!amountStr) return;
     const amount = parseFloat(amountStr);
     if (isNaN(amount)) return;
-    
+
     try {
       const updatedVendor = { ...purchase.vendor, name: vendor };
       await updateDoc(doc(db, 'purchases', purchase.id), { vendor: updatedVendor, amount });
@@ -93,7 +95,7 @@ export default function Purchases() {
       let newStatus = 'pending';
       if (purchase.status === 'pending' || purchase.status === 'submitted') {
         newStatus = 'bank_transfer';
-        
+
         // Move to Reconciliation by creating a transaction
         await addDoc(collection(db, 'transactions'), {
           amount: purchase.grandTotal || purchase.amount || 0,
@@ -110,7 +112,7 @@ export default function Purchases() {
       else if (purchase.status === 'bank_transfer') newStatus = 'cleared';
       else if (purchase.status === 'cleared') newStatus = 'flagged';
       else if (purchase.status === 'flagged') newStatus = 'pending';
-      
+
       await updateDoc(doc(db, 'purchases', purchase.id), { status: newStatus });
     } catch (err) {
       console.error("Error updating status:", err);
@@ -121,18 +123,114 @@ export default function Purchases() {
   const filteredPurchases = purchases.filter(p => {
     const vendorName = typeof p.vendor === 'string' ? p.vendor : p.vendor?.name || '';
     const matchesSearch = vendorName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-           (p.reference && p.reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
-           (p.invoice?.invoice_number && p.invoice.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()));
+      (p.reference && p.reference.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (p.invoice?.invoice_number && p.invoice.invoice_number.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesStatus = statusFilter === 'all' || p.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filtered = filteredPurchases;
+
+    const now = new Date();
+    filtered = filtered.filter(p => {
+      const pDate = p.date || p.createdAt;
+      const date = pDate ? (pDate as any).toDate ? (pDate as any).toDate() : new Date(pDate as any) : new Date();
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              for (const purchase of filtered) {
+                const doc = new jsPDF();
+                doc.setFontSize(20);
+                doc.text("Purchase Record", 14, 22);
+                
+                doc.setFontSize(12);
+                doc.setTextColor(50);
+                const vendorName = purchase.vendor?.name || 'Unknown Vendor';
+                doc.text(`Vendor: ${vendorName}`, 14, 34);
+                doc.text(`Category: ${purchase.category || 'General'}`, 14, 42);
+                
+                const pDate = purchase.date || purchase.createdAt;
+                const dateStr = pDate ? (pDate as any).toDate ? (pDate as any).toDate().toLocaleDateString('en-IN') : new Date(pDate as any).toLocaleDateString('en-IN') : 'N/A';
+                doc.text(`Date: ${dateStr}`, 130, 34);
+                
+                const ref = purchase.invoice?.invoice_number || purchase.reference || 'N/A';
+                doc.text(`Reference: ${ref}`, 130, 42);
+                
+                doc.text(`Status: ${purchase.status.toUpperCase()}`, 130, 50);
+
+                if (purchase.items && purchase.items.length > 0) {
+                  autoTable(doc, {
+                    startY: 60,
+                    head: [['Item', 'Quantity', 'Unit Price', 'Total']],
+                    body: purchase.items.map(item => [
+                      item.itemName || 'Item',
+                      (item.quantity || 1).toString(),
+                      `Rs. ${(item.unitPrice || 0).toLocaleString()}`,
+                      `Rs. ${(item.total || 0).toLocaleString()}`
+                    ]),
+                    theme: 'striped',
+                  });
+                  const finalY = (doc as any).lastAutoTable.finalY || 60;
+                  doc.setFontSize(14);
+                  doc.setTextColor(0);
+                  doc.text(`Grand Total: Rs. ${(purchase.grandTotal || purchase.amount || 0).toLocaleString()}`, 130, finalY + 20);
+                } else {
+                  doc.setFontSize(14);
+                  doc.setTextColor(0);
+                  doc.text(`Grand Total: Rs. ${(purchase.grandTotal || purchase.amount || 0).toLocaleString()}`, 14, 60);
+                }
+                
+                const blob = doc.output('blob');
+                const filename = `Purchase_${ref}_${vendorName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                zip.file(filename, blob);
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'Purchases_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
+
     if (format === 'excel') {
-      const reportData = filteredPurchases.map(p => {
+      const reportData = filtered.map(p => {
         const vendorName = typeof p.vendor === 'string' ? p.vendor : p.vendor?.name || '';
         const invoiceNum = p.invoice?.invoice_number || p.reference || 'N/A';
-        const purchaseDate = p.date ? (p.date as any).toDate ? (p.date as any).toDate().toLocaleDateString('en-IN') : new Date(p.date as any).toLocaleDateString('en-IN') : 'N/A';
+        const pDate = p.date || p.createdAt;
+        const purchaseDate = pDate ? (pDate as any).toDate ? (pDate as any).toDate().toLocaleDateString('en-IN') : new Date(pDate as any).toLocaleDateString('en-IN') : 'N/A';
         return {
           'Purchase Reference/Invoice': invoiceNum,
           'Vendor': vendorName,
@@ -158,10 +256,11 @@ export default function Purchases() {
       autoTable(doc, {
         startY: 40,
         head: [['Invoice/Ref #', 'Vendor', 'Date', 'Grand Total', 'Category', 'Status']],
-        body: filteredPurchases.map(p => {
+        body: filtered.map(p => {
           const vendorName = typeof p.vendor === 'string' ? p.vendor : p.vendor?.name || '';
           const invoiceNum = p.invoice?.invoice_number || p.reference || 'N/A';
-          const purchaseDate = p.date ? (p.date as any).toDate ? (p.date as any).toDate().toLocaleDateString('en-IN') : new Date(p.date as any).toLocaleDateString('en-IN') : 'N/A';
+          const pDate = p.date || p.createdAt;
+          const purchaseDate = pDate ? (pDate as any).toDate ? (pDate as any).toDate().toLocaleDateString('en-IN') : new Date(pDate as any).toLocaleDateString('en-IN') : 'N/A';
           return [
             invoiceNum,
             vendorName,
@@ -185,33 +284,17 @@ export default function Purchases() {
           <p className="text-secondary mt-1">Track and reconcile incoming inventory / services.</p>
         </div>
         <div className="flex gap-4 items-center">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-transparent border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button onClick={handleAddPurchase} className="neo-btn-primary flex items-center gap-2">
             <Plus size={20} />
             New Purchase
@@ -222,7 +305,7 @@ export default function Purchases() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="md:col-span-2 relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={18} />
-          <input 
+          <input
             type="text"
             placeholder="Search vendors or reference numbers..."
             className="w-full neo-input !pl-10"
@@ -235,7 +318,7 @@ export default function Purchases() {
           This Month
         </button>
         <div className="relative">
-          <select 
+          <select
             className="neo-btn !px-4 !pl-10 flex items-center justify-center gap-2 appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -281,31 +364,37 @@ export default function Purchases() {
                   <td className="p-4 font-mono text-xs text-secondary">{purchase.invoice?.invoice_number || purchase.reference || 'N/A'}</td>
                   <td className="p-4 text-right font-black text-primary-dark">₹ {(purchase.grandTotal || purchase.amount || 0).toLocaleString()}</td>
                   <td className="p-4 text-center">
-                    <button 
+                    <button
                       onClick={() => toggleStatus(purchase)}
-                      className={`cursor-pointer transition-colors px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                        purchase.status === 'cleared' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 
-                        purchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
-                        purchase.status === 'flagged' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                      }`}>
+                      className={`cursor-pointer transition-colors px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${purchase.status === 'cleared' ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                          purchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
+                            purchase.status === 'flagged' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                        }`}>
                       {purchase.status}
                     </button>
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
                       <button 
-                        onClick={() => handleEditPurchase(purchase)}
+                        onClick={() => setPreviewPurchase(purchase)}
                         className="p-2 text-secondary hover:text-primary transition-colors" 
+                        title="Preview Purchase"
+                      >
+                         <Eye size={18} />
+                      </button>
+                      <button
+                        onClick={() => handleEditPurchase(purchase)}
+                        className="p-2 text-secondary hover:text-primary transition-colors"
                         title="Edit Purchase"
                       >
-                         <Edit size={18} />
+                        <Edit size={18} />
                       </button>
-                      <button 
+                      <button
                         onClick={() => deletePurchase(purchase.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
+                        className="p-2 text-secondary hover:text-red-600 transition-colors"
                         title="Delete Purchase"
                       >
-                         <Trash2 size={18} />
+                        <Trash2 size={18} />
                       </button>
                     </div>
                   </td>
@@ -339,29 +428,34 @@ export default function Purchases() {
                   <div className="font-mono text-[11px] text-secondary">
                     Ref: {purchase.invoice?.invoice_number || purchase.reference || 'N/A'}
                   </div>
-                  <button 
+                  <button
                     onClick={() => toggleStatus(purchase)}
-                    className={`cursor-pointer transition-colors px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
-                      purchase.status === 'cleared' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 
-                      purchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
-                      purchase.status === 'flagged' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-                    }`}>
+                    className={`cursor-pointer transition-colors px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${purchase.status === 'cleared' ? 'bg-green-100 text-green-700 hover:bg-green-200' :
+                        purchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' :
+                          purchase.status === 'flagged' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                      }`}>
                     {purchase.status}
                   </button>
                 </div>
 
                 <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
                   <button 
-                    onClick={() => handleEditPurchase(purchase)}
+                    onClick={() => setPreviewPurchase(purchase)}
                     className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold" 
                   >
-                     <Edit size={14} /> Edit
+                     <Eye size={14} /> Preview
                   </button>
-                  <button 
-                    onClick={() => deletePurchase(purchase.id)}
-                    className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-red-600 transition-colors" 
+                  <button
+                    onClick={() => handleEditPurchase(purchase)}
+                    className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold"
                   >
-                     <Trash2 size={16} />
+                    <Edit size={14} /> Edit
+                  </button>
+                  <button
+                    onClick={() => deletePurchase(purchase.id)}
+                    className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-red-600 transition-colors"
+                  >
+                    <Trash2 size={16} />
                   </button>
                 </div>
               </div>
@@ -369,6 +463,80 @@ export default function Purchases() {
           </div>
         </div>
       </div>
+
+      {previewPurchase && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+          <div className="bg-surface rounded-card w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-neo-raised relative animate-slide-up p-8">
+            <button
+              onClick={() => setPreviewPurchase(null)}
+              className="absolute top-4 right-4 p-2 text-secondary hover:text-primary transition-colors bg-shadow-darker/5 rounded-full"
+            >
+              ✕
+            </button>
+            <h2 className="text-2xl font-bold text-primary-dark mb-6">Purchase Details</h2>
+            
+            <div className="grid grid-cols-2 gap-6 mb-8">
+              <div>
+                <p className="text-sm text-secondary font-semibold uppercase tracking-wider mb-1">Vendor</p>
+                <p className="font-bold text-primary-dark text-lg">{previewPurchase.vendor?.name || 'Unknown'}</p>
+                <p className="text-sm text-secondary">{previewPurchase.category || 'General'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-secondary font-semibold uppercase tracking-wider mb-1">Date</p>
+                <p className="font-bold text-primary-dark text-lg">
+                  {previewPurchase.createdAt?.toDate().toLocaleDateString('en-IN') || previewPurchase.date?.toDate().toLocaleDateString('en-IN') || '-'}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-secondary font-semibold uppercase tracking-wider mb-1">Reference / Invoice #</p>
+                <p className="font-bold text-primary-dark text-lg">{previewPurchase.invoice?.invoice_number || previewPurchase.reference || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-sm text-secondary font-semibold uppercase tracking-wider mb-1">Total Amount</p>
+                <p className="font-bold text-primary-dark text-lg">₹ {(previewPurchase.grandTotal || previewPurchase.amount || 0).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-sm text-secondary font-semibold uppercase tracking-wider mb-1">Status</p>
+                <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                        previewPurchase.status === 'cleared' ? 'bg-green-100 text-green-700' : 
+                        previewPurchase.status === 'bank_transfer' ? 'bg-blue-100 text-blue-700' :
+                        previewPurchase.status === 'flagged' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'
+                      }`}>
+                  {previewPurchase.status}
+                </span>
+              </div>
+            </div>
+
+            {previewPurchase.items && previewPurchase.items.length > 0 && (
+              <div>
+                <h3 className="text-lg font-bold text-primary-dark mb-4">Line Items</h3>
+                <div className="border border-shadow-darker/10 rounded-xl overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-shadow-darker/5 border-b border-shadow-darker/10">
+                      <tr>
+                        <th className="p-3 text-sm font-semibold text-secondary">Item</th>
+                        <th className="p-3 text-sm font-semibold text-secondary text-right">Qty</th>
+                        <th className="p-3 text-sm font-semibold text-secondary text-right">Price</th>
+                        <th className="p-3 text-sm font-semibold text-secondary text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-shadow-darker/5">
+                      {previewPurchase.items.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-3 font-medium text-primary-dark">{item.itemName || 'Item'}</td>
+                          <td className="p-3 text-right">{item.quantity || 1}</td>
+                          <td className="p-3 text-right">₹ {(item.unitPrice || 0).toLocaleString()}</td>
+                          <td className="p-3 text-right font-bold text-primary-dark">₹ {(item.total || 0).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

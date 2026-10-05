@@ -113,16 +113,21 @@ function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
   } else if (type === 'expense') {
     return `
       You are an expert OCR and data extraction system.
-      Extract the key details from this expense receipt.
+      Extract the key details from this expense receipt or handwritten list.
+      If there are multiple individual expenses listed (like a handwritten daily ledger), extract each one separately as its own item.
       Return the output as a JSON object matching this schema exactly:
       {
-        "date": "YYYY-MM-DD",
-        "description": "Short description of what was purchased (e.g. Office Supplies from Staples)",
-        "amount": 0.00,
-        "category": "General",
-        "notes": "Any extra details or vendor name"
+        "expenses": [
+          {
+            "date": "YYYY-MM-DD",
+            "description": "Short description of what was purchased or the vendor name",
+            "amount": 0.00,
+            "category": "General",
+            "notes": "Any extra details"
+          }
+        ]
       }
-      Important: Ensure amount is a number.
+      Important: Ensure amount is a number. If a date is written once at the top of a page, apply it to all items below it. Assume the current year is ${new Date().getFullYear()} if no year is specified.
     `;
   } else if (type === 'statement') {
     return `

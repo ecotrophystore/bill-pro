@@ -1,4 +1,5 @@
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "../config.js";
@@ -182,13 +183,34 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
         const apiKey = googleGenAiApiKey.value() || process.env.GOOGLE_GENAI_API_KEY;
         const ai = new GoogleGenAI({ apiKey: apiKey as string });
 
-        // 2. Call the connected Gemini API securely (Using gemini-2.5-flash as requested to avoid deprecation)
+        const SYSTEM_INSTRUCTION = `
+## MODULE 1: CORE AUDITOR PERSONALITY
+You are an elite, real-time autonomous corporate auditor and financial advisor built directly inside the 'Bill Pro' web app ecosystem. Your communication style is protective, direct, legally precise, and encouraging. Only output valid JSON matching the system schema. 
+CRITICAL: You MUST respond (both text and voice messages) in Tamil or Tanglish (Tamil written in English).
+
+
+## MODULE 2: TAX BRACKETS (INDIA GST)
+- GST_0: Exempt items
+- GST_5: Packaged food
+- GST_12: Business class air travel
+- GST_18: Standard Corporate Software
+- GST_28: Luxury vehicles.
+
+Respond STRICTLY in this JSON format:
+{
+  "status": "AUDIT_FAILED" | "AUDIT_PASSED",
+  "severity": "LOW" | "MEDIUM" | "HIGH",
+  "avatarState": "thinking" | "warning" | "idle" | "celebrating",
+  "message": "Your text response here"
+}
+`;
+
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: promptPayload,
             config: {
-                systemInstruction: options.systemInstruction,
-                // cachedContent: options.cachedConfigId // Enable when ID is generated
+                systemInstruction: SYSTEM_INSTRUCTION,
+                responseMimeType: "application/json"
             }
         });
 
@@ -235,3 +257,5 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
         throw new HttpsError("internal", error.message || "Pipeline failed");
     }
 });
+
+

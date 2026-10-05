@@ -15,4 +15,18 @@ export declare const getGeminiLiveEphemeralToken: import("firebase-functions/v2/
     token: string | undefined;
     url: string;
 }>, unknown>;
+/**
+ * Main Executable Middleware Wrapper for all Bill Pro Agent onBlur Actions
+ */
+export declare const executeBillProAgentTask: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
+    success: boolean;
+    fallbackActive: boolean;
+    text: string;
+    budgetAlert?: never;
+} | {
+    success: boolean;
+    fallbackActive: boolean;
+    text: string | undefined;
+    budgetAlert: string | null;
+}>, unknown>;
 //# sourceMappingURL=gateway.d.ts.map
