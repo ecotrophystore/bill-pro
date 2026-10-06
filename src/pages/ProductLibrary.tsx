@@ -370,6 +370,17 @@ export default function ProductLibrary() {
               className="neo-input w-full pl-10"
             />
           </div>
+          <div className="w-full md:w-auto">
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as any)}
+              className="neo-input w-full"
+            >
+              <option value="all">All Products</option>
+              <option value="purchase">Purchase Products Only</option>
+              <option value="manual">Ecotrophy Products Only</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -377,8 +388,8 @@ export default function ProductLibrary() {
         <div className="text-center py-8 text-secondary neo-card">Loading products...</div>
       ) : (
         <>
-          {renderProductTable(purchaseProducts, "Purchase Products", "Products imported from vendor bills and purchases")}
-          {renderProductTable(ecotrophyProducts, "Ecotrophy Products", "Products created manually or manufactured")}
+          {(sourceFilter === 'all' || sourceFilter === 'purchase') && renderProductTable(purchaseProducts, "Purchase Products", "Products imported from vendor bills and purchases")}
+          {(sourceFilter === 'all' || sourceFilter === 'manual') && renderProductTable(ecotrophyProducts, "Ecotrophy Products", "Products created manually or manufactured")}
         </>
       )}
 
