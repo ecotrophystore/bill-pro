@@ -288,12 +288,15 @@ export default function ExpensePage() {
       reader.onload = (event) => {
         setCropImageUrl(event.target?.result as string);
         setIsCropModalOpen(true);
+        if (cameraInputRef.current) {
+            cameraInputRef.current.value = '';
+        }
       };
       reader.readAsDataURL(selectedFile);
-    }
-    // Reset the input value so the same file can be selected again
-    if (cameraInputRef.current) {
-        cameraInputRef.current.value = '';
+    } else {
+      if (cameraInputRef.current) {
+          cameraInputRef.current.value = '';
+      }
     }
   };
 
