@@ -13,6 +13,7 @@ export default function ProductLibrary() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'purchase' | 'manual'>('all');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,7 +91,8 @@ export default function ProductLibrary() {
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
-          created_at: new Date()
+          created_at: new Date(),
+          source: 'manual'
         });
 
         const newProduct: Product = {
@@ -100,7 +102,8 @@ export default function ProductLibrary() {
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
-          created_at: new Date() as any
+          created_at: new Date() as any,
+          source: 'manual'
         };
         setProducts([newProduct, ...products]);
       } else {
@@ -143,10 +146,19 @@ export default function ProductLibrary() {
     }
   };
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (product.hsn_code && product.hsn_code.includes(searchQuery))
-  );
+  const filteredProducts = products.filter(product => {
+    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (product.hsn_code && product.hsn_code.includes(searchQuery));
+    
+    const isPurchase = product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0);
+    const matchesSource = sourceFilter === 'all' 
+      ? true 
+      : sourceFilter === 'purchase' 
+        ? isPurchase 
+        : !isPurchase;
+
+    return matchesSearch && matchesSource;
+  });
 
   const handleVoiceProduct = (_customerName: string | null, items: any[]) => {
     if (!items || items.length === 0) {
@@ -246,8 +258,8 @@ export default function ProductLibrary() {
       </div>
 
       <div className="neo-card">
-        <div className="flex justify-between items-center mb-4">
-          <div className="relative w-64">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
+          <div className="relative w-full md:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={20} />
             <SpeechInput
               type="text"
@@ -256,6 +268,17 @@ export default function ProductLibrary() {
               onChange={(e) => setSearchQuery(e.target.value)}
               className="neo-input w-full pl-10"
             />
+          </div>
+          <div className="w-full md:w-auto">
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as any)}
+              className="neo-input w-full"
+            >
+              <option value="all">All Products</option>
+              <option value="purchase">Purchase Products</option>
+              <option value="manual">Ecotrophy Products</option>
+            </select>
           </div>
         </div>
 

@@ -27,7 +27,8 @@ import {
   Tags,
   DollarSign,
   Cloud,
-  CloudUpload
+  CloudUpload,
+  Camera
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -93,6 +94,7 @@ export default function ExpensePage() {
   const [isParsing, setIsParsing] = useState(false);
   const [parsedFileName, setParsedFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Manual Entry Form state
   const [manualForm, setManualForm] = useState({
@@ -906,6 +908,14 @@ export default function ExpensePage() {
                 accept=".csv, .xlsx, .xls, image/*, application/pdf" 
                 className="hidden" 
               />
+              <input 
+                type="file" 
+                ref={cameraInputRef} 
+                onChange={handleFileChange} 
+                accept="image/*" 
+                capture="environment"
+                className="hidden" 
+              />
               
               {isParsing ? (
                 <div className="flex flex-col items-center gap-2">
@@ -915,10 +925,23 @@ export default function ExpensePage() {
                 </div>
               ) : (
                 <>
-                  <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
-                    <Upload size={20} />
+                  <div className="flex gap-4 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center">
+                      <Upload size={20} />
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        cameraInputRef.current?.click();
+                      }}
+                      className="w-12 h-12 rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 hover:text-primary-dark flex items-center justify-center transition-colors"
+                      title="Use Mobile Camera"
+                    >
+                      <Camera size={20} />
+                    </button>
                   </div>
-                  <span className="text-xs font-bold text-primary-dark">Choose file or drag here</span>
+                  <span className="text-xs font-bold text-primary-dark">Choose file, drag here, or take photo</span>
                   <span className="text-[10px] text-secondary mt-1">Supports CSV, Excel (.xlsx, .xls), Images, PDFs</span>
                 </>
               )}

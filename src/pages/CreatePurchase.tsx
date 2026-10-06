@@ -353,7 +353,8 @@ export default function CreatePurchase() {
                    vendorName: finalData.vendor?.name || 'Unknown',
                    purchaseId: finalData.id
                 }],
-                created_at: Timestamp.now()
+                created_at: Timestamp.now(),
+                source: 'purchase'
              });
           }
         }

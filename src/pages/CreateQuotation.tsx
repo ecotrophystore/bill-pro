@@ -52,7 +52,8 @@ export default function CreateQuotation() {
         
         const loadedCustomers = custSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Customer));
         setCustomers(loadedCustomers);
-        setProducts(prodSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+        const allProducts = prodSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+        setProducts(allProducts.filter(p => !(p.source === 'purchase' || (p.priceHistory && p.priceHistory.length > 0))));
 
         if (id) {
           const qDoc = await getDoc(doc(db, 'quotations', id));

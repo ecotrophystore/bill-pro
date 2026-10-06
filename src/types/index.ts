@@ -66,6 +66,7 @@ export interface Product {
     purchaseId: string;
   }[];
   created_at: Timestamp;
+  source?: 'manual' | 'purchase';
 }
 
 export interface LineItem {
