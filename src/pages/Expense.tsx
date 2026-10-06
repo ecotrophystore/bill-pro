@@ -271,13 +271,39 @@ export default function ExpensePage() {
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+      const selectedFile = e.dataTransfer.files[0];
+      if (selectedFile.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setCropImageUrl(event.target?.result as string);
+          setIsCropModalOpen(true);
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        processFile(selectedFile);
+      }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      if (selectedFile.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setCropImageUrl(event.target?.result as string);
+          setIsCropModalOpen(true);
+          if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+          }
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        processFile(selectedFile);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+      }
     }
   };
 
