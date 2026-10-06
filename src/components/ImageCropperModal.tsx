@@ -28,7 +28,6 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       const image = new Image();
       image.addEventListener('load', () => resolve(image));
       image.addEventListener('error', (error) => reject(error));
-      image.setAttribute('crossOrigin', 'anonymous'); 
       image.src = url;
     });
 
@@ -73,14 +72,16 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
   };
 
   const handleConfirm = async () => {
+    if (!croppedAreaPixels) return;
     try {
       const croppedImage = await getCroppedImg(imageUrl, croppedAreaPixels);
       if (croppedImage) {
         onCropComplete(croppedImage);
         onClose();
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert("Error cropping image: " + (e.message || JSON.stringify(e)));
     }
   };
 
