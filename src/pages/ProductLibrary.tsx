@@ -147,17 +147,8 @@ export default function ProductLibrary() {
   };
 
   const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    return product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (product.hsn_code && product.hsn_code.includes(searchQuery));
-    
-    const isPurchase = product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0);
-    const matchesSource = sourceFilter === 'all' 
-      ? true 
-      : sourceFilter === 'purchase' 
-        ? isPurchase 
-        : !isPurchase;
-
-    return matchesSearch && matchesSource;
   });
 
   const handleVoiceProduct = (_customerName: string | null, items: any[]) => {
@@ -269,17 +260,6 @@ export default function ProductLibrary() {
               className="neo-input w-full pl-10"
             />
           </div>
-          <div className="w-full md:w-auto">
-            <select
-              value={sourceFilter}
-              onChange={(e) => setSourceFilter(e.target.value as any)}
-              className="neo-input w-full"
-            >
-              <option value="all">All Products</option>
-              <option value="purchase">Purchase Products</option>
-              <option value="manual">Ecotrophy Products</option>
-            </select>
-          </div>
         </div>
 
         {loading ? (
@@ -292,6 +272,7 @@ export default function ProductLibrary() {
               <thead>
                 <tr className="border-b-2 border-secondary/20">
                   <th className="text-left py-3 px-4 text-primary-dark font-semibold">Name</th>
+                  <th className="text-left py-3 px-4 text-primary-dark font-semibold">Type</th>
                   <th className="text-left py-3 px-4 text-primary-dark font-semibold">HSN Code</th>
                   <th className="text-right py-3 px-4 text-primary-dark font-semibold">Retail Price</th>
                   <th className="text-right py-3 px-4 text-primary-dark font-semibold">Cost Price</th>
@@ -304,6 +285,15 @@ export default function ProductLibrary() {
                 {filteredProducts.map(product => (
                   <tr key={product.id} className="border-b border-secondary/10 hover:bg-transparent">
                     <td className="py-3 px-4 font-medium">{product.name}</td>
+                    <td className="py-3 px-4">
+                      <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${
+                        (product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0))
+                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                          : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                      }`}>
+                        {(product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0)) ? 'Purchase' : 'Ecotrophy'}
+                      </span>
+                    </td>
                     <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
                     <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
                     <td className="py-3 px-4 text-right text-secondary">₹{product.costPrice || 0}</td>
@@ -343,7 +333,16 @@ export default function ProductLibrary() {
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="font-bold text-primary-dark">{product.name}</div>
-                      <div className="text-xs text-secondary mt-0.5">HSN: {product.hsn_code || 'N/A'}</div>
+                      <div className="text-xs text-secondary mt-1 flex items-center gap-2">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                          (product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0))
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
+                            : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                        }`}>
+                          {(product.source === 'purchase' || (product.priceHistory && product.priceHistory.length > 0)) ? 'Purchase' : 'Ecotrophy'}
+                        </span>
+                        <span>HSN: {product.hsn_code || 'N/A'}</span>
+                      </div>
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-primary-dark">₹{product.retail_price}</div>
