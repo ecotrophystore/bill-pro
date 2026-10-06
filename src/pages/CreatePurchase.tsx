@@ -9,6 +9,7 @@ import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../contexts/AuthContext';
 import { extractDataFromDocument, getApiKey, setApiKey } from '../services/ai';
 import type { Purchase, PurchaseItem } from '../types';
+import { ImageCropperModal } from '../components/ImageCropperModal';
 
 type Step = 'entry_method' | 'upload' | 'processing' | 'review' | 'confirmation';
 
@@ -46,6 +47,8 @@ export default function CreatePurchase() {
   const [syncInventory, setSyncInventory] = useState(true);
 
   const [confidenceInfo, setConfidenceInfo] = useState<any>({});
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -58,6 +61,33 @@ export default function CreatePurchase() {
       setStep('upload');
       uploadFileAndProcess(selectedFile);
     }
+  };
+
+  const handleCameraSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.size > 20 * 1024 * 1024) {
+        alert("File size exceeds 20MB limit.");
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCropImageUrl(event.target?.result as string);
+        setIsCropModalOpen(true);
+      };
+      reader.readAsDataURL(selectedFile);
+    }
+    // Reset the input value so the same file can be selected again
+    if (cameraInputRef.current) {
+        cameraInputRef.current.value = '';
+    }
+  };
+
+  const handleCropComplete = (croppedFile: File) => {
+    setFile(croppedFile);
+    setStep('upload');
+    uploadFileAndProcess(croppedFile);
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
@@ -431,7 +461,7 @@ export default function CreatePurchase() {
           <button onClick={() => cameraInputRef.current?.click()} className="neo-btn flex items-center gap-2">
             <Camera size={20} /> Use Mobile Camera
           </button>
-          <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleFileSelect} />
+          <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleCameraSelect} />
         </div>
       )}
 
@@ -743,6 +773,17 @@ export default function CreatePurchase() {
         </div>
       )}
 
+      {cropImageUrl && (
+        <ImageCropperModal
+          isOpen={isCropModalOpen}
+          onClose={() => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+          }}
+          imageUrl={cropImageUrl}
+          onCropComplete={handleCropComplete}
+        />
+      )}
     </div>
   );
 }

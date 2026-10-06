@@ -50,6 +50,7 @@ import {
   writeBatch, 
   serverTimestamp 
 } from 'firebase/firestore';
+import { ImageCropperModal } from '../components/ImageCropperModal';
 
 interface ExpenseItem {
   id: string;
@@ -118,6 +119,10 @@ export default function ExpensePage() {
   const [filterPaymentMode, setFilterPaymentMode] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
 
   // 1. Real-time Firestore sync for Expenses & Opening Cash
   useEffect(() => {
@@ -274,6 +279,26 @@ export default function ExpensePage() {
     if (e.target.value && e.target.files && e.target.files[0]) {
       processFile(e.target.files[0]);
     }
+  };
+
+  const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.value && e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCropImageUrl(event.target?.result as string);
+        setIsCropModalOpen(true);
+      };
+      reader.readAsDataURL(selectedFile);
+    }
+    // Reset the input value so the same file can be selected again
+    if (cameraInputRef.current) {
+        cameraInputRef.current.value = '';
+    }
+  };
+
+  const handleCropComplete = (croppedFile: File) => {
+    processFile(croppedFile);
   };
 
   const exactRound = (num: number) => Math.round(num * 100) / 100;
@@ -523,9 +548,30 @@ export default function ExpensePage() {
     if (!db) return;
     try {
       await deleteDoc(doc(db, 'expenses', id));
+      setSelectedExpenses(prev => prev.filter(selId => selId !== id));
     } catch (err: any) {
       console.error("Error deleting expense:", err);
       alert("Failed to delete expense: " + (err.message || "Unknown error"));
+    }
+  };
+
+  // Bulk Delete
+  const handleBulkDelete = async () => {
+    if (selectedExpenses.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedExpenses.length} selected expenses?`)) return;
+    if (!db) return;
+    
+    try {
+      const batch = writeBatch(db);
+      selectedExpenses.forEach(id => {
+        batch.delete(doc(db, 'expenses', id));
+      });
+      await batch.commit();
+      setSelectedExpenses([]);
+      alert(`Successfully deleted ${selectedExpenses.length} expenses.`);
+    } catch (err: any) {
+      console.error("Error in bulk delete:", err);
+      alert("Failed to delete expenses: " + (err.message || "Unknown error"));
     }
   };
 
@@ -911,7 +957,7 @@ export default function ExpensePage() {
               <input 
                 type="file" 
                 ref={cameraInputRef} 
-                onChange={handleFileChange} 
+                onChange={handleCameraChange} 
                 accept="image/*" 
                 capture="environment"
                 className="hidden" 
@@ -1345,6 +1391,14 @@ export default function ExpensePage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {selectedExpenses.length > 0 && (
+              <button 
+                onClick={handleBulkDelete} 
+                className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
+              >
+                <Trash2 size={14} /> Delete Selected ({selectedExpenses.length})
+              </button>
+            )}
             <button onClick={() => setIsExportModalOpen(true)} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold">
               <Download size={14} /> Export Report
             </button>
@@ -1483,6 +1537,20 @@ export default function ExpensePage() {
               <table className="w-full text-left text-xs border-collapse hidden md:table">
                 <thead>
                   <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
+                    <th className="p-3 w-10 text-center">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                        checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedExpenses(filteredReportList.map(item => item.id));
+                          } else {
+                            setSelectedExpenses([]);
+                          }
+                        }}
+                      />
+                    </th>
                     <th className="p-3">Date</th>
                     <th className="p-3">Member</th>
                     <th className="p-3">Purpose</th>
@@ -1498,7 +1566,21 @@ export default function ExpensePage() {
                 </thead>
                 <tbody className="divide-y divide-shadow-darker/5 font-medium">
                   {filteredReportList.map((item) => (
-                    <tr key={item.id} className="hover:bg-primary/5 transition-colors group">
+                    <tr key={item.id} className={`hover:bg-primary/5 transition-colors group ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : ''}`}>
+                      <td className="p-3 text-center">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                          checked={selectedExpenses.includes(item.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedExpenses(prev => [...prev, item.id]);
+                            } else {
+                              setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                            }
+                          }}
+                        />
+                      </td>
                       <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
                       <td className="p-3 font-bold text-primary-dark">{item.member}</td>
                       <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
@@ -1538,12 +1620,43 @@ export default function ExpensePage() {
           {/* Mobile Card View for Saved Ledger */}
           {!loadingExpenses && filteredReportList.length > 0 && (
             <div className="md:hidden divide-y divide-shadow-darker/10 border-t border-shadow-darker/10">
+              <div className="p-4 bg-gray-50 flex items-center justify-between border-b border-shadow-darker/10">
+                <label className="flex items-center gap-2 text-xs font-bold text-secondary cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                    checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedExpenses(filteredReportList.map(item => item.id));
+                      } else {
+                        setSelectedExpenses([]);
+                      }
+                    }}
+                  />
+                  Select All
+                </label>
+              </div>
               {filteredReportList.map((item) => (
-                <div key={item.id} className="p-4 space-y-3 group hover:bg-shadow-darker/5 transition-colors">
+                <div key={item.id} className={`p-4 space-y-3 group transition-colors ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : 'hover:bg-shadow-darker/5'}`}>
                   <div className="flex justify-between items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-bold text-primary-dark text-sm truncate">{item.member}</div>
-                      <div className="text-xs text-secondary mt-0.5 truncate" title={item.purpose}>{item.purpose}</div>
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-gray-300 text-primary focus:ring-primary mt-1 cursor-pointer"
+                        checked={selectedExpenses.includes(item.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedExpenses(prev => [...prev, item.id]);
+                          } else {
+                            setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                          }
+                        }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold text-primary-dark text-sm truncate">{item.member}</div>
+                        <div className="text-xs text-secondary mt-0.5 truncate" title={item.purpose}>{item.purpose}</div>
+                      </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <div className="font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</div>
@@ -1706,6 +1819,17 @@ export default function ExpensePage() {
 
       </div>
 
+      {cropImageUrl && (
+        <ImageCropperModal
+          isOpen={isCropModalOpen}
+          onClose={() => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+          }}
+          imageUrl={cropImageUrl}
+          onCropComplete={handleCropComplete}
+        />
+      )}
     </div>
   );
 }
