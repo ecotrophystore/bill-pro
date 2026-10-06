@@ -276,13 +276,13 @@ export default function ExpensePage() {
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value && e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files[0]) {
       processFile(e.target.files[0]);
     }
   };
 
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value && e.target.files && e.target.files[0]) {
+    if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       const reader = new FileReader();
       reader.onload = (event) => {
