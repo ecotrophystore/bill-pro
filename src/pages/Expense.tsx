@@ -801,10 +801,10 @@ export default function ExpensePage() {
   const maxMonthlyExpense = Math.max(...monthlyExpenses.map(m => m.total), 1000);
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-7xl mx-auto pb-16">
+    <div className="space-y-6 animate-fade-in">
       
       {/* 1. Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-primary-dark uppercase">Expense Tracking</h1>
           <p className="text-secondary mt-1">
@@ -821,7 +821,7 @@ export default function ExpensePage() {
 
       {/* Legacy Migration Alert Banner */}
       {legacyLocalExpenses.length > 0 && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
               <CloudUpload size={22} />
@@ -847,9 +847,9 @@ export default function ExpensePage() {
       )}
 
       {/* 2. Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
         {/* Opening Cash Card */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary relative flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Opening Cash</span>
             <Wallet size={16} className="text-primary" />
@@ -878,7 +878,7 @@ export default function ExpensePage() {
         </div>
 
         {/* Money in Hand */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Money In Hand</span>
             <ArrowDownRight size={16} className="text-primary" />
@@ -890,7 +890,7 @@ export default function ExpensePage() {
         </div>
 
         {/* Total Requested */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Requested</span>
             <Layers size={16} className="text-primary" />
@@ -902,7 +902,7 @@ export default function ExpensePage() {
         </div>
 
         {/* Total Paid */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Paid</span>
             <ArrowUpRight size={16} className="text-primary" />
@@ -914,7 +914,7 @@ export default function ExpensePage() {
         </div>
 
         {/* Closing Balance */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Closing Bal.</span>
             <Wallet size={16} className="text-primary" />
@@ -926,7 +926,7 @@ export default function ExpensePage() {
         </div>
 
         {/* GST Total */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total GST</span>
             <Sparkles size={16} className="text-primary" />
@@ -938,7 +938,7 @@ export default function ExpensePage() {
         </div>
 
         {/* Non-GST Total */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        <div className="neo-card !p-4 flex flex-col justify-between">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Non-GST Exp.</span>
             <FileText size={16} className="text-primary" />
@@ -1035,9 +1035,9 @@ export default function ExpensePage() {
             <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
               <div className="flex items-center gap-2">
                 <Plus size={18} className="text-primary" />
-                <h3 className="font-bold text-base text-primary-dark">Manual Entry Form</h3>
+                <h3 className="font-bold text-lg text-primary-dark">Manual Entry Form</h3>
               </div>
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest bg-primary/5 px-2.5 py-1 rounded-full">
+              <span className="text-xs font-bold text-secondary uppercase tracking-widest bg-primary/5 px-3 py-1 rounded-full">
                 Staged Row
               </span>
             </div>
@@ -1045,36 +1045,36 @@ export default function ExpensePage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Date */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Date *</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
                 <input 
                   type="date" 
                   value={manualForm.date} 
                   onChange={(e) => setManualForm({...manualForm, date: e.target.value})} 
-                  className="neo-input w-full !text-xs font-semibold" 
+                  className="neo-input w-full font-semibold" 
                   required 
                 />
               </div>
 
               {/* Member Name */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
                 <input 
                   type="text" 
                   placeholder="e.g. Ramesh" 
                   value={manualForm.member} 
                   onChange={(e) => setManualForm({...manualForm, member: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
+                  className="neo-input w-full" 
                   required 
                 />
               </div>
 
               {/* Payment Mode */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
                 <select 
                   value={manualForm.paymentMode} 
                   onChange={(e) => setManualForm({...manualForm, paymentMode: e.target.value as any})} 
-                  className="neo-input w-full !text-xs"
+                  className="neo-input w-full"
                 >
                   <option value="UPI">UPI</option>
                   <option value="Cash">Cash</option>
@@ -1085,63 +1085,63 @@ export default function ExpensePage() {
 
               {/* Purpose */}
               <div className="space-y-1 md:col-span-2">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
                 <input 
                   type="text" 
                   placeholder="e.g. Raw Material Acrylic Sheets" 
                   value={manualForm.purpose} 
                   onChange={(e) => setManualForm({...manualForm, purpose: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
+                  className="neo-input w-full" 
                   required 
                 />
               </div>
 
               {/* Bill No */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
                 <input 
                   type="text" 
                   placeholder="Optional bill #" 
                   value={manualForm.billNo} 
                   onChange={(e) => setManualForm({...manualForm, billNo: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
+                  className="neo-input w-full" 
                 />
               </div>
 
               {/* Requested Amount */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
                 <input 
                   type="number" 
                   step="0.01" 
                   placeholder="0.00" 
                   value={manualForm.requested} 
                   onChange={(e) => setManualForm({...manualForm, requested: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
+                  className="neo-input w-full" 
                 />
               </div>
 
               {/* Paid Amount */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
                 <input 
                   type="number" 
                   step="0.01" 
                   placeholder="0.00" 
                   value={manualForm.paid} 
                   onChange={(e) => setManualForm({...manualForm, paid: e.target.value})} 
-                  className="neo-input w-full !text-xs font-bold text-primary-dark" 
+                  className="neo-input w-full font-bold text-primary-dark" 
                   required 
                 />
               </div>
 
               {/* Tax Status */}
               <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Tax Type</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
                 <select 
                   value={manualForm.taxStatus} 
                   onChange={(e) => setManualForm({...manualForm, taxStatus: e.target.value as any})} 
-                  className="neo-input w-full !text-xs"
+                  className="neo-input w-full"
                 >
                   <option value="GST">GST Included</option>
                   <option value="Non-GST">Non-GST</option>
@@ -1151,11 +1151,11 @@ export default function ExpensePage() {
               {/* GST Percent (Conditional) */}
               {manualForm.taxStatus === 'GST' && (
                 <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
                   <select 
                     value={manualForm.gstPercent} 
                     onChange={(e) => setManualForm({...manualForm, gstPercent: parseFloat(e.target.value)})} 
-                    className="neo-input w-full !text-xs"
+                    className="neo-input w-full"
                   >
                     <option value={5}>5%</option>
                     <option value={12}>12%</option>
@@ -1167,13 +1167,13 @@ export default function ExpensePage() {
 
               {/* Notes */}
               <div className={`space-y-1 ${manualForm.taxStatus === 'GST' ? 'md:col-span-2' : 'md:col-span-3'}`}>
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
                 <input 
                   type="text" 
                   placeholder="Optional remarks" 
                   value={manualForm.notes} 
                   onChange={(e) => setManualForm({...manualForm, notes: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
+                  className="neo-input w-full" 
                 />
               </div>
             </div>
@@ -1218,19 +1218,19 @@ export default function ExpensePage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse hidden md:table">
+            <table className="w-full text-left border-collapse hidden md:table">
               <thead>
-                <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Member</th>
-                  <th className="p-3">Purpose</th>
-                  <th className="p-3 text-right">Requested</th>
-                  <th className="p-3 text-right">Paid Amount</th>
-                  <th className="p-3">Tax Type</th>
-                  <th className="p-3 text-right">GST Amount</th>
-                  <th className="p-3">Mode</th>
-                  <th className="p-3 text-right">Running Cash</th>
-                  <th className="p-3 text-center">Action</th>
+                <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Tax Type</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">GST Amount</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Mode</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Running Cash</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-shadow-darker/5 font-medium">
@@ -1414,7 +1414,7 @@ export default function ExpensePage() {
           <div>
             <div className="flex items-center gap-2">
               <Clock size={18} className="text-primary" />
-              <h3 className="font-bold text-base text-primary-dark">Saved Expense Ledger ({filteredReportList.length} items)</h3>
+              <h3 className="font-bold text-xl text-primary-dark">Saved Expense Ledger ({filteredReportList.length} items)</h3>
             </div>
             <p className="text-xs text-secondary mt-0.5">Real-time cloud database ledger synced with Firestore.</p>
           </div>
@@ -1563,10 +1563,10 @@ export default function ExpensePage() {
           ) : (
             <>
               {/* Desktop Table View */}
-              <table className="w-full text-left text-xs border-collapse hidden md:table">
+              <table className="w-full text-left border-collapse hidden md:table">
                 <thead>
-                  <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
-                    <th className="p-3 w-10 text-center">
+                  <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
+                    <th className="p-4 w-10 text-center">
                       <input 
                         type="checkbox" 
                         className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
@@ -1580,17 +1580,17 @@ export default function ExpensePage() {
                         }}
                       />
                     </th>
-                    <th className="p-3">Date</th>
-                    <th className="p-3">Member</th>
-                    <th className="p-3">Purpose</th>
-                    <th className="p-3 text-right">Requested</th>
-                    <th className="p-3 text-right">Paid Amount</th>
-                    <th className="p-3">Tax Type</th>
-                    <th className="p-3 text-right">GST Amount</th>
-                    <th className="p-3">Mode</th>
-                    <th className="p-3">Bill No</th>
-                    <th className="p-3">Notes</th>
-                    <th className="p-3 text-center">Action</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Tax Type</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">GST Amount</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Mode</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Bill No</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Notes</th>
+                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-center">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-shadow-darker/5 font-medium">
