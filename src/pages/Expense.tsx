@@ -1683,7 +1683,7 @@ export default function ExpensePage() {
                             <span className="text-[10px] text-secondary">Req: ₹{totalReq.toLocaleString('en-IN')}</span>
                           )}
                         </div>
-                        <div className="bg-white p-1.5 rounded-full shadow-sm">
+                        <div className="bg-primary/5 p-1.5 rounded-full shadow-sm">
                           {isExpanded ? <ChevronUp size={20} className="text-primary" /> : <ChevronDown size={20} className="text-secondary" />}
                         </div>
                       </div>
@@ -1691,7 +1691,7 @@ export default function ExpensePage() {
 
                     {/* Accordion Body */}
                     {isExpanded && (
-                      <div className="border-t border-shadow-darker/10 bg-white">
+                      <div className="border-t border-shadow-darker/10 bg-transparent">
                         {/* Desktop Table View */}
                         <div className="hidden md:block overflow-x-auto">
                           <table className="w-full text-left border-collapse">
