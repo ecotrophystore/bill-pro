@@ -56,7 +56,6 @@ interface ExpenseItem {
   id: string;
   date: string;
   member: string;
-  category: string;
   purpose: string;
   requested: number;
   paid: number;
@@ -102,7 +101,6 @@ export default function ExpensePage() {
   const [manualForm, setManualForm] = useState({
     date: new Date().toISOString().split('T')[0],
     member: '',
-    category: 'Other',
     purpose: '',
     requested: '',
     paid: '',
@@ -117,7 +115,7 @@ export default function ExpensePage() {
   const [filterFromDate, setFilterFromDate] = useState('');
   const [filterToDate, setFilterToDate] = useState('');
   const [filterMember, setFilterMember] = useState('all');
-  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterPurpose, setFilterPurpose] = useState('all');
   const [filterTaxStatus, setFilterTaxStatus] = useState('all');
   const [filterPaymentMode, setFilterPaymentMode] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -358,7 +356,6 @@ export default function ExpensePage() {
                 id: `csv-${Date.now()}-${idx}`,
                 date: row.Date || row.date || new Date().toISOString().split('T')[0],
                 member: row.Member || row.member || row.Name || row.name || 'Imported Member',
-                category: row.Category || row.category || 'Other',
                 purpose: row.Purpose || row.purpose || row.Description || row.description || 'Imported Purpose',
                 requested: req,
                 paid: paid,
@@ -394,7 +391,6 @@ export default function ExpensePage() {
               id: `xlsx-${Date.now()}-${idx}`,
               date: row.Date || row.date || new Date().toISOString().split('T')[0],
               member: row.Member || row.member || row.Name || row.name || 'Imported Member',
-              category: row.Category || row.category || 'Other',
               purpose: row.Purpose || row.purpose || row.Description || row.description || 'Imported Purpose',
               requested: req,
               paid: paid,
@@ -426,7 +422,6 @@ export default function ExpensePage() {
               id: `ocr-${Date.now()}-${idx}`,
               date: item.date || new Date().toISOString().split('T')[0],
               member: 'Imported Vendor',
-              category: item.category || 'Other',
               purpose: item.description || 'Parsed from AI',
               requested: parseFloat(item.amount) || 0,
               paid: parseFloat(item.amount) || 0,
@@ -468,7 +463,6 @@ export default function ExpensePage() {
       id: `manual-${Date.now()}`,
       date: manualForm.date,
       member: manualForm.member,
-      category: manualForm.category || 'Other',
       purpose: manualForm.purpose,
       requested,
       paid,
@@ -487,7 +481,6 @@ export default function ExpensePage() {
     setManualForm(prev => ({
       ...prev,
       member: '',
-      category: 'Other',
       purpose: '',
       requested: '',
       paid: '',
@@ -544,7 +537,6 @@ export default function ExpensePage() {
         batch.set(newDocRef, {
           date: item.date,
           member: item.member,
-          category: item.category || 'Other',
           purpose: item.purpose,
           requested: item.requested,
           paid: item.paid,
@@ -625,7 +617,6 @@ export default function ExpensePage() {
         batch.set(newDocRef, {
           date: item.date || new Date().toISOString().split('T')[0],
           member: item.member || 'Migrated Member',
-          category: (item as any).category || 'Other',
           purpose: item.purpose || 'Migrated Purpose',
           requested: Number(item.requested || item.paid || 0),
           paid: Number(item.paid || 0),
@@ -659,7 +650,10 @@ export default function ExpensePage() {
     if (filterFromDate && item.date < filterFromDate) return false;
     if (filterToDate && item.date > filterToDate) return false;
     if (filterMember !== 'all' && item.member.toLowerCase() !== filterMember.toLowerCase()) return false;
-    if (filterCategory !== 'all' && (item.category || 'Other') !== filterCategory) return false;
+    
+    // Exact or loose match on purpose based on filter
+    if (filterPurpose !== 'all' && item.purpose !== filterPurpose) return false;
+
     if (filterTaxStatus !== 'all' && item.taxStatus !== filterTaxStatus) return false;
     if (filterPaymentMode !== 'all' && item.paymentMode !== filterPaymentMode) return false;
     
@@ -678,9 +672,9 @@ export default function ExpensePage() {
   const filteredStats = getStats(filteredReportList);
   const filteredClosing = openingCash - filteredStats.totalPaid;
 
-  // Extract unique members and categories for filter dropdown
+  // Extract unique members and purposes for filter dropdown
   const uniqueMembers = [...new Set(savedExpenses.map(item => item.member))];
-  const uniqueCategories = [...new Set(savedExpenses.map(item => item.category || 'Other'))];
+  const uniquePurposes = [...new Set(savedExpenses.map(item => item.purpose))];
 
   // Running cash for Staged Preview Table
   let previewRunningCash = openingCash;
@@ -726,7 +720,6 @@ export default function ExpensePage() {
       const dataToExport = listToExport.map(item => ({
         Date: item.date,
         Member: item.member,
-        Category: item.category || 'Other',
         Purpose: item.purpose,
         'Requested Amount (₹)': item.requested,
         'Paid Amount (₹)': item.paid,
@@ -753,7 +746,6 @@ export default function ExpensePage() {
       const tableData = listToExport.map(item => [
         item.date,
         item.member,
-        item.category || 'Other',
         item.purpose,
         `Rs. ${item.requested.toLocaleString()}`,
         `Rs. ${item.paid.toLocaleString()}`,
@@ -765,7 +757,7 @@ export default function ExpensePage() {
 
       autoTable(doc, {
         startY: 40,
-        head: [['Date', 'Member', 'Category', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
+        head: [['Date', 'Member', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
         body: tableData,
         theme: 'striped',
         headStyles: { fillColor: [0, 77, 64] },
@@ -809,21 +801,21 @@ export default function ExpensePage() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, total]) => ({ month, total }));
   };
 
-  const getCategoryWiseExpenses = () => {
+  const getPurposeWiseExpenses = () => {
     const map: Record<string, { total: number; count: number; gst: number; nonGst: number }> = {};
     savedExpenses.forEach(item => {
-      const c = item.category || 'Other';
-      if (!map[c]) map[c] = { total: 0, count: 0, gst: 0, nonGst: 0 };
-      map[c].total += item.paid;
-      map[c].count += 1;
-      map[c].gst += item.gstAmount;
-      map[c].nonGst += item.nonGstAmount;
+      const p = item.purpose || 'Unknown';
+      if (!map[p]) map[p] = { total: 0, count: 0, gst: 0, nonGst: 0 };
+      map[p].total += item.paid;
+      map[p].count += 1;
+      map[p].gst += item.gstAmount;
+      map[p].nonGst += item.nonGstAmount;
     });
-    return Object.entries(map).map(([category, val]) => ({ category, ...val })).sort((a,b) => b.total - a.total);
+    return Object.entries(map).map(([purpose, val]) => ({ purpose, ...val })).sort((a,b) => b.total - a.total);
   };
 
   const memberExpenses = getMemberWiseExpenses();
-  const categoryExpenses = getCategoryWiseExpenses();
+  const purposeExpenses = getPurposeWiseExpenses();
   const taxBreakdown = getTaxBreakdown();
   const monthlyExpenses = getMonthlyBreakdown();
   const maxMonthlyExpense = Math.max(...monthlyExpenses.map(m => m.total), 1000);
@@ -1096,29 +1088,6 @@ export default function ExpensePage() {
                 />
               </div>
 
-              {/* Category */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Category</label>
-                <input 
-                  type="text" 
-                  list="expense-categories"
-                  placeholder="e.g. Bus Parcel" 
-                  value={manualForm.category} 
-                  onChange={(e) => setManualForm({...manualForm, category: e.target.value})} 
-                  className="neo-input w-full" 
-                />
-                <datalist id="expense-categories">
-                  <option value="Bus Parcel" />
-                  <option value="Raw Materials" />
-                  <option value="Office Supplies" />
-                  <option value="Maintenance" />
-                  <option value="Salaries" />
-                  <option value="Travel" />
-                  <option value="Utilities" />
-                  <option value="Other" />
-                </datalist>
-              </div>
-
               {/* Payment Mode */}
               <div className="space-y-1">
                 <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
@@ -1274,7 +1243,6 @@ export default function ExpensePage() {
                 <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
                   <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
                   <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
-                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Category</th>
                   <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
                   <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
                   <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
@@ -1302,14 +1270,6 @@ export default function ExpensePage() {
                         value={row.member} 
                         onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
                         className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-28 outline-none font-semibold text-primary-dark"
-                      />
-                    </td>
-                    <td className="p-3">
-                      <input 
-                        type="text" 
-                        value={row.category} 
-                        onChange={(e) => handleEditPreviewRow(row.id, 'category', e.target.value)} 
-                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-24 outline-none font-semibold text-primary"
                       />
                     </td>
                     <td className="p-3">
@@ -1392,13 +1352,6 @@ export default function ExpensePage() {
                         placeholder="Member"
                         onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
                         className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary-dark"
-                      />
-                      <input 
-                        type="text" 
-                        value={row.category} 
-                        placeholder="Category"
-                        onChange={(e) => handleEditPreviewRow(row.id, 'category', e.target.value)} 
-                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary"
                       />
                       <input 
                         type="text" 
@@ -1560,17 +1513,17 @@ export default function ExpensePage() {
             </select>
           </div>
 
-          {/* Filter Category */}
+          {/* Filter Purpose */}
           <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Category</label>
+            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Purpose</label>
             <select 
-              value={filterCategory} 
-              onChange={(e) => setFilterCategory(e.target.value)} 
+              value={filterPurpose} 
+              onChange={(e) => setFilterPurpose(e.target.value)} 
               className="neo-input !py-1.5 !text-xs w-full"
             >
-              <option value="all">All Categories</option>
-              {uniqueCategories.map(c => (
-                <option key={c} value={c}>{c}</option>
+              <option value="all">All Purposes</option>
+              {uniquePurposes.map(p => (
+                <option key={p} value={p}>{p}</option>
               ))}
             </select>
           </div>
@@ -1664,7 +1617,6 @@ export default function ExpensePage() {
                     </th>
                     <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
                     <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Category</th>
                     <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
                     <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
                     <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
@@ -1695,7 +1647,6 @@ export default function ExpensePage() {
                       </td>
                       <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
                       <td className="p-3 font-bold text-primary-dark">{item.member}</td>
-                      <td className="p-3 font-semibold text-primary">{item.category || 'Other'}</td>
                       <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
                       <td className="p-3 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
                       <td className="p-3 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
@@ -1768,7 +1719,6 @@ export default function ExpensePage() {
                       />
                       <div className="flex-1 min-w-0">
                         <div className="font-bold text-primary-dark text-sm truncate">{item.member}</div>
-                        <div className="text-[11px] font-semibold text-primary truncate">{item.category || 'Other'}</div>
                         <div className="text-xs text-secondary mt-0.5 truncate" title={item.purpose}>{item.purpose}</div>
                       </div>
                     </div>
@@ -1817,29 +1767,29 @@ export default function ExpensePage() {
       {/* 6. Visual Analytics & Member Breakdown */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
         
-        {/* Category-wise Breakdown */}
+        {/* Purpose Breakdown */}
         <div className="neo-card p-6 space-y-4">
           <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
             <Layers size={18} className="text-primary" />
-            <h4 className="font-bold text-sm text-primary-dark">Category Breakdown</h4>
+            <h4 className="font-bold text-sm text-primary-dark">Purpose Breakdown</h4>
           </div>
           
           <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
-            {categoryExpenses.length === 0 ? (
-              <p className="text-xs text-secondary py-8 text-center">No category data recorded.</p>
+            {purposeExpenses.length === 0 ? (
+              <p className="text-xs text-secondary py-8 text-center">No purpose data recorded.</p>
             ) : (
-              categoryExpenses.map(c => (
+              purposeExpenses.map(c => (
                 <div 
-                  key={c.category} 
+                  key={c.purpose} 
                   className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-primary/10 transition-colors"
                   onClick={() => {
-                    setFilterCategory(c.category);
+                    setFilterPurpose(c.purpose);
                     window.scrollTo({ top: 400, behavior: 'smooth' });
                   }}
-                  title={`Click to filter by ${c.category}`}
+                  title={`Click to filter by ${c.purpose}`}
                 >
                   <div>
-                    <span className="font-bold text-primary-dark block">{c.category}</span>
+                    <span className="font-bold text-primary-dark block max-w-[120px] truncate" title={c.purpose}>{c.purpose}</span>
                     <span className="text-[10px] text-secondary">{c.count} transaction(s)</span>
                   </div>
                   <div className="text-right">
