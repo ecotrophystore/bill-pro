@@ -9,6 +9,7 @@ import {
   Trash2, 
   Download, 
   ChevronDown, 
+  ChevronUp,
   Upload, 
   X, 
   FileText, 
@@ -124,6 +125,7 @@ export default function ExpensePage() {
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
+  const [expandedPurpose, setExpandedPurpose] = useState<string | null>(null);
 
   // 1. Real-time Firestore sync for Expenses & Opening Cash
   useEffect(() => {
@@ -682,6 +684,22 @@ export default function ExpensePage() {
     previewRunningCash -= item.paid;
     return { ...item, runningCash: previewRunningCash };
   });
+
+  // Group the filteredReportList by Purpose
+  const groupedLedger = React.useMemo(() => {
+    const groups: Record<string, typeof filteredReportList> = {};
+    filteredReportList.forEach(item => {
+      const p = item.purpose || 'Unknown';
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(item);
+    });
+    // Sort by total paid descending
+    return Object.entries(groups).sort((a, b) => {
+      const sumA = a[1].reduce((acc, curr) => acc + curr.paid, 0);
+      const sumB = b[1].reduce((acc, curr) => acc + curr.paid, 0);
+      return sumB - sumA;
+    });
+  }, [filteredReportList]);
 
   // Export functions
   const handleExportReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
@@ -1596,99 +1614,13 @@ export default function ExpensePage() {
               <p className="text-xs opacity-75 mt-1">Add a manual expense or import a spreadsheet above to begin.</p>
             </div>
           ) : (
-            <>
-              {/* Desktop Table View */}
-              <table className="w-full text-left border-collapse hidden md:table">
-                <thead>
-                  <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
-                    <th className="p-4 w-10 text-center">
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
-                        checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedExpenses(filteredReportList.map(item => item.id));
-                          } else {
-                            setSelectedExpenses([]);
-                          }
-                        }}
-                      />
-                    </th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Tax Type</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">GST Amount</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Mode</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Bill No</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Notes</th>
-                    <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-shadow-darker/5 font-medium">
-                  {filteredReportList.map((item) => (
-                    <tr key={item.id} className={`hover:bg-primary/5 transition-colors group ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : ''}`}>
-                      <td className="p-3 text-center">
-                        <input 
-                          type="checkbox" 
-                          className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
-                          checked={selectedExpenses.includes(item.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedExpenses(prev => [...prev, item.id]);
-                            } else {
-                              setSelectedExpenses(prev => prev.filter(id => id !== item.id));
-                            }
-                          }}
-                        />
-                      </td>
-                      <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
-                      <td className="p-3 font-bold text-primary-dark">{item.member}</td>
-                      <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
-                      <td className="p-3 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
-                      <td className="p-3 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
-                        }`}>
-                          {item.taxStatus}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
-                      <td className="p-3">
-                        <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[10px]">
-                          {item.paymentMode}
-                        </span>
-                      </td>
-                      <td className="p-3 font-mono text-[10px] text-secondary">{item.billNo || '-'}</td>
-                      <td className="p-3 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
-                      <td className="p-3 text-center">
-                        <button 
-                          onClick={() => handleDeleteSavedExpense(item.id)} 
-                          className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="Delete from Firestore"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-          
-          {/* Mobile Card View for Saved Ledger */}
-          {!loadingExpenses && filteredReportList.length > 0 && (
-            <div className="md:hidden divide-y divide-shadow-darker/10 border-t border-shadow-darker/10">
-              <div className="p-4 bg-gray-50 flex items-center justify-between border-b border-shadow-darker/10">
-                <label className="flex items-center gap-2 text-xs font-bold text-secondary cursor-pointer">
+            <div className="space-y-4">
+              {/* Global Select All for Grouped View */}
+              <div className="flex items-center justify-between p-3 bg-shadow-darker/5 rounded-xl border border-shadow-darker/10">
+                <label className="flex items-center gap-2 text-sm font-bold text-primary-dark cursor-pointer">
                   <input 
                     type="checkbox" 
-                    className="rounded border-gray-300 text-primary focus:ring-primary"
+                    className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer w-4 h-4"
                     checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
                     onChange={(e) => {
                       if (e.target.checked) {
@@ -1698,67 +1630,199 @@ export default function ExpensePage() {
                       }
                     }}
                   />
-                  Select All
+                  Select All {filteredReportList.length} Expenses
                 </label>
+                <div className="text-xs text-secondary font-semibold">
+                  {groupedLedger.length} Purpose Categories
+                </div>
               </div>
-              {filteredReportList.map((item) => (
-                <div key={item.id} className={`p-4 space-y-3 group transition-colors ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : 'hover:bg-shadow-darker/5'}`}>
-                  <div className="flex justify-between items-start gap-3">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-gray-300 text-primary focus:ring-primary mt-1 cursor-pointer"
-                        checked={selectedExpenses.includes(item.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedExpenses(prev => [...prev, item.id]);
-                          } else {
-                            setSelectedExpenses(prev => prev.filter(id => id !== item.id));
-                          }
-                        }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-bold text-primary-dark text-sm truncate">{item.member}</div>
-                        <div className="text-xs text-secondary mt-0.5 truncate" title={item.purpose}>{item.purpose}</div>
+
+              {groupedLedger.map(([purpose, items]) => {
+                const totalPaid = items.reduce((sum, i) => sum + i.paid, 0);
+                const totalReq = items.reduce((sum, i) => sum + i.requested, 0);
+                const isExpanded = expandedPurpose === purpose;
+                
+                // Check if all items in this group are selected
+                const allSelected = items.every(i => selectedExpenses.includes(i.id));
+                const someSelected = items.some(i => selectedExpenses.includes(i.id));
+
+                return (
+                  <div key={purpose} className="neo-card border border-shadow-darker/10 overflow-hidden shadow-sm transition-all duration-300">
+                    {/* Accordion Header */}
+                    <div 
+                      className="p-4 bg-primary/5 hover:bg-primary/10 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
+                      onClick={() => setExpandedPurpose(isExpanded ? null : purpose)}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <input 
+                            type="checkbox" 
+                            className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer w-4 h-4"
+                            checked={allSelected}
+                            ref={input => {
+                              if (input) input.indeterminate = someSelected && !allSelected;
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedExpenses(prev => [...new Set([...prev, ...items.map(i => i.id)])]);
+                              } else {
+                                setSelectedExpenses(prev => prev.filter(id => !items.find(i => i.id === id)));
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-base text-primary-dark">{purpose}</h4>
+                          <p className="text-xs text-secondary mt-0.5">{items.length} expenses recorded</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between md:justify-end gap-6 w-full md:w-auto">
+                        <div className="text-left md:text-right">
+                          <span className="font-black text-[#004D40] text-lg block">₹{totalPaid.toLocaleString('en-IN')}</span>
+                          {totalReq > totalPaid && (
+                            <span className="text-[10px] text-secondary">Req: ₹{totalReq.toLocaleString('en-IN')}</span>
+                          )}
+                        </div>
+                        <div className="bg-white p-1.5 rounded-full shadow-sm">
+                          {isExpanded ? <ChevronUp size={20} className="text-primary" /> : <ChevronDown size={20} className="text-secondary" />}
+                        </div>
                       </div>
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</div>
-                      <div className="text-[10px] text-secondary mt-0.5">{item.date}</div>
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-2 text-[10px]">
-                    <div><span className="text-secondary">Req:</span> ₹{item.requested?.toLocaleString('en-IN') || '0'}</div>
-                    <div className="text-right">
-                      <span className={`px-1.5 py-0.5 rounded font-bold ${item.taxStatus === 'GST' ? 'bg-primary/10 text-primary' : 'bg-shadow-darker/10 text-secondary'}`}>
-                        {item.taxStatus}
-                      </span>
-                    </div>
-                    <div><span className="text-secondary">GST:</span> ₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</div>
-                    <div className="text-right">
-                      <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono">{item.paymentMode}</span>
-                    </div>
-                  </div>
 
-                  {(item.billNo || item.notes) && (
-                    <div className="text-[10px] text-secondary pt-2 border-t border-shadow-darker/5 space-y-1">
-                      {item.billNo && <div><span className="font-semibold">Bill No:</span> {item.billNo}</div>}
-                      {item.notes && <div className="truncate" title={item.notes}><span className="font-semibold">Notes:</span> {item.notes}</div>}
-                    </div>
-                  )}
+                    {/* Accordion Body */}
+                    {isExpanded && (
+                      <div className="border-t border-shadow-darker/10 bg-white">
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
+                                <th className="p-3 w-10 text-center"></th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Date</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Member</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">Requested</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">Paid Amount</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Tax Type</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">GST Amount</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Mode</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Notes</th>
+                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-shadow-darker/5 font-medium text-xs">
+                              {items.map((item) => (
+                                <tr key={item.id} className={`hover:bg-primary/5 transition-colors group ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : ''}`}>
+                                  <td className="p-2.5 text-center">
+                                    <input 
+                                      type="checkbox" 
+                                      className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
+                                      checked={selectedExpenses.includes(item.id)}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedExpenses(prev => [...prev, item.id]);
+                                        } else {
+                                          setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                                        }
+                                      }}
+                                    />
+                                  </td>
+                                  <td className="p-2.5 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
+                                  <td className="p-2.5 font-bold text-primary-dark">{item.member}</td>
+                                  <td className="p-2.5 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
+                                  <td className="p-2.5 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
+                                  <td className="p-2.5">
+                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                      item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
+                                    }`}>
+                                      {item.taxStatus}
+                                    </span>
+                                  </td>
+                                  <td className="p-2.5 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
+                                  <td className="p-2.5">
+                                    <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[9px]">
+                                      {item.paymentMode}
+                                    </span>
+                                  </td>
+                                  <td className="p-2.5 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
+                                  <td className="p-2.5 text-center">
+                                    <button 
+                                      onClick={() => handleDeleteSavedExpense(item.id)} 
+                                      className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
+                                      title="Delete from Firestore"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
 
-                  <div className="flex justify-end pt-2">
-                    <button 
-                      onClick={() => handleDeleteSavedExpense(item.id)} 
-                      className="neo-btn p-2 hover:text-error text-secondary transition-colors"
-                      title="Delete from Firestore"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                        {/* Mobile View */}
+                        <div className="md:hidden divide-y divide-shadow-darker/5">
+                          {items.map((item) => (
+                            <div key={item.id} className={`p-3 space-y-2 group transition-colors ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : 'hover:bg-shadow-darker/5'}`}>
+                              <div className="flex justify-between items-start gap-3">
+                                <div className="flex items-start gap-2 flex-1 min-w-0">
+                                  <input 
+                                    type="checkbox" 
+                                    className="rounded border-gray-300 text-primary focus:ring-primary mt-1 cursor-pointer"
+                                    checked={selectedExpenses.includes(item.id)}
+                                    onChange={(e) => {
+                                      if (e.target.checked) {
+                                        setSelectedExpenses(prev => [...prev, item.id]);
+                                      } else {
+                                        setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                                      }
+                                    }}
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-bold text-primary-dark text-xs truncate">{item.member}</div>
+                                    <div className="text-[10px] text-secondary mt-0.5">{item.date}</div>
+                                  </div>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                  <div className="font-black text-primary-dark text-sm">₹{item.paid?.toLocaleString('en-IN') || '0'}</div>
+                                  <div className="text-[9px] text-secondary mt-0.5">Req: ₹{item.requested?.toLocaleString('en-IN') || '0'}</div>
+                                </div>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-2 text-[10px] pl-6">
+                                <div>
+                                  <span className={`px-1.5 py-0.5 rounded font-bold ${item.taxStatus === 'GST' ? 'bg-primary/10 text-primary' : 'bg-shadow-darker/10 text-secondary'}`}>
+                                    {item.taxStatus}
+                                  </span>
+                                  {item.taxStatus === 'GST' && <span className="ml-1 text-primary">₹{item.gstAmount}</span>}
+                                </div>
+                                <div className="text-right">
+                                  <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono">{item.paymentMode}</span>
+                                </div>
+                              </div>
+
+                              {(item.billNo || item.notes) && (
+                                <div className="text-[10px] text-secondary pt-1.5 pl-6 space-y-0.5">
+                                  {item.billNo && <div><span className="font-semibold">Bill No:</span> {item.billNo}</div>}
+                                  {item.notes && <div className="truncate" title={item.notes}><span className="font-semibold">Notes:</span> {item.notes}</div>}
+                                </div>
+                              )}
+
+                              <div className="flex justify-end pt-1">
+                                <button 
+                                  onClick={() => handleDeleteSavedExpense(item.id)} 
+                                  className="neo-btn p-1.5 hover:text-error text-secondary transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
