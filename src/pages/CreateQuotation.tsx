@@ -101,9 +101,9 @@ export default function CreateQuotation() {
               if (matched) {
                 setSelectedCustomerId(matched.id);
                 setSelectedCustomerName(matched.name);
-                setCustomerType(matched.type || 'gst');
+                setCustomerType(matched.type === 'business' ? 'gst' : 'non_gst');
                 setCustomerAddress(matched.billing_address || '');
-                setCustomerState(matched.state || '');
+                setCustomerState((matched as any).state || '');
                 setCustomerGstin(matched.gst_number || '');
               }
             }

@@ -61,6 +61,9 @@ interface AiContextType {
     stopSession: () => void;
     sendText: (text: string) => void;
     dispatchAudit: (fieldId: string, payload: any) => Promise<void>;
+    
+    // Message History
+    messages: Array<{type: 'user' | 'ai', text: string}>;
 }
 
 const AiContext = createContext<AiContextType | undefined>(undefined);
@@ -78,6 +81,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const [transcript, setTranscript] = useState('');
     const [aiResponse, setAiResponse] = useState('');
+    const [messages, setMessages] = useState<Array<{type: 'user' | 'ai', text: string}>>([]);
     const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 
     // Cross-Device Architecture 
@@ -145,7 +149,9 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (intent.intent !== 'UNKNOWN') {
                     // Local edge execution bypasses LLM
                     console.log("Local execution intent:", intent);
+                    setMessages(prev => [...prev, { type: 'user', text }]);
                     setAiResponse(`Executed local command: ${intent.intent}`);
+                    setMessages(prev => [...prev, { type: 'ai', text: `Executed local command: ${intent.intent}` }]);
                 } else {
                     // Unknown command, send delta to API
                     sendText(text);
@@ -266,18 +272,20 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         responseText = parsedObj.voiceAlertText || parsedObj.message;
                     }
                 }
-                
                 setAiResponse(responseText);
+                setMessages(prev => [...prev, { type: 'ai', text: responseText }]);
                 conditionalSpeak(responseText);
 
             } else {
                 setAiResponse("I could not process that request.");
+                setMessages(prev => [...prev, { type: 'ai', text: "I could not process that request." }]);
                 conditionalSpeak("I could not process that request.");
             }
         } catch (error) {
             console.error("Audit dispatch failed:", error);
             setStatus('error');
             setAiResponse("I'm having trouble connecting to the network.");
+            setMessages(prev => [...prev, { type: 'ai', text: "I'm having trouble connecting to the network." }]);
             conditionalSpeak("I'm having trouble connecting to the network.");
         } finally {
             if (status !== 'speaking') {
@@ -288,6 +296,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
     const sendText = (text: string) => {
         setTranscript(text);
+        setMessages(prev => [...prev, { type: 'user', text }]);
         dispatchAudit('txt_global_input', { query: text });
     };
 
@@ -325,6 +334,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             avatarState, severity, volumeLevel,
             transcript, setTranscript,
             aiResponse, setAiResponse,
+            messages,
             pendingAction, confirmAction, cancelAction,
             startSession, stopSession, sendText,
             capabilities, activeAuditThread, dispatchAudit

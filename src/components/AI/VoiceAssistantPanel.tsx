@@ -5,20 +5,24 @@ export const VoiceAssistantPanel: React.FC = () => {
     const { 
         isOpen, toggleAi, status, 
         interactionMode, setInteractionMode,
-        transcript, aiResponse, 
+        transcript, aiResponse, messages,
         pendingAction, confirmAction, cancelAction,
         startSession, stopSession, sendText, volumeLevel
     } = useAi();
-
     
+    const messagesEndRef = React.useRef<HTMLDivElement>(null);
     const [textInput, setTextInput] = React.useState('');
+
+    React.useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, status]);
 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed bottom-6 right-6 w-96 neo-card flex flex-col z-50 overflow-hidden !p-0">
+        <div className="fixed bottom-6 right-6 w-96 max-h-[85vh] neo-card flex flex-col z-50 overflow-hidden !p-0">
             {/* Header */}
-            <div className="bg-primary p-4 flex flex-col space-y-3 text-surface">
+            <div className="bg-primary p-4 flex flex-col space-y-3 text-surface shrink-0">
                 <div className="flex justify-between items-center">
                     <div className="flex items-center space-x-2">
                         <div className={`w-3 h-3 rounded-full shadow-neo-surface ${status === 'listening' || status === 'speaking' ? 'bg-red-400 animate-pulse' : 'bg-green-400'}`}></div>
@@ -73,20 +77,19 @@ export const VoiceAssistantPanel: React.FC = () => {
 
                 {/* Transcripts & Responses */}
                 <div className="flex-1 overflow-y-auto space-y-3 custom-sidebar-scrollbar pr-2">
-                    {transcript && (
-                        <div className="flex justify-end">
-                            <div className="neo-card !p-3 !rounded-tr-none text-primary-dark font-medium text-sm max-w-[80%]">
-                                "{transcript}"
-                            </div>
+                    {messages.length === 0 && !transcript && !aiResponse && (
+                        <div className="text-center text-secondary text-sm mt-10">
+                            Ask Bill Pro to navigate, create documents, or check inventory!
                         </div>
                     )}
-                    {aiResponse && (
-                        <div className="flex justify-start">
-                            <div className="bg-primary/10 border border-primary/20 shadow-neo-inset rounded-xl rounded-tl-none p-3 text-primary-dark font-medium text-sm max-w-[90%]">
-                                {aiResponse}
+                    {messages.map((msg, idx) => (
+                        <div key={idx} className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`${msg.type === 'user' ? 'neo-card !p-3 !rounded-tr-none text-primary-dark font-medium text-sm max-w-[80%]' : 'bg-primary/10 border border-primary/20 shadow-neo-inset rounded-xl rounded-tl-none p-3 text-primary-dark font-medium text-sm max-w-[90%]'}`}>
+                                {msg.type === 'user' ? `"${msg.text}"` : msg.text}
                             </div>
                         </div>
-                    )}
+                    ))}
+                    <div ref={messagesEndRef} />
                 </div>
 
                 {/* Confirmation Card */}
@@ -113,7 +116,7 @@ export const VoiceAssistantPanel: React.FC = () => {
             </div>
 
             {/* Controls */}
-            <div className="p-4 bg-surface border-t border-shadow-dark flex flex-col space-y-3">
+            <div className="p-4 bg-surface border-t border-shadow-dark flex flex-col space-y-3 shrink-0">
                 {status === 'disconnected' || status === 'error' ? (
                     <button 
                         onClick={startSession}
