@@ -368,7 +368,7 @@ export default function CreateCashMemo() {
                     <SearchableAutocomplete
                       items={products.map(p => ({ 
                         id: p.id, 
-                        label: p.name, 
+                        label: p.sku ? `${p.name} (${p.sku})` : p.name, 
                         subLabel: `${p.category || ''} | ${p.size || ''}` 
                       }))}
                       value={item.description || ''}
@@ -442,7 +442,9 @@ export default function CreateCashMemo() {
                   </div>
                   <div className="w-full sm:w-20 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Unit</label>}
-                    <select
+                    <input
+                      type="text"
+                      list="units-list"
                       className="neo-input w-full text-xs"
                       value={item.unit || 'Pcs'}
                       onChange={(e) => {
@@ -450,14 +452,15 @@ export default function CreateCashMemo() {
                         newItems[index].unit = e.target.value;
                         setItems(newItems);
                       }}
-                    >
-                      <option value="Pcs">Pcs</option>
-                      <option value="Sq Ft">Sq Ft</option>
-                      <option value="Kg">Kg</option>
-                      <option value="Ltr">Ltr</option>
-                      <option value="Mtr">Mtr</option>
-                      <option value="Nos">Nos</option>
-                    </select>
+                    />
+                    <datalist id="units-list">
+                      <option value="Pcs" />
+                      <option value="Sq Ft" />
+                      <option value="Kg" />
+                      <option value="Ltr" />
+                      <option value="Mtr" />
+                      <option value="Nos" />
+                    </datalist>
                   </div>
                   <div className="w-full sm:w-28 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}

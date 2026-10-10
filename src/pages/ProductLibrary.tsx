@@ -22,6 +22,8 @@ export default function ProductLibrary() {
 
   // Form Fields
   const [name, setName] = useState('');
+  const [size, setSize] = useState('');
+  const [sku, setSku] = useState('');
   const [hsnCode, setHsnCode] = useState('');
   const [retailPrice, setRetailPrice] = useState('');
   const [wholesalePrice, setWholesalePrice] = useState('');
@@ -52,6 +54,8 @@ export default function ProductLibrary() {
     setModalMode('add');
     setEditingProductId(null);
     setName('');
+    setSize('');
+    setSku('');
     setHsnCode('');
     setRetailPrice('');
     setWholesalePrice('');
@@ -63,12 +67,27 @@ export default function ProductLibrary() {
     setModalMode('edit');
     setEditingProductId(product.id);
     setName(product.name || '');
+    setSize(product.size || '');
+    setSku(product.sku || '');
     setHsnCode(product.hsn_code || '');
     setRetailPrice(product.retail_price?.toString() || '0');
     setWholesalePrice(product.wholesale_price?.toString() || '0');
     setTaxPercentage(product.tax_percentage?.toString() || '18');
     setIsModalOpen(true);
   };
+
+  // Auto-generate SKU based on retail price
+  useEffect(() => {
+    if (modalMode === 'add') {
+      const price = parseFloat(retailPrice);
+      if (!isNaN(price) && price >= 0) {
+        const generatedNum = Math.floor(price / 100) * 100 + 99;
+        setSku(`ETWA${generatedNum}`);
+      } else {
+        setSku('');
+      }
+    }
+  }, [retailPrice, modalMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,6 +106,8 @@ export default function ProductLibrary() {
       if (modalMode === 'add') {
         const docRef = await addDoc(collection(db, 'products'), {
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
@@ -98,6 +119,8 @@ export default function ProductLibrary() {
         const newProduct: Product = {
           id: docRef.id,
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
@@ -111,6 +134,8 @@ export default function ProductLibrary() {
         const productRef = doc(db, 'products', editingProductId);
         await updateDoc(productRef, {
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
@@ -120,6 +145,8 @@ export default function ProductLibrary() {
         setProducts(products.map(p => p.id === editingProductId ? {
           ...p,
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
@@ -148,7 +175,8 @@ export default function ProductLibrary() {
 
   const filteredProducts = products.filter(product => {
     return product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (product.hsn_code && product.hsn_code.includes(searchQuery));
+      (product.hsn_code && product.hsn_code.includes(searchQuery)) ||
+      (product.sku && product.sku.toLowerCase().includes(searchQuery.toLowerCase()));
   });
 
   const purchaseProducts = filteredProducts.filter(p => p.source === 'purchase' || (p.priceHistory && p.priceHistory.length > 0));
@@ -169,6 +197,8 @@ export default function ProductLibrary() {
             <thead>
               <tr className="border-b-2 border-secondary/20">
                 <th className="text-left py-3 px-4 text-primary-dark font-semibold">Name</th>
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">Size</th>
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">SKU</th>
                 <th className="text-left py-3 px-4 text-primary-dark font-semibold">HSN Code</th>
                 <th className="text-right py-3 px-4 text-primary-dark font-semibold">Retail Price</th>
                 <th className="text-right py-3 px-4 text-primary-dark font-semibold">Cost Price</th>
@@ -181,6 +211,8 @@ export default function ProductLibrary() {
               {productsList.map(product => (
                 <tr key={product.id} className="border-b border-secondary/10 hover:bg-transparent">
                   <td className="py-3 px-4 font-medium">{product.name}</td>
+                  <td className="py-3 px-4 text-secondary">{product.size || '-'}</td>
+                  <td className="py-3 px-4 text-primary font-bold">{product.sku || '-'}</td>
                   <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
                   <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
                   <td className="py-3 px-4 text-right text-secondary">₹{product.costPrice || 0}</td>
@@ -221,6 +253,8 @@ export default function ProductLibrary() {
                   <div>
                     <div className="font-bold text-primary-dark">{product.name}</div>
                     <div className="text-xs text-secondary mt-1 flex items-center gap-2">
+                      {product.sku && <span className="font-bold text-primary">{product.sku}</span>}
+                      {product.sku && <span>•</span>}
                       <span>HSN: {product.hsn_code || 'N/A'}</span>
                     </div>
                   </div>
@@ -410,27 +444,50 @@ export default function ProductLibrary() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
-                <SpeechInput
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                  placeholder="e.g. Acrylic Trophy"
-                  className="neo-input w-full"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
+                  <SpeechInput
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    placeholder="e.g. Acrylic Trophy"
+                    className="neo-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Size</label>
+                  <SpeechInput
+                    type="text"
+                    value={size}
+                    onChange={(e) => setSize(e.target.value)}
+                    placeholder="e.g. 8 inch"
+                    className="neo-input w-full"
+                  />
+                </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
-                <SpeechInput
-                  type="text"
-                  value={hsnCode}
-                  onChange={(e) => setHsnCode(e.target.value)}
-                  placeholder="e.g. 39269099"
-                  className="neo-input w-full"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Product Code (SKU)</label>
+                  <SpeechInput
+                    type="text"
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="e.g. ETWA699"
+                    className="neo-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
+                  <SpeechInput
+                    type="text"
+                    value={hsnCode}
+                    onChange={(e) => setHsnCode(e.target.value)}
+                    placeholder="e.g. 39269099"
+                    className="neo-input w-full"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
