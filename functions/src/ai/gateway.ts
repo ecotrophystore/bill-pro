@@ -171,7 +171,7 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
             success: false, 
             fallbackActive: true, 
             text: JSON.stringify({
-                status: "AUDIT_FAILED",
+                status: "ERROR",
                 severity: "HIGH",
                 avatarState: "warning",
                 voiceAlertText: "Budget constraint active. Running structural offline rule validations instead."
@@ -205,10 +205,10 @@ Respond STRICTLY in this JSON format:
   "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "REPLY",
   "target": "/route_path",
   "payload": { "name": "Item Name", "retail_price": 100, "phone": "1234567890" },
-  "status": "AUDIT_FAILED" | "AUDIT_PASSED",
+  "status": "SUCCESS" | "ERROR",
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "avatarState": "thinking" | "warning" | "idle" | "celebrating",
-  "message": "Your conversational response here (Tanglish/Tamil)"
+  "message": "Your conversational response here in Tanglish or Tamil. Be helpful and direct."
 }
 `;
 

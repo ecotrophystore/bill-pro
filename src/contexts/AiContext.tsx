@@ -255,10 +255,10 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         }).catch(console.error);
                         
                         responseText = parsedObj.message || `Added customer ${parsedObj.payload.name}`;
-                    } else if (parsedObj.status === "AUDIT_FAILED") {
+                    } else if (parsedObj.status === "ERROR") {
                         setAvatarState(parsedObj.avatarState || 'warning');
                         setSeverity(parsedObj.severity || 'MEDIUM');
-                        responseText = parsedObj.voiceAlertText || parsedObj.message || "Audit failed.";
+                        responseText = parsedObj.voiceAlertText || parsedObj.message || "Action failed.";
                     } else if (parsedObj.voiceAlertText || parsedObj.message) {
                         responseText = parsedObj.voiceAlertText || parsedObj.message;
                     }
