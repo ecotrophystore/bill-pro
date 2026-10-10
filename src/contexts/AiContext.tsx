@@ -3,7 +3,8 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { useNavigate } from 'react-router-dom';
-
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { BillProSpeechEngine } from '../services/billProSpeechEngine';
 import { BillProInputEngine } from '../services/billProInputEngine';
 
@@ -221,7 +222,40 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 } catch(e) {}
 
                 if (parsedObj && typeof parsedObj === 'object') {
-                    if (parsedObj.status === "AUDIT_FAILED") {
+                    if (parsedObj.action === "NAVIGATE" && parsedObj.target) {
+                        navigate(parsedObj.target);
+                        responseText = parsedObj.message || `Navigating to ${parsedObj.target}`;
+                    } else if (parsedObj.action === "ADD_PRODUCT" && parsedObj.payload) {
+                        // Calculate auto SKU
+                        const price = parseFloat(parsedObj.payload.retail_price) || 0;
+                        const generatedNum = Math.floor(price / 100) * 100 + 99;
+                        const sku = `ETWA${generatedNum}`;
+
+                        addDoc(collection(db, 'products'), {
+                            name: parsedObj.payload.name || 'New Product',
+                            sku: sku,
+                            retail_price: price,
+                            wholesale_price: price,
+                            tax_percentage: 18,
+                            hsn_code: '0000',
+                            created_at: new Date(),
+                            source: 'ai_agent'
+                        }).catch(console.error);
+
+                        responseText = parsedObj.message || `Added product ${parsedObj.payload.name}`;
+                    } else if (parsedObj.action === "ADD_CUSTOMER" && parsedObj.payload) {
+                        addDoc(collection(db, 'customers'), {
+                            name: parsedObj.payload.name || 'New Customer',
+                            phone: parsedObj.payload.phone || '',
+                            email: parsedObj.payload.email || '',
+                            gst_number: parsedObj.payload.gst_number || '',
+                            billing_address: parsedObj.payload.address || '',
+                            created_at: new Date(),
+                            source: 'ai_agent'
+                        }).catch(console.error);
+                        
+                        responseText = parsedObj.message || `Added customer ${parsedObj.payload.name}`;
+                    } else if (parsedObj.status === "AUDIT_FAILED") {
                         setAvatarState(parsedObj.avatarState || 'warning');
                         setSeverity(parsedObj.severity || 'MEDIUM');
                         responseText = parsedObj.voiceAlertText || parsedObj.message || "Audit failed.";
