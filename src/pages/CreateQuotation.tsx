@@ -32,11 +32,12 @@ export default function CreateQuotation() {
   const [advancePaymentDate, setAdvancePaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [advanceReferenceNumber, setAdvanceReferenceNumber] = useState('');
   const [items, setItems] = useState<any[]>([
-    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: 18, priceTier: 'retail' }
+    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' }
   ]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [chargeAmount, setChargeAmount] = useState(0);
   const [documentNumber, setDocumentNumber] = useState('');
+  const [quotationDate, setQuotationDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
   const [loadingData, setLoadingData] = useState(true);
@@ -75,6 +76,7 @@ export default function CreateQuotation() {
             setDiscountPercent(data.discount_percent || 0);
             setChargeAmount(data.charge_amount || 0);
             setDocumentNumber(data.number || '');
+            setQuotationDate(data.custom_date || data.date || new Date().toISOString().split('T')[0]);
           }
         } else {
           // Auto-generate proposed quotation number based on settings
@@ -161,6 +163,7 @@ export default function CreateQuotation() {
           rate: pItem.rate || (pItem.priceTier === 'wholesale' ? matchedProduct?.wholesale_price : matchedProduct?.retail_price) || 150,
           hsn_code: pItem.hsn_code || matchedProduct?.hsn_code || '',
           tax_percentage: pItem.tax_percentage || matchedProduct?.tax_percentage || 18,
+          unit: pItem.unit || matchedProduct?.unit || 'Pcs'
         };
       });
 
@@ -171,7 +174,8 @@ export default function CreateQuotation() {
           priceTier: 'retail',
           rate: 150,
           hsn_code: '',
-          tax_percentage: 18
+          tax_percentage: 18,
+          unit: 'Pcs'
         });
       }
 
@@ -215,7 +219,7 @@ export default function CreateQuotation() {
     }
   }, [location.state, loadingData, customers, products]);
 
-  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: companySettings?.defaultGst ?? 18, priceTier: 'retail' }]);
+  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: companySettings?.defaultGst ?? 18, priceTier: 'retail', unit: 'Pcs' }]);
   
   const removeItem = (index: number) => {
     if (items.length > 1) {
@@ -257,6 +261,7 @@ export default function CreateQuotation() {
           rate: rate,
           hsn_code: pItem.hsn_code || matchedProduct?.hsn_code || '',
           tax_percentage: pItem.tax_percentage || matchedProduct?.tax_percentage || 18,
+          unit: pItem.unit || matchedProduct?.unit || 'Pcs'
         };
       });
       
@@ -369,7 +374,8 @@ export default function CreateQuotation() {
           discount_amount: totals.discountAmount,
           charge_amount: totals.chargeAmount,
           round_off: totals.roundOff,
-          grand_total: totals.grandTotal
+          grand_total: totals.grandTotal,
+          custom_date: quotationDate
         });
         navigate('/quotations');
       } catch (error) {
@@ -402,6 +408,7 @@ export default function CreateQuotation() {
         advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
         payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
         is_igst: !isIntraState,
+        custom_date: quotationDate,
       };
 
       await createQuotationFn({ quotationData });
@@ -427,6 +434,7 @@ export default function CreateQuotation() {
           advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
           payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
           is_igst: !isIntraState,
+          custom_date: quotationDate,
         };
         const { clientCreateQuotation } = await import('../utils/clientBillingCreator');
         await clientCreateQuotation(quotationData);
@@ -534,6 +542,10 @@ export default function CreateQuotation() {
                   onChange={(e: any) => setDocumentNumber(e.target.value)}
                 />
               </div>
+              <div className="space-y-1">
+                <label className="text-sm font-semibold text-primary-dark px-1">Quotation Date</label>
+                <input type="date" className="neo-input w-full" value={quotationDate} onChange={(e) => setQuotationDate(e.target.value)} />
+              </div>
             </div>
           </div>
 
@@ -550,6 +562,7 @@ export default function CreateQuotation() {
                   <div className="flex-1 min-w-[200px]">Product & Description</div>
                   <div className="w-[100px]">HSN/SAC</div>
                   <div className="w-[80px]">Qty</div>
+                  <div className="w-[80px]">Unit</div>
                   <div className="w-[100px]">Rate</div>
                   <div className="w-[100px]">Total</div>
                   <div className="w-[42px]"></div>
@@ -621,10 +634,29 @@ export default function CreateQuotation() {
                         value={item.quantity} 
                         onChange={(e) => {
                           const newItems = [...items];
-                          newItems[index].quantity = parseInt(e.target.value) || 0;
+                          newItems[index].quantity = parseFloat(e.target.value) || 0;
                           setItems(newItems);
                         }} 
                       />
+                    </div>
+
+                    <div className="w-[80px]">
+                      <select 
+                        className="neo-input w-full text-xs" 
+                        value={item.unit || 'Pcs'} 
+                        onChange={(e) => {
+                          const newItems = [...items];
+                          newItems[index].unit = e.target.value;
+                          setItems(newItems);
+                        }} 
+                      >
+                        <option value="Pcs">Pcs</option>
+                        <option value="Sq Ft">Sq Ft</option>
+                        <option value="Kg">Kg</option>
+                        <option value="Ltr">Ltr</option>
+                        <option value="Mtr">Mtr</option>
+                        <option value="Nos">Nos</option>
+                      </select>
                     </div>
 
                     <div className="w-[100px]">

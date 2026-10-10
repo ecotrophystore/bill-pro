@@ -182,7 +182,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
         .client-name { font-weight: bold; font-size: 13px; margin-bottom: 2px; display: block; }
         .client-address { font-size: 12px; line-height: 1.3; color: #444; white-space: pre-line; }
         .items-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-        .items-table th { background: ${theme.primary}; color: white; padding: 6px 8px; font-size: 11px; text-align: left; font-weight: 600; text-transform: uppercase; }
+        .items-table th { background: ${theme.primary}; color: white; padding: 6px 8px; font-size: 11px; text-align: left; vertical-align: middle; font-weight: 600; text-transform: uppercase; }
         .items-table td { border-bottom: 1px solid #eee; padding: 6px 8px; font-size: 12px; vertical-align: top; }
         .col-sno { width: 30px; text-align: center; }
         .col-qty { width: 50px; text-align: center; }

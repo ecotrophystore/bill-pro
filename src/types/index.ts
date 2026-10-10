@@ -80,6 +80,7 @@ export interface LineItem {
   tax_amount?: number;
   line_total?: number;
   priceTier?: 'retail' | 'wholesale';
+  unit?: string;
 }
 
 export interface Quotation {

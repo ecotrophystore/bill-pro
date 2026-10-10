@@ -22,7 +22,7 @@ export default function CreateProformaInvoice() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedCustomerName, setSelectedCustomerName] = useState('');
   const [items, setItems] = useState<(Partial<LineItem> & { priceTier?: 'retail' | 'wholesale' })[]>([
-    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }
+    { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' }
   ]);
   const [advanceAmount, setAdvanceAmount] = useState(0);
   const [advancePaymentMethod, setAdvancePaymentMethod] = useState('Bank Transfer');
@@ -87,7 +87,7 @@ export default function CreateProformaInvoice() {
     fetchData();
   }, [id, companySettings?.proforma_prefix, companySettings?.proforma_format, companySettings?.proforma_year, companySettings?.proforma_next_number]);
 
-  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail' }]);
+  const addItem = () => setItems([...items, { description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' }]);
   
   const removeItem = (index: number) => {
     if (items.length > 1) {
@@ -419,17 +419,38 @@ export default function CreateProformaInvoice() {
                   </div>
                   <div className="w-full sm:w-20 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
-                    <SpeechInput 
-                      type="number" 
-                      className="neo-input w-full font-bold" 
-                      placeholder="1" 
-                      value={item.quantity} 
+                    <div className="flex rounded-md shadow-sm">
+                      <input 
+                        type="number" 
+                        className="neo-input w-full font-bold rounded-r-none border-r-0" 
+                        placeholder="1" 
+                        value={item.quantity} 
+                        onChange={(e) => {
+                          const newItems = [...items];
+                          newItems[index].quantity = parseFloat(e.target.value) || 0;
+                          setItems(newItems);
+                        }} 
+                      />
+                    </div>
+                  </div>
+                  <div className="w-full sm:w-20 space-y-1">
+                    {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Unit</label>}
+                    <select
+                      className="neo-input w-full text-xs"
+                      value={item.unit || 'Pcs'}
                       onChange={(e) => {
                         const newItems = [...items];
-                        newItems[index].quantity = parseInt(e.target.value) || 0;
+                        newItems[index].unit = e.target.value;
                         setItems(newItems);
-                      }} 
-                    />
+                      }}
+                    >
+                      <option value="Pcs">Pcs</option>
+                      <option value="Sq Ft">Sq Ft</option>
+                      <option value="Kg">Kg</option>
+                      <option value="Ltr">Ltr</option>
+                      <option value="Mtr">Mtr</option>
+                      <option value="Nos">Nos</option>
+                    </select>
                   </div>
                   <div className="w-full sm:w-28 space-y-1">
                     {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
