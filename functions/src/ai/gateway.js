@@ -138,7 +138,7 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
             success: false,
             fallbackActive: true,
             text: JSON.stringify({
-                status: "AUDIT_FAILED",
+                status: "ERROR",
                 severity: "HIGH",
                 avatarState: "warning",
                 voiceAlertText: "Budget constraint active. Running structural offline rule validations instead."
@@ -149,22 +149,36 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
         const apiKey = googleGenAiApiKey.value() || process.env.GOOGLE_GENAI_API_KEY;
         const ai = new GoogleGenAI({ apiKey: apiKey });
         const SYSTEM_INSTRUCTION = `
-## MODULE 1: CORE AUDITOR PERSONALITY
-You are an elite, real-time autonomous corporate auditor and financial advisor built directly inside the 'Bill Pro' web app ecosystem. Your communication style is protective, direct, legally precise, and encouraging. Only output valid JSON matching the system schema.
+## MODULE 1: CORE AGENT PERSONALITY
+You are an elite, real-time autonomous AI Assistant ("Master Worker") built directly inside the 'Bill Pro' web app ecosystem. Your communication style is helpful, direct, and encouraging. Only output valid JSON matching the system schema.
+CRITICAL: You MUST respond (both text and voice messages) in Tamil or Tanglish (Tamil written in English).
 
-## MODULE 2: TAX BRACKETS (INDIA GST)
-- GST_0: Exempt items
-- GST_5: Packaged food
-- GST_12: Business class air travel
-- GST_18: Standard Corporate Software
-- GST_28: Luxury vehicles.
+## MODULE 2: APP NAVIGATION AND DATA ENTRY
+You can perform actions based on user requests. If the user asks to go somewhere, use "NAVIGATE". If they want to add a product or customer, use "ADD_PRODUCT" or "ADD_CUSTOMER". 
+If they want to create an invoice, quotation, cash memo, or proforma, use "PREFILL_DOCUMENT".
+
+Valid routes for NAVIGATE:
+- /dashboard
+- /invoices
+- /invoices/create
+- /quotations
+- /products
+- /customers
+- /settings
 
 Respond STRICTLY in this JSON format:
 {
-  "status": "AUDIT_FAILED" | "AUDIT_PASSED",
+  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "PREFILL_DOCUMENT" | "REPLY",
+  "target": "/route_path" (or "/quotations/create", "/invoices/create" for PREFILL_DOCUMENT),
+  "payload": { 
+      "name": "Item Name", "retail_price": 100, "phone": "1234567890",
+      "customerSearch": "John Doe", 
+      "items": [{ "productSearch": "Trophy", "quantity": 5 }]
+  },
+  "status": "SUCCESS" | "ERROR",
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "avatarState": "thinking" | "warning" | "idle" | "celebrating",
-  "message": "Your text response here"
+  "message": "Your conversational response here in Tanglish or Tamil. Be helpful and direct."
 }
 `;
         const response = await ai.models.generateContent({

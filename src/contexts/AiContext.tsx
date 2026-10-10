@@ -243,6 +243,9 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                         }).catch(console.error);
 
                         responseText = parsedObj.message || `Added product ${parsedObj.payload.name}`;
+                    } else if (parsedObj.action === "PREFILL_DOCUMENT" && parsedObj.target) {
+                        navigate(parsedObj.target, { state: { prefillData: parsedObj.payload } });
+                        responseText = parsedObj.message || `Starting new document...`;
                     } else if (parsedObj.action === "ADD_CUSTOMER" && parsedObj.payload) {
                         addDoc(collection(db, 'customers'), {
                             name: parsedObj.payload.name || 'New Customer',

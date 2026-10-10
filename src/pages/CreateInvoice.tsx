@@ -79,6 +79,36 @@ export default function CreateInvoice() {
             console.warn("Could not generate proposed invoice number:", numErr);
           }
         }
+          const prefillData = location.state?.prefillData;
+
+          if (prefillData) {
+            if (prefillData.customerSearch) {
+              const matched = loadedCustomers.find(c => c.name.toLowerCase().includes(prefillData.customerSearch.toLowerCase()));
+              if (matched) {
+                setSelectedCustomerId(matched.id);
+                setSelectedCustomerName(matched.name);
+              }
+            }
+            if (prefillData.items && prefillData.items.length > 0) {
+              const newItems = prefillData.items.map((pi: any) => {
+                const matchedItem = allProducts.find(p => p.name.toLowerCase().includes(pi.productSearch.toLowerCase()));
+                if (matchedItem) {
+                  return {
+                    description: matchedItem.name,
+                    desc: matchedItem.name,
+                    hsn_code: matchedItem.hsn_code || '',
+                    quantity: pi.quantity || 1,
+                    rate: matchedItem.retail_price || 0,
+                    tax_percentage: matchedItem.tax_percentage || 18,
+                    priceTier: 'retail',
+                    unit: matchedItem.unit || 'Pcs'
+                  };
+                }
+                return { description: pi.productSearch, desc: pi.productSearch, hsn_code: '', quantity: pi.quantity || 1, rate: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' };
+              });
+              setItems(newItems);
+            }
+          }
       } catch (error) {
         console.error("Error fetching library data:", error);
       } finally {
