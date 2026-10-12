@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mail, Lock, LogIn, UserPlus, AlertCircle } from 'lucide-react';
+import { Mail, Lock, LogIn, UserPlus, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
@@ -8,6 +8,7 @@ export default function Login() {
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -105,14 +106,22 @@ export default function Login() {
                 <Lock size={18} />
               </div>
               <input 
-                type="password" 
+                type={showPassword ? "text" : "password"} 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="neo-input w-full pl-10" 
+                className="neo-input w-full pl-10 pr-10" 
                 placeholder="••••••••"
                 required
                 minLength={6}
               />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-0 pr-3 flex items-center text-secondary hover:text-primary transition-colors focus:outline-none"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
             </div>
           </div>
 

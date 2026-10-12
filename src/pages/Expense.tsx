@@ -29,7 +29,17 @@ import {
   DollarSign,
   Cloud,
   CloudUpload,
-  Camera
+  Camera,
+  Receipt,
+  ArrowRight,
+  ShieldCheck,
+  TrendingDown,
+  Percent,
+  LayoutList,
+  FolderKanban,
+  SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -126,6 +136,19 @@ export default function ExpensePage() {
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
   const [expandedPurpose, setExpandedPurpose] = useState<string | null>(null);
+
+  // New Drawer & Scan UI states
+  const [isAddDrawerOpen, setIsAddDrawerOpen] = useState(false);
+  const [isScanCardOpen, setIsScanCardOpen] = useState(false);
+  const [showDetailedStats, setShowDetailedStats] = useState(false);
+
+  // Ledger Presentation states
+  const [ledgerViewMode, setLedgerViewMode] = useState<'flat' | 'grouped'>('flat');
+  const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
+  const [groupedCurrentPage, setGroupedCurrentPage] = useState(1);
+  const [groupedItemsPerPage, setGroupedItemsPerPage] = useState(8);
 
   // 1. Real-time Firestore sync for Expenses & Opening Cash
   useEffect(() => {
@@ -701,6 +724,30 @@ export default function ExpensePage() {
     });
   }, [filteredReportList]);
 
+  // Pagination for flat view
+  const totalPages = Math.ceil(filteredReportList.length / itemsPerPage) || 1;
+  const paginatedExpenses = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredReportList.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredReportList, currentPage, itemsPerPage]);
+
+  // Pagination for grouped view
+  const totalGroupedPages = Math.ceil(groupedLedger.length / groupedItemsPerPage) || 1;
+  const paginatedGroupedLedger = React.useMemo(() => {
+    const startIndex = (groupedCurrentPage - 1) * groupedItemsPerPage;
+    return groupedLedger.slice(startIndex, startIndex + groupedItemsPerPage);
+  }, [groupedLedger, groupedCurrentPage, groupedItemsPerPage]);
+
+  // Auto-adjust page if out of bounds
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+    if (groupedCurrentPage > totalGroupedPages) {
+      setGroupedCurrentPage(1);
+    }
+  }, [totalPages, currentPage, totalGroupedPages, groupedCurrentPage]);
+
   // Export functions
   const handleExportReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
     let listToExport = savedExpenses;
@@ -884,346 +931,525 @@ export default function ExpensePage() {
         </div>
       )}
 
-      {/* 2. Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
-        {/* Opening Cash Card */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
+      {/* 2. Bento Grid Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* Card 1: Money in Hand & Opening Cash Hero */}
+        <div className="neo-card p-5 relative overflow-hidden flex flex-col justify-between border border-primary/20 bg-gradient-to-br from-[#F5ECE0] to-[#EFE2D2] shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Opening Cash</span>
-            <Wallet size={16} className="text-primary" />
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Wallet size={15} className="text-primary" /> Net Cash in Hand
+              </span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className={`text-2xl font-black tracking-tight ${moneyInHand < 0 ? 'text-red-700' : 'text-[#004D40]'}`}>
+                  ₹{moneyInHand.toLocaleString('en-IN')}
+                </span>
+                {moneyInHand < 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">Deficit</span>
+                )}
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <TrendingDown size={18} />
+            </div>
           </div>
-          <div className="mt-2">
+
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-xs">
+            <span className="text-secondary/80 font-medium">Opening Cash:</span>
             {isEditingOpeningCash ? (
               <div className="flex items-center gap-1">
                 <input 
                   type="number" 
-                  className="neo-input !p-1 text-xs w-20 font-bold" 
+                  className="neo-input !p-1 text-xs w-24 font-bold bg-white" 
                   value={tempOpeningCash} 
                   onChange={(e) => setTempOpeningCash(e.target.value)} 
+                  autoFocus
                 />
-                <button onClick={handleSaveOpeningCash} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200">
-                  <Check size={12} />
+                <button 
+                  onClick={handleSaveOpeningCash} 
+                  className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                  title="Save"
+                >
+                  <Check size={13} />
+                </button>
+                <button 
+                  onClick={() => setIsEditingOpeningCash(false)} 
+                  className="p-1 text-secondary hover:text-primary-dark"
+                  title="Cancel"
+                >
+                  <X size={13} />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => setIsEditingOpeningCash(true)}>
-                <span className="text-base font-black text-[#004D40]">₹{openingCash.toLocaleString('en-IN')}</span>
-                <Edit size={10} className="text-secondary opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div 
+                className="flex items-center gap-1.5 group cursor-pointer hover:text-primary transition-colors" 
+                onClick={() => setIsEditingOpeningCash(true)}
+                title="Click to edit Opening Cash"
+              >
+                <span className="font-bold text-primary-dark">₹{openingCash.toLocaleString('en-IN')}</span>
+                <Edit size={11} className="text-secondary opacity-60 group-hover:opacity-100" />
               </div>
             )}
-            <span className="text-[9px] text-secondary/60 block mt-1">Starting balance (Cloud)</span>
           </div>
         </div>
 
-        {/* Money in Hand */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
+        {/* Card 2: Total Disbursed / Paid */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Money In Hand</span>
-            <ArrowDownRight size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{moneyInHand.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Opening - Paid</span>
-          </div>
-        </div>
-
-        {/* Total Requested */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Requested</span>
-            <Layers size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.totalRequested.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Aggregate demands</span>
-          </div>
-        </div>
-
-        {/* Total Paid */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Paid</span>
-            <ArrowUpRight size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.totalPaid.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Disbursed cash</span>
-          </div>
-        </div>
-
-        {/* Closing Balance */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Closing Bal.</span>
-            <Wallet size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{closingBalance.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Current session net</span>
-          </div>
-        </div>
-
-        {/* GST Total */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total GST</span>
-            <Sparkles size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.gstTotal.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Input tax credit</span>
-          </div>
-        </div>
-
-        {/* Non-GST Total */}
-        <div className="neo-card !p-4 flex flex-col justify-between">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Non-GST Exp.</span>
-            <FileText size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.nonGstTotal.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Exempt / Cash</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Inputs Section (Dropzone + Manual Form) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* Upload Dropzone */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="neo-card p-6 flex flex-col justify-between min-h-[360px] border-2 border-dashed border-primary/20 hover:border-primary/50 transition-all">
             <div>
-              <div className="flex items-center gap-2 mb-2">
-                <FileSpreadsheet className="text-primary" size={20} />
-                <h3 className="font-bold text-base text-primary-dark">Import Files & AI OCR Scan</h3>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <ArrowUpRight size={15} className="text-emerald-700" /> Total Paid / Disbursed
+              </span>
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.totalPaid.toLocaleString('en-IN')}
+                </span>
               </div>
-              <p className="text-xs text-secondary leading-relaxed mb-4">
-                Drag & drop or browse CSV, Excel spreadsheets, or scanned receipt images/PDFs for automated Gemini AI extraction.
-              </p>
             </div>
-
-            <div 
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
-                dragActive ? 'border-primary bg-primary/5 scale-98' : 'border-shadow-darker/20 hover:bg-shadow-darker/5'
-              }`}
-            >
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                accept=".csv, .xlsx, .xls, image/*, application/pdf" 
-                className="hidden" 
-              />
-              <input 
-                type="file" 
-                ref={cameraInputRef} 
-                onChange={handleCameraChange} 
-                accept="image/*" 
-                capture="environment"
-                className="hidden" 
-              />
-              
-              {isParsing ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="animate-spin text-primary" size={32} />
-                  <span className="text-xs font-bold text-primary-dark">Parsing {parsedFileName}...</span>
-                  <span className="text-[10px] text-secondary">AI OCR / Spreadsheet processing</span>
-                </div>
-              ) : (
-                <>
-                  <div className="flex gap-4 mb-3">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center">
-                      <Upload size={20} />
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        cameraInputRef.current?.click();
-                      }}
-                      className="w-12 h-12 rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 hover:text-primary-dark flex items-center justify-center transition-colors"
-                      title="Use Mobile Camera"
-                    >
-                      <Camera size={20} />
-                    </button>
-                  </div>
-                  <span className="text-xs font-bold text-primary-dark">Choose file, drag here, or take photo</span>
-                  <span className="text-[10px] text-secondary mt-1">Supports CSV, Excel (.xlsx, .xls), Images, PDFs</span>
-                </>
-              )}
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-800">
+              <DollarSign size={18} />
             </div>
-
-            <div className="bg-primary/5 p-3 rounded-xl flex items-start gap-2 text-[11px] text-secondary mt-4">
-              <Info size={14} className="text-primary shrink-0 mt-0.5" />
-              <span>Columns matched: Date, Member/Name, Purpose/Description, Paid/Amount, TaxStatus, GST.</span>
-            </div>
+          </div>
+          
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Non-GST: <strong className="text-primary-dark">₹{stats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
+            <span>Taxable: <strong className="text-primary-dark">₹{(stats.totalPaid - stats.nonGstTotal).toLocaleString('en-IN')}</strong></span>
           </div>
         </div>
 
-        {/* Manual Input Form */}
-        <div className="lg:col-span-7">
-          <form onSubmit={handleAddManualExpense} className="neo-card p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
-              <div className="flex items-center gap-2">
-                <Plus size={18} className="text-primary" />
-                <h3 className="font-bold text-lg text-primary-dark">Manual Entry Form</h3>
-              </div>
-              <span className="text-xs font-bold text-secondary uppercase tracking-widest bg-primary/5 px-3 py-1 rounded-full">
-                Staged Row
+        {/* Card 3: Demands & Claims */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Layers size={15} className="text-primary" /> Total Requested
               </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Date */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
-                <input 
-                  type="date" 
-                  value={manualForm.date} 
-                  onChange={(e) => setManualForm({...manualForm, date: e.target.value})} 
-                  className="neo-input w-full font-semibold" 
-                  required 
-                />
-              </div>
-
-              {/* Member Name */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Ramesh" 
-                  value={manualForm.member} 
-                  onChange={(e) => setManualForm({...manualForm, member: e.target.value})} 
-                  className="neo-input w-full" 
-                  required 
-                />
-              </div>
-
-              {/* Payment Mode */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
-                <select 
-                  value={manualForm.paymentMode} 
-                  onChange={(e) => setManualForm({...manualForm, paymentMode: e.target.value as any})} 
-                  className="neo-input w-full"
-                >
-                  <option value="UPI">UPI</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank">Bank Transfer</option>
-                  <option value="Card">Debit/Credit Card</option>
-                </select>
-              </div>
-
-              {/* Purpose */}
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Raw Material Acrylic Sheets" 
-                  value={manualForm.purpose} 
-                  onChange={(e) => setManualForm({...manualForm, purpose: e.target.value})} 
-                  className="neo-input w-full" 
-                  required 
-                />
-              </div>
-
-              {/* Bill No */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
-                <input 
-                  type="text" 
-                  placeholder="Optional bill #" 
-                  value={manualForm.billNo} 
-                  onChange={(e) => setManualForm({...manualForm, billNo: e.target.value})} 
-                  className="neo-input w-full" 
-                />
-              </div>
-
-              {/* Requested Amount */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  placeholder="0.00" 
-                  value={manualForm.requested} 
-                  onChange={(e) => setManualForm({...manualForm, requested: e.target.value})} 
-                  className="neo-input w-full" 
-                />
-              </div>
-
-              {/* Paid Amount */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  placeholder="0.00" 
-                  value={manualForm.paid} 
-                  onChange={(e) => setManualForm({...manualForm, paid: e.target.value})} 
-                  className="neo-input w-full font-bold text-primary-dark" 
-                  required 
-                />
-              </div>
-
-              {/* Tax Status */}
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
-                <select 
-                  value={manualForm.taxStatus} 
-                  onChange={(e) => setManualForm({...manualForm, taxStatus: e.target.value as any})} 
-                  className="neo-input w-full"
-                >
-                  <option value="GST">GST Included</option>
-                  <option value="Non-GST">Non-GST</option>
-                </select>
-              </div>
-
-              {/* GST Percent (Conditional) */}
-              {manualForm.taxStatus === 'GST' && (
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
-                  <select 
-                    value={manualForm.gstPercent} 
-                    onChange={(e) => setManualForm({...manualForm, gstPercent: parseFloat(e.target.value)})} 
-                    className="neo-input w-full"
-                  >
-                    <option value={5}>5%</option>
-                    <option value={12}>12%</option>
-                    <option value={18}>18%</option>
-                    <option value={28}>28%</option>
-                  </select>
-                </div>
-              )}
-
-              {/* Notes */}
-              <div className={`space-y-1 ${manualForm.taxStatus === 'GST' ? 'md:col-span-2' : 'md:col-span-3'}`}>
-                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
-                <input 
-                  type="text" 
-                  placeholder="Optional remarks" 
-                  value={manualForm.notes} 
-                  onChange={(e) => setManualForm({...manualForm, notes: e.target.value})} 
-                  className="neo-input w-full" 
-                />
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.totalRequested.toLocaleString('en-IN')}
+                </span>
               </div>
             </div>
-
-            <div className="flex justify-end pt-2">
-              <button type="submit" className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-6">
-                <Plus size={16} /> Add to Staged Queue
-              </button>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <FileText size={18} />
             </div>
-          </form>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Variance vs Paid:</span>
+            <span className={`font-bold ${stats.totalRequested - stats.totalPaid !== 0 ? 'text-amber-700' : 'text-primary'}`}>
+              ₹{(stats.totalRequested - stats.totalPaid).toLocaleString('en-IN')}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 4: Input Tax Credit (GST) */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
+          <div className="flex justify-between items-start">
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles size={15} className="text-primary" /> GST Input Credit
+              </span>
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.gstTotal.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <Percent size={18} />
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Claimable ITC</span>
+            <button 
+              type="button"
+              onClick={() => setShowDetailedStats(!showDetailedStats)}
+              className="text-primary hover:underline font-bold text-[10px] flex items-center gap-0.5"
+            >
+              {showDetailedStats ? 'Hide breakdown' : 'More stats'} {showDetailedStats ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Expandable Detailed Stats Row */}
+      {showDetailedStats && (
+        <div className="neo-card p-5 border border-primary/20 bg-primary/5 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 animate-scale-up mb-6">
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Closing Session Net</span>
+            <div className="text-base font-bold text-primary-dark mt-1">₹{closingBalance.toLocaleString('en-IN')}</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Exempt / Non-GST Total</span>
+            <div className="text-base font-bold text-primary-dark mt-1">₹{stats.nonGstTotal.toLocaleString('en-IN')}</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Total Recorded Expenses</span>
+            <div className="text-base font-bold text-primary-dark mt-1">{allCurrentExpenses.length} entries</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Active Payees / Members</span>
+            <div className="text-base font-bold text-primary-dark mt-1">{uniqueMembers.length} members</div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Primary Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface rounded-2xl shadow-neo-raised border border-shadow-darker/10">
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={() => setIsAddDrawerOpen(true)}
+            className="neo-btn-primary flex items-center gap-2 text-sm py-2.5 px-6 font-bold shadow-md hover:scale-[1.02] active:scale-100 transition-transform"
+          >
+            <Plus size={18} /> Add New Expense
+          </button>
+          <button 
+            type="button"
+            onClick={() => setIsScanCardOpen(!isScanCardOpen)}
+            className={`neo-btn flex items-center gap-2 text-sm py-2.5 px-5 font-semibold transition-all ${
+              isScanCardOpen ? 'border-primary text-primary bg-primary/5' : 'text-primary-dark'
+            }`}
+          >
+            <FileSpreadsheet size={17} className="text-primary" />
+            {isScanCardOpen ? 'Hide Import & AI OCR' : 'Import / AI OCR Scan'}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-secondary">
+          <span className="hidden sm:inline">Shortcuts:</span>
+          <span className="px-2 py-1 rounded bg-secondary/10 font-mono text-[11px] font-bold text-primary-dark">Click "+ Add New Expense" to record</span>
+        </div>
+      </div>
+
+      {/* Collapsible Dropzone & AI OCR Box */}
+      {isScanCardOpen && (
+        <div className="neo-card p-6 border-2 border-dashed border-primary/30 rounded-2xl bg-surface animate-fade-in">
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <FileSpreadsheet size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-primary-dark">Import Excel, CSV, or AI OCR Digital Scan</h3>
+                <p className="text-xs text-secondary">Drag & drop files or snap a receipt photo for automated extraction into your queue.</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsScanCardOpen(false)}
+              className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-secondary/10"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div 
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
+              dragActive ? 'border-primary bg-primary/5 scale-[0.99]' : 'border-shadow-darker/20 hover:bg-primary/5'
+            }`}
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileChange} 
+              accept=".csv, .xlsx, .xls, image/*, application/pdf" 
+              className="hidden" 
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
+              onChange={handleCameraChange} 
+              accept="image/*" 
+              capture="environment" 
+              className="hidden" 
+            />
+            
+            {isParsing ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="animate-spin text-primary" size={32} />
+                <span className="text-xs font-bold text-primary-dark">Processing {parsedFileName}...</span>
+                <span className="text-[10px] text-secondary">Extracting date, amounts, and tax breakdowns</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-4 mb-3">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center shadow-xs">
+                    <Upload size={20} />
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cameraInputRef.current?.click();
+                    }}
+                    className="w-12 h-12 rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 hover:text-primary-dark flex items-center justify-center transition-colors"
+                    title="Take Photo"
+                  >
+                    <Camera size={20} />
+                  </button>
+                </div>
+                <span className="text-sm font-bold text-primary-dark">Choose file, drag & drop here, or use camera</span>
+                <span className="text-xs text-secondary mt-1">Supports Excel (.xlsx, .xls), CSV, Receipts (JPG, PNG, WebP), PDFs</span>
+              </>
+            )}
+          </div>
+
+          <div className="bg-primary/5 p-3 rounded-xl flex items-start gap-2 text-xs text-secondary mt-4">
+            <Info size={15} className="text-primary shrink-0 mt-0.5" />
+            <span>Extracted items are staged into your preview queue below so you can inspect & fine-tune before committing to the cloud.</span>
+          </div>
+        </div>
+      )}
+
+      {/* Slide-over Drawer for Add Expense */}
+      {isAddDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity animate-fade-in"
+            onClick={() => setIsAddDrawerOpen(false)}
+          />
+
+          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="w-screen max-w-lg bg-surface shadow-2xl border-l border-shadow-darker/10 flex flex-col justify-between animate-fade-in">
+              {/* Drawer Header */}
+              <div className="p-6 border-b border-shadow-darker/10 flex items-center justify-between bg-surface">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                    <Plus size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-primary-dark">New Expense Entry</h3>
+                    <p className="text-xs text-secondary">Record a transaction to your staged queue.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsAddDrawerOpen(false)}
+                  className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-secondary/10 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Drawer Body Form */}
+              <form 
+                id="expense-drawer-form"
+                onSubmit={(e) => {
+                  handleAddManualExpense(e);
+                  setIsAddDrawerOpen(false);
+                }}
+                className="p-6 space-y-5 overflow-y-auto flex-1 custom-sidebar-scrollbar"
+              >
+                {/* 1. Transaction Details Section */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                    <Receipt size={14} /> Transaction Details
+                  </h4>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
+                      <input 
+                        type="date" 
+                        value={manualForm.date} 
+                        onChange={(e) => setManualForm({...manualForm, date: e.target.value})} 
+                        className="neo-input w-full font-semibold" 
+                        required 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
+                      <select 
+                        value={manualForm.paymentMode} 
+                        onChange={(e) => setManualForm({...manualForm, paymentMode: e.target.value as any})} 
+                        className="neo-input w-full font-medium"
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank">Bank Transfer</option>
+                        <option value="Card">Debit/Credit Card</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Ramesh / Vendor Name" 
+                      value={manualForm.member} 
+                      onChange={(e) => setManualForm({...manualForm, member: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Raw Material Acrylic Sheets, Fuel, etc." 
+                      value={manualForm.purpose} 
+                      onChange={(e) => setManualForm({...manualForm, purpose: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Invoice / Ref No.</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. INV-2026-091 (optional)" 
+                      value={manualForm.billNo} 
+                      onChange={(e) => setManualForm({...manualForm, billNo: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Amount & Tax Section */}
+                <div className="space-y-4 pt-4 border-t border-shadow-darker/10">
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                    <DollarSign size={14} /> Financials & Tax
+                  </h4>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        placeholder="0.00" 
+                        value={manualForm.requested} 
+                        onChange={(e) => setManualForm({...manualForm, requested: e.target.value})} 
+                        className="neo-input w-full" 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        placeholder="0.00" 
+                        value={manualForm.paid} 
+                        onChange={(e) => setManualForm({...manualForm, paid: e.target.value})} 
+                        className="neo-input w-full font-bold text-primary-dark" 
+                        required 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
+                      <select 
+                        value={manualForm.taxStatus} 
+                        onChange={(e) => setManualForm({...manualForm, taxStatus: e.target.value as any})} 
+                        className="neo-input w-full font-medium"
+                      >
+                        <option value="GST">GST Included</option>
+                        <option value="Non-GST">Non-GST (Exempt)</option>
+                      </select>
+                    </div>
+
+                    {manualForm.taxStatus === 'GST' ? (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                        <select 
+                          value={manualForm.gstPercent} 
+                          onChange={(e) => setManualForm({...manualForm, gstPercent: parseFloat(e.target.value)})} 
+                          className="neo-input w-full font-bold text-primary-dark"
+                        >
+                          <option value={5}>5%</option>
+                          <option value={12}>12%</option>
+                          <option value={18}>18%</option>
+                          <option value={28}>28%</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 opacity-50">
+                        <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                        <input type="text" disabled value="0% (Exempt)" className="neo-input w-full cursor-not-allowed text-xs" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dynamic calculation preview */}
+                  {manualForm.paid && (
+                    <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 text-xs space-y-1">
+                      <div className="flex justify-between text-secondary">
+                        <span>Net Base Amount:</span>
+                        <strong className="text-primary-dark">
+                          ₹{manualForm.taxStatus === 'GST' 
+                            ? ((parseFloat(manualForm.paid) || 0) - exactRound(((parseFloat(manualForm.paid) || 0) * manualForm.gstPercent) / (100 + manualForm.gstPercent))).toLocaleString('en-IN')
+                            : (parseFloat(manualForm.paid) || 0).toLocaleString('en-IN')
+                          }
+                        </strong>
+                      </div>
+                      {manualForm.taxStatus === 'GST' && (
+                        <div className="flex justify-between text-secondary">
+                          <span>Calculated GST ({manualForm.gstPercent}%):</span>
+                          <strong className="text-purple-800">
+                            ₹{exactRound(((parseFloat(manualForm.paid) || 0) * manualForm.gstPercent) / (100 + manualForm.gstPercent)).toLocaleString('en-IN')}
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
+                    <textarea 
+                      rows={2}
+                      placeholder="Optional notes or reference info..." 
+                      value={manualForm.notes} 
+                      onChange={(e) => setManualForm({...manualForm, notes: e.target.value})} 
+                      className="neo-input w-full text-xs font-medium resize-none" 
+                    />
+                  </div>
+                </div>
+              </form>
+
+              {/* Drawer Sticky Footer */}
+              <div className="p-4 border-t border-shadow-darker/10 bg-surface flex items-center justify-end gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsAddDrawerOpen(false)}
+                  className="neo-btn text-xs py-2.5 px-4 font-semibold text-secondary"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  onClick={(e) => {
+                    handleAddManualExpense(e);
+                  }}
+                  className="neo-btn text-xs py-2.5 px-4 font-bold text-primary hover:bg-primary/5"
+                >
+                  + Add & Another
+                </button>
+                <button 
+                  type="submit"
+                  form="expense-drawer-form"
+                  className="neo-btn-primary flex items-center gap-2 text-xs py-2.5 px-6 font-bold shadow-md"
+                >
+                  <Plus size={16} /> Add to Queue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 4. Staged Preview Table */}
       {previewRows.length > 0 && (
@@ -1447,27 +1673,69 @@ export default function ExpensePage() {
       )}
 
       {/* 5. Persistent Saved Database & Reports Section */}
-      <div className="neo-card p-6 space-y-6">
+      <div className="neo-card p-6 space-y-5 border border-shadow-darker/10 shadow-sm">
+        {/* Ledger Header */}
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-shadow-darker/10 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Clock size={18} className="text-primary" />
-              <h3 className="font-bold text-xl text-primary-dark">Saved Expense Ledger ({filteredReportList.length} items)</h3>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <Clock size={20} />
             </div>
-            <p className="text-xs text-secondary mt-0.5">Real-time cloud database ledger synced with Firestore.</p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-xl text-primary-dark">Expense Ledger</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary">
+                  {filteredReportList.length} items
+                </span>
+              </div>
+              <p className="text-xs text-secondary mt-0.5">Real-time ledger synchronized with cloud database.</p>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+            {/* View Mode Switcher */}
+            <div className="inline-flex rounded-xl bg-primary/5 p-1 border border-primary/10">
+              <button
+                type="button"
+                onClick={() => setLedgerViewMode('flat')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  ledgerViewMode === 'flat'
+                    ? 'bg-white text-primary-dark shadow-xs'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+                title="Table List View"
+              >
+                <LayoutList size={14} />
+                Flat List
+              </button>
+              <button
+                type="button"
+                onClick={() => setLedgerViewMode('grouped')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  ledgerViewMode === 'grouped'
+                    ? 'bg-white text-primary-dark shadow-xs'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+                title="Grouped by Purpose View"
+              >
+                <FolderKanban size={14} />
+                By Purpose
+              </button>
+            </div>
+
             {selectedExpenses.length > 0 && (
               <button 
                 onClick={handleBulkDelete} 
-                className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
+                className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200"
               >
-                <Trash2 size={14} /> Delete Selected ({selectedExpenses.length})
+                <Trash2 size={14} /> Delete ({selectedExpenses.length})
               </button>
             )}
-            <button onClick={() => setIsExportModalOpen(true)} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold">
-              <Download size={14} /> Export Report
+
+            <button 
+              onClick={() => setIsExportModalOpen(true)} 
+              className="neo-btn text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold text-primary-dark"
+            >
+              <Download size={14} className="text-primary" /> Export
             </button>
             <ExportReportModal 
               isOpen={isExportModalOpen}
@@ -1477,150 +1745,368 @@ export default function ExpensePage() {
           </div>
         </div>
 
-        {/* Filter Controls Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 bg-primary/5 rounded-2xl border border-primary/10">
-          {/* Search */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Search</label>
-            <div className="relative">
-              <Search size={12} className="absolute left-2.5 top-2.5 text-secondary" />
+        {/* Compact Single-Row Filter Toolbar */}
+        <div className="space-y-3">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search size={14} className="absolute left-3.5 top-3 text-secondary" />
               <input 
                 type="text" 
-                placeholder="Payee, purpose, bill..." 
+                placeholder="Search payee, purpose, bill #, remarks..." 
                 value={searchQuery} 
                 onChange={(e) => setSearchQuery(e.target.value)} 
-                className="neo-input !pl-7 !py-1.5 !text-xs w-full" 
+                className="neo-input !pl-9 !py-2 !text-xs w-full bg-surface/50 border border-shadow-dark/40 focus:border-primary" 
               />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-2.5 text-secondary hover:text-primary-dark"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Quick Pills & Advanced Filter Toggle */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { label: 'All Modes', mode: 'all' },
+                { label: 'UPI', mode: 'UPI' },
+                { label: 'Cash', mode: 'Cash' },
+                { label: 'Bank', mode: 'Bank' }
+              ].map(pill => (
+                <button
+                  key={pill.mode}
+                  type="button"
+                  onClick={() => setFilterPaymentMode(pill.mode)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    filterPaymentMode === pill.mode
+                      ? 'bg-primary text-white shadow-xs font-bold'
+                      : 'bg-surface hover:bg-primary/10 text-secondary hover:text-primary-dark border border-shadow-dark/30'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              ))}
+
+              <div className="h-4 w-[1px] bg-shadow-darker/40 mx-1 hidden sm:block"></div>
+
+              {[
+                { label: 'All Tax', status: 'all' },
+                { label: 'GST', status: 'GST' },
+                { label: 'Non-GST', status: 'Non-GST' }
+              ].map(taxPill => (
+                <button
+                  key={taxPill.status}
+                  type="button"
+                  onClick={() => setFilterTaxStatus(taxPill.status)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    filterTaxStatus === taxPill.status
+                      ? 'bg-primary-dark text-white shadow-xs font-bold'
+                      : 'bg-surface hover:bg-primary/10 text-secondary hover:text-primary-dark border border-shadow-dark/30'
+                  }`}
+                >
+                  {taxPill.label}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setIsAdvancedFiltersOpen(!isAdvancedFiltersOpen)}
+                className={`neo-btn !py-1.5 !px-3 text-xs flex items-center gap-1.5 font-bold transition-all ${
+                  isAdvancedFiltersOpen || filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all'
+                    ? 'border-primary text-primary bg-primary/10'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+              >
+                <SlidersHorizontal size={13} />
+                Filters
+                {(filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all') && (
+                  <span className="w-2 h-2 rounded-full bg-primary" />
+                )}
+              </button>
+
+              {(filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all' || filterTaxStatus !== 'all' || filterPaymentMode !== 'all' || searchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterFromDate('');
+                    setFilterToDate('');
+                    setFilterMember('all');
+                    setFilterPurpose('all');
+                    setFilterTaxStatus('all');
+                    setFilterPaymentMode('all');
+                    setSearchQuery('');
+                  }}
+                  className="text-xs font-bold text-error hover:underline flex items-center gap-1 ml-1"
+                >
+                  <X size={12} /> Clear
+                </button>
+              )}
             </div>
           </div>
 
-          {/* From Date */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">From Date</label>
-            <input 
-              type="date" 
-              value={filterFromDate} 
-              onChange={(e) => setFilterFromDate(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full font-semibold" 
-            />
-          </div>
+          {/* Expandable Secondary Filter Box */}
+          {isAdvancedFiltersOpen && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-surface/70 rounded-2xl border border-shadow-dark/40 animate-fade-in text-xs shadow-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">From Date</label>
+                <input 
+                  type="date" 
+                  value={filterFromDate} 
+                  onChange={(e) => setFilterFromDate(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full font-semibold bg-surface border border-shadow-dark/30" 
+                />
+              </div>
 
-          {/* To Date */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">To Date</label>
-            <input 
-              type="date" 
-              value={filterToDate} 
-              onChange={(e) => setFilterToDate(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full font-semibold" 
-            />
-          </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">To Date</label>
+                <input 
+                  type="date" 
+                  value={filterToDate} 
+                  onChange={(e) => setFilterToDate(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full font-semibold bg-surface border border-shadow-dark/30" 
+                />
+              </div>
 
-          {/* Filter Member */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Member</label>
-            <select 
-              value={filterMember} 
-              onChange={(e) => setFilterMember(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Members</option>
-              {uniqueMembers.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Member / Payee</label>
+                <select 
+                  value={filterMember} 
+                  onChange={(e) => setFilterMember(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full bg-surface border border-shadow-dark/30 font-medium"
+                >
+                  <option value="all">All Members ({uniqueMembers.length})</option>
+                  {uniqueMembers.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Filter Purpose */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Purpose</label>
-            <select 
-              value={filterPurpose} 
-              onChange={(e) => setFilterPurpose(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Purposes</option>
-              {uniquePurposes.map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Purpose Category</label>
+                <select 
+                  value={filterPurpose} 
+                  onChange={(e) => setFilterPurpose(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full bg-surface border border-shadow-dark/30 font-medium"
+                >
+                  <option value="all">All Purposes ({uniquePurposes.length})</option>
+                  {uniquePurposes.map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
 
-          {/* Filter Tax */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Tax Type</label>
-            <select 
-              value={filterTaxStatus} 
-              onChange={(e) => setFilterTaxStatus(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Tax Types</option>
-              <option value="GST">GST Included</option>
-              <option value="Non-GST">Non-GST</option>
-            </select>
+        {/* Filtered Subtotal Ribbon */}
+        <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5 bg-primary/10 rounded-xl border border-primary/20 text-xs">
+          <div className="flex flex-wrap items-center gap-4 text-secondary">
+            <span>Filtered Paid: <strong className="text-primary-dark">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-primary/30">•</span>
+            <span>Input GST: <strong className="text-primary font-bold">₹{filteredStats.gstTotal.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-primary/30">•</span>
+            <span>Non-GST: <strong className="text-primary-dark">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
           </div>
-
-          {/* Filter Payment Mode */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
-            <select 
-              value={filterPaymentMode} 
-              onChange={(e) => setFilterPaymentMode(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Modes</option>
-              <option value="UPI">UPI</option>
-              <option value="Cash">Cash</option>
-              <option value="Bank">Bank</option>
-              <option value="Card">Card</option>
-            </select>
+          <div className="text-[11px] font-bold text-primary-dark">
+            Showing {filteredReportList.length} of {savedExpenses.length} transactions
           </div>
         </div>
 
-        {/* Filtered Summary KPIs */}
-        <div className="flex flex-wrap items-center gap-6 p-3.5 bg-[#FCFAF7] border border-shadow-darker/10 rounded-xl text-xs">
-          <div>
-            <span className="text-secondary text-[11px]">Filtered Total Paid:</span>
-            <span className="font-bold text-primary-dark ml-1.5">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Filtered GST Tax:</span>
-            <span className="font-bold text-primary ml-1.5">₹{filteredStats.gstTotal.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Filtered Non-GST:</span>
-            <span className="font-bold text-secondary ml-1.5">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Net Money After Filter:</span>
-            <span className="font-black text-[#004D40] ml-1.5">₹{filteredClosing.toLocaleString('en-IN')}</span>
-          </div>
-        </div>
-
-        {/* Persistent Ledger Table */}
+        {/* Table / Ledger Display */}
         <div className="overflow-x-auto">
           {loadingExpenses ? (
-            <div className="py-16 flex flex-col items-center justify-center gap-2 text-secondary">
-              <Loader2 className="animate-spin text-primary" size={24} />
-              <span className="text-xs font-semibold">Connecting to Firestore ledger...</span>
+            <div className="py-20 flex flex-col items-center justify-center gap-2 text-secondary">
+              <Loader2 className="animate-spin text-primary" size={26} />
+              <span className="text-xs font-semibold">Connecting to cloud ledger...</span>
             </div>
           ) : filteredReportList.length === 0 ? (
-            <div className="py-16 text-center text-secondary border border-dashed border-shadow-darker/20 rounded-2xl">
-              <Wallet size={32} className="mx-auto mb-2 opacity-30 text-primary" />
-              <p className="font-semibold text-sm">No expenses match the selected filters or database is empty.</p>
-              <p className="text-xs opacity-75 mt-1">Add a manual expense or import a spreadsheet above to begin.</p>
+            <div className="py-16 text-center text-secondary border border-dashed border-shadow-dark/40 rounded-2xl bg-surface/50">
+              <Wallet size={36} className="mx-auto mb-2 opacity-30 text-primary" />
+              <p className="font-bold text-sm text-primary-dark">No expense records match your current filters.</p>
+              <p className="text-xs opacity-75 mt-1">Try resetting filters or adding a new transaction.</p>
+            </div>
+          ) : ledgerViewMode === 'flat' ? (
+            /* FLAT CHRONOLOGICAL STREAMLINED TABLE */
+            <div className="space-y-3">
+              <div className="border border-shadow-dark/40 rounded-2xl overflow-hidden bg-surface shadow-neo-raised">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-primary/10 border-b border-shadow-dark/30 text-[11px] font-bold text-primary-dark uppercase tracking-wider">
+                      <th className="p-3.5 w-10 text-center">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                          checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedExpenses(filteredReportList.map(item => item.id));
+                            } else {
+                              setSelectedExpenses([]);
+                            }
+                          }}
+                          title="Select all on this list"
+                        />
+                      </th>
+                      <th className="p-3.5">Date</th>
+                      <th className="p-3.5">Payee & Purpose</th>
+                      <th className="p-3.5">Payment Mode</th>
+                      <th className="p-3.5 text-right">Amount & Tax</th>
+                      <th className="p-3.5">Reference / Notes</th>
+                      <th className="p-3.5 w-12 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-shadow-dark/20 font-medium text-xs">
+                    {paginatedExpenses.map((item) => {
+                      const isSelected = selectedExpenses.includes(item.id);
+                      return (
+                        <tr 
+                          key={item.id} 
+                          className={`hover:bg-primary/5 transition-colors group ${isSelected ? 'bg-primary/10' : ''}`}
+                        >
+                          {/* Checkbox */}
+                          <td className="p-3.5 text-center">
+                            <input 
+                              type="checkbox" 
+                              className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedExpenses(prev => [...prev, item.id]);
+                                } else {
+                                  setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                                }
+                              }}
+                            />
+                          </td>
+
+                          {/* Date */}
+                          <td className="p-3.5 whitespace-nowrap text-secondary font-mono text-[11px]">
+                            {item.date}
+                          </td>
+
+                          {/* Payee & Purpose */}
+                          <td className="p-3.5">
+                            <div className="font-bold text-primary-dark text-sm">{item.member}</div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="px-2 py-0.5 rounded-md bg-primary/15 text-primary-dark font-medium text-[10px] border border-primary/20">
+                                {item.purpose}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Payment Mode */}
+                          <td className="p-3.5 whitespace-nowrap">
+                            <span className="px-2.5 py-1 rounded-lg bg-surface shadow-neo-surface font-bold text-primary-dark text-[11px] inline-block">
+                              {item.paymentMode}
+                            </span>
+                          </td>
+
+                          {/* Amount & Tax */}
+                          <td className="p-3.5 text-right whitespace-nowrap">
+                            <div className="font-black text-primary-dark text-sm">
+                              ₹{item.paid?.toLocaleString('en-IN') || '0'}
+                            </div>
+                            <div className="text-[10px] mt-0.5">
+                              {item.taxStatus === 'GST' ? (
+                                <span className="text-primary font-bold">
+                                  GST ({item.gstPercent || 18}%): ₹{item.gstAmount?.toLocaleString('en-IN') || '0'}
+                                </span>
+                              ) : (
+                                <span className="text-secondary/80">Non-GST (Exempt)</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Reference / Notes */}
+                          <td className="p-3.5 text-secondary text-xs max-w-[220px]">
+                            {item.billNo && (
+                              <div className="font-mono text-[10px] text-primary-dark/90 font-bold">
+                                #{item.billNo}
+                              </div>
+                            )}
+                            <div className="truncate text-secondary" title={item.notes}>
+                              {item.notes || '-'}
+                            </div>
+                          </td>
+
+                          {/* Action */}
+                          <td className="p-3.5 text-center">
+                            <button 
+                              onClick={() => handleDeleteSavedExpense(item.id)} 
+                              className="p-1.5 rounded-lg text-secondary hover:text-error hover:bg-error/10 transition-colors opacity-60 group-hover:opacity-100"
+                              title="Delete Expense"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 pt-2 text-xs text-secondary">
+                <div className="flex items-center gap-2">
+                  <span>Show per page:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="neo-input !py-1 !px-2 !text-xs bg-surface border border-shadow-dark/30 font-bold text-primary-dark"
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                  </select>
+                  <span>
+                    Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredReportList.length)}–
+                    {Math.min(currentPage * itemsPerPage, filteredReportList.length)} of {filteredReportList.length}
+                  </span>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Previous page"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="font-bold px-2 text-primary-dark">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Next page"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
-            <div className="space-y-4">
-              {/* Global Select All for Grouped View */}
-              <div className="flex items-center justify-between p-3 bg-shadow-darker/5 rounded-xl border border-shadow-darker/10">
-                <label className="flex items-center gap-2 text-sm font-bold text-primary-dark cursor-pointer">
+            /* GROUPED BY PURPOSE ACCORDION VIEW */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-primary/10 rounded-xl border border-primary/20">
+                <label className="flex items-center gap-2 text-xs font-bold text-primary-dark cursor-pointer">
                   <input 
                     type="checkbox" 
-                    className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer w-4 h-4"
+                    className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
                     checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
                     onChange={(e) => {
                       if (e.target.checked) {
@@ -1637,27 +2123,23 @@ export default function ExpensePage() {
                 </div>
               </div>
 
-              {groupedLedger.map(([purpose, items]) => {
+              {paginatedGroupedLedger.map(([purpose, items]) => {
                 const totalPaid = items.reduce((sum, i) => sum + i.paid, 0);
-                const totalReq = items.reduce((sum, i) => sum + i.requested, 0);
                 const isExpanded = expandedPurpose === purpose;
-                
-                // Check if all items in this group are selected
                 const allSelected = items.every(i => selectedExpenses.includes(i.id));
                 const someSelected = items.some(i => selectedExpenses.includes(i.id));
 
                 return (
-                  <div key={purpose} className="neo-card border border-shadow-darker/10 overflow-hidden shadow-sm transition-all duration-300">
-                    {/* Accordion Header */}
+                  <div key={purpose} className="neo-card !p-0 border border-shadow-dark/40 overflow-hidden shadow-neo-raised bg-surface transition-all">
                     <div 
-                      className="p-4 bg-primary/5 hover:bg-primary/10 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
+                      className="p-4 cursor-pointer flex items-center justify-between gap-4 hover:bg-primary/5 transition-colors"
                       onClick={() => setExpandedPurpose(isExpanded ? null : purpose)}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3.5">
                         <div onClick={(e) => e.stopPropagation()}>
                           <input 
                             type="checkbox" 
-                            className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer w-4 h-4"
+                            className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
                             checked={allSelected}
                             ref={input => {
                               if (input) input.indeterminate = someSelected && !allSelected;
@@ -1672,145 +2154,44 @@ export default function ExpensePage() {
                           />
                         </div>
                         <div>
-                          <h4 className="font-bold text-base text-primary-dark">{purpose}</h4>
-                          <p className="text-xs text-secondary mt-0.5">{items.length} expenses recorded</p>
+                          <h4 className="font-bold text-sm text-primary-dark">{purpose}</h4>
+                          <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md bg-primary/10 text-primary-dark text-[10px] font-semibold border border-primary/20">
+                            {items.length} {items.length === 1 ? 'record' : 'records'}
+                          </span>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between md:justify-end gap-6 w-full md:w-auto">
-                        <div className="text-left md:text-right">
-                          <span className="font-black text-[#004D40] text-lg block">₹{totalPaid.toLocaleString('en-IN')}</span>
-                          {totalReq > totalPaid && (
-                            <span className="text-[10px] text-secondary">Req: ₹{totalReq.toLocaleString('en-IN')}</span>
-                          )}
-                        </div>
-                        <div className="bg-primary/5 p-1.5 rounded-full shadow-sm">
-                          {isExpanded ? <ChevronUp size={20} className="text-primary" /> : <ChevronDown size={20} className="text-secondary" />}
+                      <div className="flex items-center gap-4">
+                        <span className="font-black text-[#004D40] text-base">₹{totalPaid.toLocaleString('en-IN')}</span>
+                        <div className="bg-surface shadow-neo-surface p-1.5 rounded-lg border border-shadow-dark/20 text-primary">
+                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                         </div>
                       </div>
                     </div>
 
-                    {/* Accordion Body */}
                     {isExpanded && (
-                      <div className="border-t border-shadow-darker/10 bg-transparent">
-                        {/* Desktop Table View */}
-                        <div className="hidden md:block overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
-                                <th className="p-3 w-10 text-center"></th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Date</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Member</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">Requested</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">Paid Amount</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Tax Type</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-right">GST Amount</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Mode</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider">Notes</th>
-                                <th className="p-3 font-bold text-secondary text-[11px] uppercase tracking-wider text-center">Action</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-shadow-darker/5 font-medium text-xs">
-                              {items.map((item) => (
-                                <tr key={item.id} className={`hover:bg-primary/5 transition-colors group ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : ''}`}>
-                                  <td className="p-2.5 text-center">
-                                    <input 
-                                      type="checkbox" 
-                                      className="rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
-                                      checked={selectedExpenses.includes(item.id)}
-                                      onChange={(e) => {
-                                        if (e.target.checked) {
-                                          setSelectedExpenses(prev => [...prev, item.id]);
-                                        } else {
-                                          setSelectedExpenses(prev => prev.filter(id => id !== item.id));
-                                        }
-                                      }}
-                                    />
-                                  </td>
-                                  <td className="p-2.5 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
-                                  <td className="p-2.5 font-bold text-primary-dark">{item.member}</td>
-                                  <td className="p-2.5 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
-                                  <td className="p-2.5 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
-                                  <td className="p-2.5">
-                                    <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                      item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
-                                    }`}>
-                                      {item.taxStatus}
-                                    </span>
-                                  </td>
-                                  <td className="p-2.5 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
-                                  <td className="p-2.5">
-                                    <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[9px]">
-                                      {item.paymentMode}
-                                    </span>
-                                  </td>
-                                  <td className="p-2.5 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
-                                  <td className="p-2.5 text-center">
-                                    <button 
-                                      onClick={() => handleDeleteSavedExpense(item.id)} 
-                                      className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-                                      title="Delete from Firestore"
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Mobile View */}
-                        <div className="md:hidden divide-y divide-shadow-darker/5">
+                      <div className="border-t border-shadow-dark/30 p-3 bg-surface/50">
+                        <div className="divide-y divide-shadow-dark/20">
                           {items.map((item) => (
-                            <div key={item.id} className={`p-3 space-y-2 group transition-colors ${selectedExpenses.includes(item.id) ? 'bg-primary/5' : 'hover:bg-shadow-darker/5'}`}>
-                              <div className="flex justify-between items-start gap-3">
-                                <div className="flex items-start gap-2 flex-1 min-w-0">
-                                  <input 
-                                    type="checkbox" 
-                                    className="rounded border-gray-300 text-primary focus:ring-primary mt-1 cursor-pointer"
-                                    checked={selectedExpenses.includes(item.id)}
-                                    onChange={(e) => {
-                                      if (e.target.checked) {
-                                        setSelectedExpenses(prev => [...prev, item.id]);
-                                      } else {
-                                        setSelectedExpenses(prev => prev.filter(id => id !== item.id));
-                                      }
-                                    }}
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-bold text-primary-dark text-xs truncate">{item.member}</div>
-                                    <div className="text-[10px] text-secondary mt-0.5">{item.date}</div>
-                                  </div>
-                                </div>
-                                <div className="text-right flex-shrink-0">
-                                  <div className="font-black text-primary-dark text-sm">₹{item.paid?.toLocaleString('en-IN') || '0'}</div>
-                                  <div className="text-[9px] text-secondary mt-0.5">Req: ₹{item.requested?.toLocaleString('en-IN') || '0'}</div>
+                            <div key={item.id} className="p-2.5 flex items-center justify-between text-xs hover:bg-primary/5 rounded-lg transition-colors">
+                              <div>
+                                <div className="font-bold text-primary-dark">{item.member}</div>
+                                <div className="text-[10px] text-secondary flex items-center gap-2 mt-0.5">
+                                  <span>{item.date}</span>
+                                  <span>•</span>
+                                  <span>{item.paymentMode}</span>
+                                  {item.taxStatus === 'GST' && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-primary font-bold">GST ₹{item.gstAmount}</span>
+                                    </>
+                                  )}
                                 </div>
                               </div>
-                              
-                              <div className="grid grid-cols-2 gap-2 text-[10px] pl-6">
-                                <div>
-                                  <span className={`px-1.5 py-0.5 rounded font-bold ${item.taxStatus === 'GST' ? 'bg-primary/10 text-primary' : 'bg-shadow-darker/10 text-secondary'}`}>
-                                    {item.taxStatus}
-                                  </span>
-                                  {item.taxStatus === 'GST' && <span className="ml-1 text-primary">₹{item.gstAmount}</span>}
-                                </div>
-                                <div className="text-right">
-                                  <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono">{item.paymentMode}</span>
-                                </div>
-                              </div>
-
-                              {(item.billNo || item.notes) && (
-                                <div className="text-[10px] text-secondary pt-1.5 pl-6 space-y-0.5">
-                                  {item.billNo && <div><span className="font-semibold">Bill No:</span> {item.billNo}</div>}
-                                  {item.notes && <div className="truncate" title={item.notes}><span className="font-semibold">Notes:</span> {item.notes}</div>}
-                                </div>
-                              )}
-
-                              <div className="flex justify-end pt-1">
+                              <div className="flex items-center gap-3">
+                                <span className="font-bold text-primary-dark">₹{item.paid?.toLocaleString('en-IN')}</span>
                                 <button 
                                   onClick={() => handleDeleteSavedExpense(item.id)} 
-                                  className="neo-btn p-1.5 hover:text-error text-secondary transition-colors"
+                                  className="text-secondary hover:text-error p-1"
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -1823,6 +2204,56 @@ export default function ExpensePage() {
                   </div>
                 );
               })}
+
+              {/* Grouped View Pagination Controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 pt-2 text-xs text-secondary">
+                <div className="flex items-center gap-2">
+                  <span>Categories per page:</span>
+                  <select
+                    value={groupedItemsPerPage}
+                    onChange={(e) => {
+                      setGroupedItemsPerPage(Number(e.target.value));
+                      setGroupedCurrentPage(1);
+                    }}
+                    className="neo-input !py-1 !px-2 !text-xs bg-surface border border-shadow-dark/30 font-bold text-primary-dark"
+                  >
+                    <option value={5}>5</option>
+                    <option value={8}>8</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                  </select>
+                  <span>
+                    Showing {Math.min((groupedCurrentPage - 1) * groupedItemsPerPage + 1, groupedLedger.length)}–
+                    {Math.min(groupedCurrentPage * groupedItemsPerPage, groupedLedger.length)} of {groupedLedger.length} categories
+                  </span>
+                </div>
+
+                {totalGroupedPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={groupedCurrentPage === 1}
+                      onClick={() => setGroupedCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Previous page"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="font-bold px-2 text-primary-dark">
+                      Page {groupedCurrentPage} of {totalGroupedPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={groupedCurrentPage === totalGroupedPages}
+                      onClick={() => setGroupedCurrentPage(prev => Math.min(prev + 1, totalGroupedPages))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Next page"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

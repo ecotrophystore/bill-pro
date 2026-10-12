@@ -40,3 +40,8 @@ users.json
 
 # Agents
 .agents/
+
+# Firebase & audit reports
+.firebase/
+lighthouse-*.json
+scratch_read_events.js

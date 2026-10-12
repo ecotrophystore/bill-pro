@@ -188,9 +188,19 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
 You are an elite, real-time autonomous AI Assistant ("Master Worker") built directly inside the 'Bill Pro' web app ecosystem. Your communication style is helpful, direct, and encouraging. Only output valid JSON matching the system schema.
 CRITICAL: You should reply in English by default. However, if the user speaks to you in Tamil or Tanglish, you may respond in Tanglish (Tamil written in English) or Tamil. Match the user's language.
 
-## MODULE 2: APP NAVIGATION AND DATA ENTRY
-You can perform actions based on user requests. If the user asks to go somewhere, use "NAVIGATE". If they want to add a product or customer, use "ADD_PRODUCT" or "ADD_CUSTOMER". 
-If they want to create an invoice, quotation, cash memo, or proforma, use "PREFILL_DOCUMENT".
+## MODULE 2: APP NAVIGATION AND FULL AUTONOMOUS EXECUTION
+You are the central autonomous AI operator of Bill Pro. You can perform all work in the app and answer questions with exact live database numbers:
+1. If the user asks for sales or revenue (yesterday, today, this month, lifetime), check the [SYSTEM DATA - LIVE ANALYTICS] and state the exact numbers!
+2. If the user asks about quotations (how many quotations, pending, accepted), check [SYSTEM DATA - LIVE ANALYTICS] and answer with exact counts!
+3. If the user asks about leads, CRM, expenses, stock, or customers, answer with exact data from [SYSTEM DATA - LIVE ANALYTICS]!
+4. If the user asks to go somewhere, use "NAVIGATE".
+5. If they want to add a lead (e.g. "Add lead John 9876543210 for 50 trophies"), use "ADD_LEAD".
+6. If they want to create an invoice, quotation, cash memo, or proforma, use "PREFILL_DOCUMENT" or "CREATE_QUOTATION" / "CREATE_INVOICE".
+7. If they want to add a product or customer, use "ADD_PRODUCT" or "ADD_CUSTOMER".
+8. If they say they spent money, use "ADD_EXPENSE" (amount, category, description).
+9. If they say an invoice was paid, use "MARK_PAID" (invoiceNumber, paymentMethod).
+10. If they received or sold stock, use "UPDATE_STOCK" (productSearch, quantityToAdd).
+11. If they ask to send/dispatch via WhatsApp, use "DISPATCH" (documentType, customerSearch).
 
 Valid routes for NAVIGATE:
 - /dashboard
@@ -198,31 +208,198 @@ Valid routes for NAVIGATE:
 - /invoices/new
 - /quotations
 - /quotations/new
-- /products
-- /customers
+- /leads
+- /pipeline
+- /cash-memos
+- /proforma-invoices
+- /library/products
+- /library/customers
+- /expense
+- /reports
 - /settings
 
 Respond STRICTLY in this JSON format:
 {
-  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "PREFILL_DOCUMENT" | "REPLY",
-  "target": "/route_path" (or "/quotations/new", "/invoices/new" for PREFILL_DOCUMENT),
+  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "CREATE_QUOTATION" | "CREATE_INVOICE" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "REPLY",
+  "target": "/route_path" (or "quotation", "invoice" for DISPATCH),
   "payload": { 
-      "name": "Item Name", "retail_price": 100, "phone": "1234567890",
+      "name": "Item Name / Lead Name", "retail_price": 100, "phone": "1234567890",
+      "company_name": "Company", "budget": 5000, "requirement": "50 Trophies",
       "customerSearch": "John Doe", 
+      "documentType": "quotation" | "invoice",
+      "amount": 500, "category": "Office Supplies", "description": "Pens and paper",
+      "invoiceNumber": "102", "paymentMethod": "Cash",
+      "productSearch": "Trophy", "quantityToAdd": 50,
       "items": [{ "productSearch": "Trophy", "quantity": 5 }]
   },
   "status": "SUCCESS" | "ERROR",
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "avatarState": "thinking" | "warning" | "idle" | "celebrating",
-  "message": "Your conversational response here in Tanglish or Tamil. Be helpful and direct."
+  "message": "Your helpful, accurate conversational response in English, Tanglish, or Tamil. Directly answer with the exact live numbers from LIVE ANALYTICS."
 }
 `;
+        let injectedContext = "";
+        const promptString = typeof promptPayload === 'string' ? promptPayload : JSON.stringify(promptPayload);
+        const lowercasePrompt = promptString.toLowerCase();
+
+        // 2. Comprehensive Live Business Analytics Collector
+        try {
+            const now = new Date();
+            const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+            const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+            const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+            const getMs = (val: any) => {
+                if (!val) return 0;
+                if (typeof val.toMillis === 'function') return val.toMillis();
+                if (typeof val.seconds === 'number') return val.seconds * 1000;
+                if (val instanceof Date) return val.getTime();
+                if (typeof val === 'number') return val;
+                if (typeof val === 'string') {
+                    const parsed = Date.parse(val);
+                    if (!isNaN(parsed)) return parsed;
+                }
+                return 0;
+            };
+
+            const [invoicesSnap, quotationsSnap, leadsSnap, expensesSnap, productsSnap, customersSnap] = await Promise.all([
+                db.collection('invoices').get().catch(() => null),
+                db.collection('quotations').get().catch(() => null),
+                db.collection('leads').get().catch(() => null),
+                db.collection('expenses').get().catch(() => null),
+                db.collection('products').get().catch(() => null),
+                db.collection('customers').get().catch(() => null)
+            ]);
+
+            // Invoices metrics
+            let totalRevenue = 0;
+            let totalOutstanding = 0;
+            let yesterdaySales = 0;
+            let yesterdayInvoicesCount = 0;
+            let todaySales = 0;
+            let todayInvoicesCount = 0;
+            let thisMonthSales = 0;
+            let productCounts: Record<string, number> = {};
+
+            if (invoicesSnap) {
+                invoicesSnap.forEach(doc => {
+                    const data = doc.data();
+                    const amt = Number(data.grand_total ?? data.total ?? data.subtotal ?? 0);
+                    const bal = Number(data.balance_amount ?? 0);
+                    const time = getMs(data.created_at || data.date);
+
+                    totalRevenue += amt;
+                    totalOutstanding += bal > 0 ? bal : (data.payment_status === 'unpaid' ? amt : 0);
+
+                    if (time >= yesterdayStart && time < todayStart) {
+                        yesterdaySales += amt;
+                        yesterdayInvoicesCount += 1;
+                    } else if (time >= todayStart) {
+                        todaySales += amt;
+                        todayInvoicesCount += 1;
+                    }
+
+                    if (time >= monthStart) {
+                        thisMonthSales += amt;
+                    }
+
+                    (data.items || []).forEach((item: any) => {
+                        const name = item.description || item.name || 'Item';
+                        productCounts[name] = (productCounts[name] || 0) + (Number(item.quantity) || 1);
+                    });
+                });
+            }
+
+            let topProduct = 'None';
+            let maxCount = 0;
+            for (const [name, count] of Object.entries(productCounts)) {
+                if (count > maxCount && name !== 'Item') {
+                    maxCount = count;
+                    topProduct = name;
+                }
+            }
+
+            // Quotations metrics
+            let totalQuotations = quotationsSnap ? quotationsSnap.size : 0;
+            let pendingQuotations = 0;
+            let acceptedQuotations = 0;
+            let totalQuotationValue = 0;
+            if (quotationsSnap) {
+                quotationsSnap.forEach(doc => {
+                    const data = doc.data();
+                    const amt = Number(data.grand_total ?? data.total ?? 0);
+                    totalQuotationValue += amt;
+                    const st = (data.status || '').toLowerCase();
+                    if (st === 'pending' || st === 'sent' || st === 'draft') pendingQuotations++;
+                    if (st === 'accepted' || st === 'converted') acceptedQuotations++;
+                });
+            }
+
+            // Leads metrics
+            let totalLeads = leadsSnap ? leadsSnap.size : 0;
+            let highPriorityLeads = 0;
+            if (leadsSnap) {
+                leadsSnap.forEach(doc => {
+                    const data = doc.data();
+                    if (data.priority === 'HIGH' || (data.quantity && data.quantity >= 50)) {
+                        highPriorityLeads++;
+                    }
+                });
+            }
+
+            // Expenses metrics
+            let totalExpenses = 0;
+            let yesterdayExpenses = 0;
+            let todayExpenses = 0;
+            if (expensesSnap) {
+                expensesSnap.forEach(doc => {
+                    const data = doc.data();
+                    const amt = Number(data.amount ?? data.paid ?? 0);
+                    const time = getMs(data.date || data.created_at);
+                    totalExpenses += amt;
+                    if (time >= yesterdayStart && time < todayStart) yesterdayExpenses += amt;
+                    if (time >= todayStart) todayExpenses += amt;
+                });
+            }
+
+            // Products & Stock
+            let totalProducts = productsSnap ? productsSnap.size : 0;
+            let lowStockCount = 0;
+            if (productsSnap) {
+                productsSnap.forEach(doc => {
+                    const data = doc.data();
+                    if (Number(data.stockQuantity || 0) < 10) lowStockCount++;
+                });
+            }
+
+            const totalCustomers = customersSnap ? customersSnap.size : 0;
+
+            injectedContext = `
+[SYSTEM DATA - LIVE ANALYTICS]
+- YESTERDAY SALES: ₹${yesterdaySales.toLocaleString()} across ${yesterdayInvoicesCount} invoices
+- TODAY SALES: ₹${todaySales.toLocaleString()} across ${todayInvoicesCount} invoices
+- THIS MONTH SALES: ₹${thisMonthSales.toLocaleString()}
+- TOTAL LIFETIME REVENUE: ₹${totalRevenue.toLocaleString()} (${invoicesSnap ? invoicesSnap.size : 0} total invoices)
+- TOTAL OUTSTANDING BALANCES: ₹${totalOutstanding.toLocaleString()}
+- TOP SELLING PRODUCT: ${topProduct} (${maxCount} units)
+- QUOTATIONS: ${totalQuotations} total quotations generated (${pendingQuotations} pending/draft, ${acceptedQuotations} accepted, Total Value: ₹${totalQuotationValue.toLocaleString()})
+- CRM LEADS: ${totalLeads} active leads (${highPriorityLeads} high priority)
+- EXPENSES: Yesterday: ₹${yesterdayExpenses.toLocaleString()} | Today: ₹${todayExpenses.toLocaleString()} | Lifetime: ₹${totalExpenses.toLocaleString()}
+- INVENTORY: ${totalProducts} total products (${lowStockCount} items low stock < 10 units)
+- CUSTOMERS: ${totalCustomers} registered customers
+(CRITICAL: Always use these exact real numbers to answer any questions about yesterday sales, quotations, leads, inventory, expenses, or revenue!)
+`;
+        } catch (err) {
+            console.error("Failed to fetch live analytics", err);
+        }
+
+        const FINAL_SYSTEM_INSTRUCTION = injectedContext + "\n" + SYSTEM_INSTRUCTION;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
             contents: promptPayload,
             config: {
-                systemInstruction: SYSTEM_INSTRUCTION,
+                systemInstruction: FINAL_SYSTEM_INSTRUCTION,
                 responseMimeType: "application/json"
             }
         });

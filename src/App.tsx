@@ -47,14 +47,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (loading) return <div className="min-h-screen bg-transparent flex items-center justify-center font-semibold text-primary">Loading...</div>;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   
-  if (dbUser && !dbUser.is_active) {
-    return (
-      <div className="min-h-screen bg-transparent flex flex-col items-center justify-center font-semibold text-primary gap-4">
-        <p className="text-xl">Your account is pending admin approval.</p>
-        <button onClick={logout} className="neo-btn-primary px-6 py-2">Sign Out</button>
-      </div>
-    );
-  }
+  // Admin approval check removed
 
   return <>{children}</>;
 }

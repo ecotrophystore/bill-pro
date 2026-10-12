@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
               email: firebaseUser.email || '',
               role: 'sales' as const,
-              is_active: false,
+              is_active: true,
               created_at: serverTimestamp()
             };
             try {
