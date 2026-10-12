@@ -2102,7 +2102,7 @@ export default function ExpensePage() {
           ) : (
             /* GROUPED BY PURPOSE ACCORDION VIEW */
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-primary/10 rounded-xl border border-primary/20">
+              <div className="flex items-center justify-between p-3 bg-surface/80 rounded-xl border border-shadow-dark/40 shadow-neo-surface">
                 <label className="flex items-center gap-2 text-xs font-bold text-primary-dark cursor-pointer">
                   <input 
                     type="checkbox" 
