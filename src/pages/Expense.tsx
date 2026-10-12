@@ -1902,16 +1902,16 @@ export default function ExpensePage() {
         </div>
 
         {/* Filtered Subtotal Ribbon */}
-        <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5 bg-primary/10 rounded-xl border border-primary/20 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5 bg-surface/80 rounded-xl border border-shadow-dark/40 shadow-neo-surface text-xs">
           <div className="flex flex-wrap items-center gap-4 text-secondary">
-            <span>Filtered Paid: <strong className="text-primary-dark">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</strong></span>
-            <span className="hidden sm:inline text-primary/30">•</span>
+            <span>Filtered Paid: <strong className="text-primary-dark font-bold">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-shadow-dark">•</span>
             <span>Input GST: <strong className="text-primary font-bold">₹{filteredStats.gstTotal.toLocaleString('en-IN')}</strong></span>
-            <span className="hidden sm:inline text-primary/30">•</span>
-            <span>Non-GST: <strong className="text-primary-dark">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-shadow-dark">•</span>
+            <span>Non-GST: <strong className="text-primary-dark font-bold">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
           </div>
-          <div className="text-[11px] font-bold text-primary-dark">
-            Showing {filteredReportList.length} of {savedExpenses.length} transactions
+          <div className="text-[11px] font-semibold text-secondary">
+            Showing <span className="font-bold text-primary-dark">{filteredReportList.length}</span> of {savedExpenses.length} transactions
           </div>
         </div>
 
@@ -1934,7 +1934,7 @@ export default function ExpensePage() {
               <div className="border border-shadow-dark/40 rounded-2xl overflow-hidden bg-surface shadow-neo-raised">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="bg-primary/10 border-b border-shadow-dark/30 text-[11px] font-bold text-primary-dark uppercase tracking-wider">
+                    <tr className="bg-surface/90 border-b border-shadow-dark/30 text-[11px] font-bold text-secondary uppercase tracking-wider">
                       <th className="p-3.5 w-10 text-center">
                         <input 
                           type="checkbox" 
