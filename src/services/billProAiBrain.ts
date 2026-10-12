@@ -448,7 +448,57 @@ export function ruleBasedAiFallback(
         return { action: 'REPLY', message: msg, status: 'SUCCESS' };
     }
 
-    // 7. Navigation intents
+    // 7. Create Invoice / Bill intent with prefilled data
+    if ((q.includes('invoice') || q.includes('bill')) && (q.includes('create') || q.includes('make') || q.includes('new') || q.includes('generate') || q.includes('for'))) {
+        // Extract customer name if mentioned: "for [customer]..." or "for the customer [customer]..."
+        let customer = '';
+        const forCustMatch = query.match(/for\s+(?:the\s+)?(?:customer\s+)?([A-Za-z0-9\s&]+?)(?=\s+for|\s+with|\s+having|\s+\d+|\s*$)/i);
+        if (forCustMatch && forCustMatch[1]) {
+            customer = forCustMatch[1].trim();
+        }
+
+        // Extract quantity: e.g. "100 customized trophies", "50 pcs", "10 units"
+        let qty = 1;
+        const qtyMatch = query.match(/(\d+)\s*(?:nos|pcs|units|customized|pieces|trophies|trophy|items)?/i);
+        if (qtyMatch && qtyMatch[1]) {
+            qty = parseInt(qtyMatch[1], 10);
+        }
+
+        // Extract price / rate: e.g. "699 price", "at 699", "rs 699", "₹699", "rate 699"
+        let rate = 0;
+        const rateMatch = query.match(/(?:price|rate|at|rs\.?|inr|₹)\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*(?:price|rate|each|per)/i);
+        if (rateMatch) {
+            rate = parseFloat(rateMatch[1] || rateMatch[2]);
+        }
+
+        // Extract product name
+        let prodDesc = 'Custom Product';
+        if (q.includes('troph')) prodDesc = 'Customized Trophies';
+        else if (q.includes('memento')) prodDesc = 'Memento';
+        else if (q.includes('medal')) prodDesc = 'Medal';
+        else if (q.includes('plaque')) prodDesc = 'Wooden Plaque';
+
+        return {
+            action: 'PREFILL_DOCUMENT',
+            target: '/invoices/new',
+            payload: {
+                documentType: 'invoice',
+                customerSearch: customer,
+                customerName: customer,
+                items: [{
+                    productSearch: prodDesc,
+                    description: prodDesc,
+                    quantity: qty,
+                    rate: rate,
+                    price: rate
+                }]
+            },
+            message: `Opening the new invoice creation screen prefilled for ${customer || 'customer'} with ${qty} ${prodDesc} at ₹${rate || 'standard'} each!`,
+            status: 'SUCCESS'
+        };
+    }
+
+    // 8. Navigation intents
     if (q.includes('dashboard')) return { action: 'NAVIGATE', target: '/dashboard', message: 'Taking you to Dashboard...', status: 'SUCCESS' };
     if (q.includes('invoice')) return { action: 'NAVIGATE', target: '/invoices', message: 'Opening Invoices...', status: 'SUCCESS' };
     if (q.includes('customer')) return { action: 'NAVIGATE', target: '/library/customers', message: 'Opening Customer Library...', status: 'SUCCESS' };
@@ -485,9 +535,9 @@ You are the Master AI Worker for Bill Pro web application. You run all operation
 ${formatSnapshotPrompt(snapshot)}
 
 ACTIONS YOU CAN EXECUTE:
+- PREFILL_DOCUMENT: { "action": "PREFILL_DOCUMENT", "target": "/invoices/new" (or "/quotations/new"), "payload": { "customerSearch": "Customer Name", "customerName": "Customer Name", "items": [{ "productSearch": "Item Name", "description": "Item Name", "quantity": 100, "rate": 699, "price": 699 }] }, "message": "Opening invoice for..." }
 - NAVIGATE: { "action": "NAVIGATE", "target": "/dashboard" | "/invoices" | "/invoices/new" | "/quotations" | "/quotations/new" | "/leads" | "/leads/new" | "/pipeline" | "/cash-memos" | "/proforma-invoices" | "/library/products" | "/library/customers" | "/expense" | "/reports" | "/settings" }
 - ADD_LEAD: { "action": "ADD_LEAD", "payload": { "name": "...", "phone": "...", "company_name": "...", "budget": 5000, "requirement": "..." } }
-- PREFILL_DOCUMENT: { "action": "PREFILL_DOCUMENT", "target": "/quotations/new" or "/invoices/new", "payload": { "customerName": "...", "items": [...] } }
 - ADD_PRODUCT: { "action": "ADD_PRODUCT", "payload": { "name": "...", "retail_price": 100, "quantity": 10 } }
 - ADD_CUSTOMER: { "action": "ADD_CUSTOMER", "payload": { "name": "...", "phone": "...", "gst_number": "..." } }
 - ADD_EXPENSE: { "action": "ADD_EXPENSE", "payload": { "amount": 500, "category": "...", "description": "..." } }
@@ -497,10 +547,11 @@ ACTIONS YOU CAN EXECUTE:
 - REPLY: { "action": "REPLY", "message": "Direct conversational answer using the exact numbers from the Live Business Snapshot above" }
 
 CRITICAL RULES:
-1. For questions about sales (yesterday, today, this month, lifetime): Use the exact numbers from the Live Business Snapshot above.
-2. For questions about quotations (how many quotations, pending, accepted, total value): State the exact counts and values.
-3. For questions about leads, expenses, stock, customers: State the exact counts.
-4. Output ONLY valid JSON matching this schema:
+1. Whenever the user asks to create, make, or generate an invoice, bill, or quotation, DO NOT just give a conversational reply asking for confirmation! Immediately choose "PREFILL_DOCUMENT" with "target": "/invoices/new" (or "/quotations/new") and populate customerSearch, quantity, item description, and price/rate.
+2. For questions about sales (yesterday, today, this month, lifetime): Use the exact numbers from the Live Business Snapshot above.
+3. For questions about quotations (how many quotations, pending, accepted, total value): State the exact counts and values.
+4. For questions about leads, expenses, stock, customers: State the exact counts.
+5. Output ONLY valid JSON matching this schema:
 {
   "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "REPLY",
   "target": "/route_path",

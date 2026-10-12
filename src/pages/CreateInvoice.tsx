@@ -82,29 +82,43 @@ export default function CreateInvoice() {
           const prefillData = location.state?.prefillData;
 
           if (prefillData) {
-            if (prefillData.customerSearch) {
-              const matched = loadedCustomers.find(c => c.name.toLowerCase().includes(prefillData.customerSearch.toLowerCase()));
+            const custSearchTerm = (prefillData.customerSearch || prefillData.customerName || prefillData.customer || '').toString().trim();
+            if (custSearchTerm) {
+              const matched = loadedCustomers.find(c => c.name.toLowerCase().includes(custSearchTerm.toLowerCase()));
               if (matched) {
                 setSelectedCustomerId(matched.id);
                 setSelectedCustomerName(matched.name);
+              } else {
+                setSelectedCustomerName(custSearchTerm);
               }
             }
             if (prefillData.items && prefillData.items.length > 0) {
               const newItems = prefillData.items.map((pi: any) => {
-                const matchedItem = allProducts.find(p => p.name.toLowerCase().includes(pi.productSearch.toLowerCase()));
+                const prodSearchTerm = (pi.productSearch || pi.description || pi.name || '').toString().trim();
+                const matchedItem = allProducts.find(p => p.name.toLowerCase().includes(prodSearchTerm.toLowerCase()));
+                const specifiedRate = Number(pi.rate ?? pi.price ?? pi.retail_price) || 0;
                 if (matchedItem) {
                   return {
                     description: matchedItem.name,
                     desc: matchedItem.name,
                     hsn_code: matchedItem.hsn_code || '',
-                    quantity: pi.quantity || 1,
-                    rate: matchedItem.retail_price || 0,
+                    quantity: Number(pi.quantity) || 1,
+                    rate: specifiedRate > 0 ? specifiedRate : (matchedItem.retail_price || 0),
                     tax_percentage: matchedItem.tax_percentage || 18,
                     priceTier: 'retail',
                     unit: matchedItem.unit || 'Pcs'
                   };
                 }
-                return { description: pi.productSearch, desc: pi.productSearch, hsn_code: '', quantity: pi.quantity || 1, rate: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' };
+                return { 
+                  description: prodSearchTerm || 'Custom Item', 
+                  desc: prodSearchTerm || 'Custom Item', 
+                  hsn_code: '', 
+                  quantity: Number(pi.quantity) || 1, 
+                  rate: specifiedRate, 
+                  tax_percentage: 18, 
+                  priceTier: 'retail', 
+                  unit: 'Pcs' 
+                };
               });
               setItems(newItems);
             }
