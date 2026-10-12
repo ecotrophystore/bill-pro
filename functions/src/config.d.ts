@@ -1,3 +1,3 @@
-export declare const app: import("firebase-admin/app").App;
-export declare const db: FirebaseFirestore.Firestore;
+export declare const app: any;
+export declare const db: any;
 //# sourceMappingURL=config.d.ts.map

@@ -155,9 +155,9 @@ export async function clientCreateQuotation(rawData: any) {
     });
 
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let quotationNumber = rawData.number;
     if (!quotationNumber) {
@@ -234,9 +234,9 @@ export async function clientCreateInvoice(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let invoiceNumber = rawData.number;
     if (!invoiceNumber) {
@@ -333,9 +333,9 @@ export async function clientCreateProformaInvoice(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let proformaNumber = rawData.number;
     if (!proformaNumber) {
@@ -432,9 +432,9 @@ export async function clientCreateCashMemo(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound((subtotal * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let memoNumber = rawData.number;
     if (!memoNumber) {
@@ -617,9 +617,9 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
       // Derived Proforma Number changing QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
       const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
@@ -712,9 +712,9 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
     const discountPercent = qData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = qData.charge_amount || qData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
     const advanceAmount = qData.advance_amount || 0;
@@ -817,9 +817,9 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound((subtotal * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
       // Derived Cash Memo Number changing QTN -> MEMO
       const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
@@ -888,9 +888,9 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
     const discountPercent = qData.discount_percent || 0;
     const discountAmount = exactRound((subtotal * discountPercent) / 100);
     const charge = qData.charge_amount || qData.chargeAmount || 0;
-    const grandTotalExact = subtotal - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
     const memoRef = doc(collection(db, "cash_memos"));

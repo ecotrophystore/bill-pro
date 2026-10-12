@@ -150,9 +150,9 @@ export const convertQuotationToInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let invoiceNumber: string | undefined;
       if (!invoiceNumber) {
@@ -262,8 +262,8 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
         };
       });
 
-      const finalGrandTotal = Math.round(subtotal);
-      const roundOff = exactRound(finalGrandTotal - subtotal);
+      const finalGrandTotal = exactRound(subtotal);
+      const roundOff = 0;
 
       const rawQNum = qData.number || '';
       const memoNumber = rawQNum ? rawQNum.replace(/^qtn/i, 'MEMO') : `MEMO/${new Date().getFullYear()}/0001`;
@@ -371,9 +371,9 @@ export const convertQuotationToProforma = onCall(async (request) => {
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
       // Directly change QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
       const rawQNum = qData.number || '';
@@ -558,9 +558,9 @@ export const createInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let invoiceNumber = rawData.number;
       if (!invoiceNumber) {
@@ -660,9 +660,9 @@ export const createProformaInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let proformaNumber = rawData.number;
       if (!proformaNumber) {
@@ -760,8 +760,8 @@ export const createCashMemo = onCall(async (request) => {
         };
       });
 
-      const finalGrandTotal = Math.round(subtotal);
-      const roundOff = exactRound(finalGrandTotal - subtotal);
+      const finalGrandTotal = exactRound(subtotal);
+      const roundOff = 0;
 
       let memoNumber = rawData.number;
       if (!memoNumber) {
@@ -854,8 +854,9 @@ export const createQuotation = onCall(async (request) => {
         return { ...item, line_total: lineTotal, tax_amount: taxAmount };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let quotationNumber = rawData.number;
       if (!quotationNumber) {

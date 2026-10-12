@@ -324,10 +324,10 @@ export default function Invoices() {
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{formatInvoiceDate(inv)}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
-                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div>₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</div>
                     {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
                       <div className="text-xs text-orange-600 font-semibold mt-0.5">
-                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                        Bal: ₹ {inv.balance_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     )}
                   </td>
@@ -373,7 +373,9 @@ export default function Invoices() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
                     <button 
                       onClick={() => openPaymentModal(inv)}
                       className={`mt-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${

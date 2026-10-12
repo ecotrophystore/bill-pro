@@ -329,7 +329,9 @@ export default function CashMemos() {
                     )}
                   </td>
                   <td className="p-4 text-secondary">{formatMemoDate(memo)}</td>
-                  <td className="p-4 text-right font-medium text-primary-dark">₹ {memo.grand_total?.toLocaleString()}</td>
+                  <td className="p-4 text-right font-medium text-primary-dark">
+                    ₹ {memo.grand_total ? memo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </td>
                   <td className="p-4 text-center">
                     <select 
                       value={memo.payment_status || 'unpaid'}
@@ -404,7 +406,9 @@ export default function CashMemos() {
                     </p>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1">
-                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {memo.grand_total?.toLocaleString()}</div>
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {memo.grand_total ? memo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
                     <select 
                       value={memo.payment_status || 'unpaid'}
                       onChange={async (e) => {

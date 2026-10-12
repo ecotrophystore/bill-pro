@@ -12,6 +12,7 @@ import { getNextProposedNumber } from '../utils/numberGenerator';
 
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
+const formatINR = (val: number) => (val || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function CreateInvoice() {
   const navigate = useNavigate();
@@ -202,15 +203,15 @@ export default function CreateInvoice() {
     const rawSubtotal = items.reduce((acc, item) => acc + exactRound((item.quantity || 0) * (item.rate || 0)), 0);
     const discountAmount = exactRound((rawSubtotal * discountPercent) / 100);
     const charge = exactRound(chargeAmount || 0);
-    const grandTotalExact = subtotal + taxTotal + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + taxTotal + charge);
+    const finalGrandTotal = grandTotalExact;
 
     return {
       subtotal: exactRound(rawSubtotal),
       discountAmount,
       taxTotal: exactRound(taxTotal),
       chargeAmount: charge,
-      roundOff: exactRound(finalGrandTotal - grandTotalExact),
+      roundOff: 0,
       grandTotal: finalGrandTotal
     };
   };
@@ -361,28 +362,27 @@ export default function CreateInvoice() {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-5xl mx-auto">
-      <div className="flex items-center gap-4 mb-8">
+    <div className="space-y-4 animate-fade-in w-full max-w-[1440px] mx-auto px-2 sm:px-4">
+      <div className="flex items-center gap-3 mb-4">
         <button onClick={() => navigate('/invoices')} className="p-2 neo-btn !px-3 !py-2">
-          <ArrowLeft size={20} className="text-secondary" />
+          <ArrowLeft size={18} className="text-secondary" />
         </button>
         <div>
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
-              {id ? 'Edit Invoice' : 'Create Invoice'}
-            </h1>
-          </div>
-          <p className="text-secondary mt-1">
+          <h1 className="text-2xl font-bold tracking-tight text-primary-dark">
+            {id ? 'Edit Invoice' : 'Create Invoice'}
+          </h1>
+          <p className="text-xs text-secondary mt-0.5">
             {id ? 'Update the details of the selected invoice.' : 'Directly generate a Tax Invoice. Locked upon creation.'}
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-        <div className="md:col-span-2 space-y-10">
-          <div className="neo-card p-8 sm:p-10">
-            <h3 className="mb-6">Customer Details</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Left Column: Customer Details & Compact Line Items */}
+        <div className="lg:col-span-8 space-y-4">
+          <div className="neo-card p-4 sm:p-5">
+            <h3 className="mb-3 text-base font-bold">Customer Details</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="space-y-1">
                 <SearchableAutocomplete
                   label="Select Customer"
@@ -400,24 +400,24 @@ export default function CreateInvoice() {
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-semibold text-primary-dark px-1 flex items-center justify-between">
+                <label className="text-xs font-semibold text-primary-dark px-1 flex items-center justify-between">
                   <span>Invoice No</span>
-                  <span className="text-xs text-primary font-normal">Editable</span>
+                  <span className="text-[10px] text-primary font-normal">Editable</span>
                 </label>
                 <SpeechInput
                   type="text"
-                  className="neo-input w-full font-mono text-primary-dark font-bold text-sm bg-transparent"
+                  className="neo-input w-full font-mono text-primary-dark font-bold text-xs bg-transparent py-2"
                   placeholder="e.g. INV/25/26/0001"
                   value={documentNumber}
                   onChange={(e: any) => setDocumentNumber(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
-                <label className="text-sm font-semibold text-primary-dark px-1">Invoice Date</label>
-                <input type="date" className="neo-input w-full" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                <label className="text-xs font-semibold text-primary-dark px-1">Invoice Date</label>
+                <input type="date" className="neo-input w-full text-xs py-2" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
               </div>
             </div>
-            <div className="mt-4 flex flex-col sm:flex-row gap-4">
+            <div className="mt-3 flex flex-wrap items-center gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -433,7 +433,7 @@ export default function CreateInvoice() {
                     }
                   }}
                 />
-                <label htmlFor="applyGst" className="text-sm font-medium text-secondary">Apply GST (18%)</label>
+                <label htmlFor="applyGst" className="font-medium text-secondary">Apply GST (18%)</label>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -450,177 +450,218 @@ export default function CreateInvoice() {
                     }
                   }}
                 />
-                <label htmlFor="igst" className="text-sm font-medium text-secondary">Apply IGST (Inter-state)</label>
+                <label htmlFor="igst" className="font-medium text-secondary">Apply IGST (Inter-state)</label>
               </div>
             </div>
           </div>
 
-          <div className="neo-card p-8 sm:p-10">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-              <h3 className="mb-0">Line Items</h3>
+          <div className="neo-card p-4 sm:p-5">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="mb-0 text-base font-bold flex items-center gap-2">
+                <span>Line Items</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                  {items.length} {items.length === 1 ? 'item' : 'items'}
+                </span>
+              </h3>
             </div>
-            <div className="overflow-x-auto pb-4 -mx-4 px-4 sm:-mx-0 sm:px-0">
-              <div className="min-w-[850px] space-y-8">
-                {items.map((item, index) => (
-                  <div key={index} className="flex flex-col sm:flex-row gap-4 items-end bg-transparent border border-shadow-darker/10 p-6 rounded-2xl shadow-sm relative group transition-all hover:shadow-md">
-                    <div className="flex-[2] space-y-1 w-full">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Product & Description</label>}
-                      <SearchableAutocomplete
-                        items={products.map(p => ({
-                          id: p.id,
-                          label: p.sku ? `${p.name} (${p.sku})` : p.name,
-                          subLabel: `${p.category || ''} | ${p.size || ''}`
-                        }))}
-                        value={item.description || ''}
-                        onSelect={(id: string, label: string) => {
-                          const product = products.find(p => p.id === id);
-                          const newItems = [...items];
-                          newItems[index] = {
-                            ...newItems[index],
-                            description: label,
-                            hsn_code: product?.hsn_code || newItems[index].hsn_code || '',
-                            tax_percentage: product?.tax_percentage || newItems[index].tax_percentage || 18,
-                            rate: item.priceTier === 'wholesale'
-                              ? (product?.wholesale_price || 0)
-                              : (product?.retail_price || 0)
-                          };
-                          setItems(newItems);
-                        }}
-                        onCustomChange={(val: string) => {
-                          const newItems = [...items];
-                          newItems[index].description = val;
-                          setItems(newItems);
-                        }}
-                        placeholder="Product description..."
-                      />
-                      <SpeechInput
-                        type="text"
-                        className="neo-input w-full text-xs mt-2"
-                        placeholder="Additional product notes (optional)..."
-                        value={item.desc || ''}
-                        onChange={(e: any) => {
-                          const newItems = [...items];
-                          newItems[index].desc = e.target.value;
-                          setItems(newItems);
-                        }}
-                      />
+
+            <div className="space-y-2.5">
+              {items.map((item, index) => {
+                const itemTotal = (item.quantity || 0) * (item.rate || 0);
+                return (
+                  <div
+                    key={index}
+                    className="p-3 sm:p-3.5 rounded-xl bg-[#EDE1D1]/60 border border-shadow-darker/15 shadow-sm space-y-2 transition-all hover:border-primary/40"
+                  >
+                    {/* Top Row: Badge, Product Search, Tier, Total, Delete */}
+                    <div className="flex flex-wrap md:flex-nowrap items-center gap-2">
+                      <span className="w-5 h-5 shrink-0 rounded-full bg-primary text-white text-[11px] font-bold flex items-center justify-center">
+                        {index + 1}
+                      </span>
+                      <div className="flex-1 min-w-[200px]">
+                        <SearchableAutocomplete
+                          items={products.map(p => ({
+                            id: p.id,
+                            label: p.sku ? `${p.name} (${p.sku})` : p.name,
+                            subLabel: `${p.category || ''} | ${p.size || ''}`
+                          }))}
+                          value={item.description || ''}
+                          onSelect={(id: string, label: string) => {
+                            const product = products.find(p => p.id === id);
+                            const newItems = [...items];
+                            newItems[index] = {
+                              ...newItems[index],
+                              description: label,
+                              hsn_code: product?.hsn_code || newItems[index].hsn_code || '',
+                              tax_percentage: product?.tax_percentage || newItems[index].tax_percentage || 18,
+                              rate: item.priceTier === 'wholesale'
+                                ? (product?.wholesale_price || 0)
+                                : (product?.retail_price || 0)
+                            };
+                            setItems(newItems);
+                          }}
+                          onCustomChange={(val: string) => {
+                            const newItems = [...items];
+                            newItems[index].description = val;
+                            setItems(newItems);
+                          }}
+                          placeholder="Select product from catalog or enter name..."
+                        />
+                      </div>
+                      <div className="w-28 shrink-0">
+                        <select
+                          className="neo-input w-full text-xs font-semibold py-1.5 px-2"
+                          value={item.priceTier}
+                          onChange={(e) => {
+                            const tier = e.target.value as 'retail' | 'wholesale';
+                            const newItems = [...items];
+                            newItems[index].priceTier = tier;
+                            const product = products.find(p => p.name === item.description);
+                            if (product) {
+                              newItems[index].rate = tier === 'wholesale' ? product.wholesale_price : product.retail_price;
+                            }
+                            setItems(newItems);
+                          }}
+                        >
+                          <option value="retail">Retail Tier</option>
+                          <option value="wholesale">Wholesale</option>
+                        </select>
+                      </div>
+                      <div className="shrink-0 text-right min-w-[100px] px-2.5 py-1 rounded-lg bg-bg-surface/50 border border-shadow-darker/10">
+                        <span className="text-[10px] text-secondary block font-medium uppercase leading-tight">Total</span>
+                        <span className="text-xs font-bold text-primary font-mono leading-tight">
+                          ₹ {formatINR(itemTotal)}
+                        </span>
+                      </div>
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="p-1 rounded-lg text-error hover:bg-error/10 transition-colors shrink-0"
+                          title="Delete Item"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                     </div>
-                    <div className="w-full sm:w-28 space-y-1">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Price Tier</label>}
-                      <select
-                        className="neo-input w-full bg-transparent text-xs"
-                        value={item.priceTier}
-                        onChange={(e) => {
-                          const tier = e.target.value as 'retail' | 'wholesale';
-                          const newItems = [...items];
-                          newItems[index].priceTier = tier;
-                          // Find matching product in library to update price if already selected
-                          const product = products.find(p => p.name === item.description);
-                          if (product) {
-                            newItems[index].rate = tier === 'wholesale' ? product.wholesale_price : product.retail_price;
-                          }
-                          setItems(newItems);
-                        }}
-                      >
-                        <option value="retail">Retail</option>
-                        <option value="wholesale">Wholesale</option>
-                      </select>
-                    </div>
-                    <div className="w-full sm:w-24 space-y-1">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">HSN</label>}
-                      <SpeechInput
-                        type="text"
-                        className="neo-input w-full"
-                        placeholder="HSN"
-                        value={item.hsn_code}
-                        onChange={(e) => {
-                          const newItems = [...items];
-                          newItems[index].hsn_code = e.target.value;
-                          setItems(newItems);
-                        }}
-                      />
-                    </div>
-                    <div className="w-full sm:w-20 space-y-1">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Qty</label>}
-                      <div className="flex rounded-md shadow-sm">
+
+                    {/* Bottom Row: HSN, Qty, Unit, Rate, Notes */}
+                    <div className="grid grid-cols-2 sm:grid-cols-12 gap-2 items-center pt-1 border-t border-shadow-darker/10 text-xs">
+                      <div className="sm:col-span-2">
                         <input
-                          type="number"
-                          className="neo-input w-full font-bold rounded-r-none border-r-0"
-                          placeholder="1"
-                          value={item.quantity}
+                          type="text"
+                          className="neo-input w-full text-xs font-mono py-1 px-2"
+                          placeholder="HSN Code"
+                          value={item.hsn_code}
                           onChange={(e) => {
                             const newItems = [...items];
-                            newItems[index].quantity = parseFloat(e.target.value) || 0;
+                            newItems[index].hsn_code = e.target.value;
+                            setItems(newItems);
+                          }}
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-semibold text-secondary uppercase shrink-0">Qty:</span>
+                          <input
+                            type="number"
+                            className="neo-input w-full font-bold text-xs py-1 px-1.5"
+                            placeholder="1"
+                            min="0"
+                            step="any"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const newItems = [...items];
+                              newItems[index].quantity = parseFloat(e.target.value) || 0;
+                              setItems(newItems);
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          list="units-list"
+                          className="neo-input w-full text-xs py-1 px-2"
+                          placeholder="Unit"
+                          value={item.unit || 'Pcs'}
+                          onChange={(e) => {
+                            const newItems = [...items];
+                            newItems[index].unit = e.target.value;
+                            setItems(newItems);
+                          }}
+                        />
+                        <datalist id="units-list">
+                          <option value="Pcs" />
+                          <option value="Sq Ft" />
+                          <option value="Kg" />
+                          <option value="Ltr" />
+                          <option value="Mtr" />
+                          <option value="Nos" />
+                        </datalist>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[10px] font-semibold text-secondary uppercase shrink-0">Rate:</span>
+                          <input
+                            type="number"
+                            className="neo-input w-full font-mono font-semibold text-xs py-1 px-1.5 text-primary-dark"
+                            placeholder="0.00"
+                            min="0"
+                            step="any"
+                            value={item.rate || ''}
+                            onChange={(e) => {
+                              const newItems = [...items];
+                              newItems[index].rate = parseFloat(e.target.value) || 0;
+                              setItems(newItems);
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="col-span-2 sm:col-span-4">
+                        <input
+                          type="text"
+                          className="w-full bg-transparent border-b border-shadow-darker/20 focus:border-primary outline-none text-xs text-secondary py-0.5 px-1 placeholder:text-secondary/50 placeholder:italic transition-colors"
+                          placeholder="Item notes (optional)..."
+                          value={item.desc || ''}
+                          onChange={(e: any) => {
+                            const newItems = [...items];
+                            newItems[index].desc = e.target.value;
                             setItems(newItems);
                           }}
                         />
                       </div>
                     </div>
-                    <div className="w-full sm:w-20 space-y-1">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Unit</label>}
-                      <input
-                        type="text"
-                        list="units-list"
-                        className="neo-input w-full text-xs"
-                        value={item.unit || 'Pcs'}
-                        onChange={(e) => {
-                          const newItems = [...items];
-                          newItems[index].unit = e.target.value;
-                          setItems(newItems);
-                        }}
-                      />
-                      <datalist id="units-list">
-                        <option value="Pcs" />
-                        <option value="Sq Ft" />
-                        <option value="Kg" />
-                        <option value="Ltr" />
-                        <option value="Mtr" />
-                        <option value="Nos" />
-                      </datalist>
-                    </div>
-                    <div className="w-full sm:w-28 space-y-1">
-                      {index === 0 && <label className="text-sm font-semibold text-primary-dark px-1 hidden sm:block">Rate</label>}
-                      <SpeechInput
-                        type="number"
-                        className="neo-input w-full font-mono text-primary-dark"
-                        placeholder="0.00"
-                        value={item.rate || ''}
-                        onChange={(e) => {
-                          const newItems = [...items];
-                          newItems[index].rate = parseFloat(e.target.value) || 0;
-                          setItems(newItems);
-                        }}
-                      />
-                    </div>
-
-                    <button onClick={() => removeItem(index)} className="p-2 neo-btn !px-3 !py-2 text-error h-[42px] mb-[2px]">
-                      <Trash2 size={18} />
-                    </button>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
 
-            <button onClick={addItem} className="neo-btn mt-6 flex items-center gap-2 text-sm text-secondary hover:text-primary-dark">
-              <Plus size={16} /> Add Item
+            <button
+              type="button"
+              onClick={addItem}
+              className="neo-btn mt-3 flex items-center justify-center gap-1.5 text-xs font-semibold text-primary-dark hover:text-primary w-full sm:w-auto py-2 px-4 border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-all"
+            >
+              <Plus size={15} /> Add Another Item
             </button>
           </div>
         </div>
 
-        <div className="space-y-10">
-          <div className="neo-card p-8 sm:p-10">
-            <h3 className="mb-8 flex items-center gap-2"><Calculator size={18} /> Summary</h3>
-            <div className="space-y-3 text-sm">
+        {/* Right Column: Sticky Summary & Action */}
+        <div className="lg:col-span-4 space-y-3 lg:sticky lg:top-4 self-start">
+          <div className="neo-card p-4 sm:p-5">
+            <h3 className="mb-3 flex items-center gap-2 text-base font-bold"><Calculator size={16} /> Summary</h3>
+            <div className="space-y-2 text-xs">
               <div className="flex justify-between text-secondary">
                 <span>Subtotal</span>
-                <span className="font-semibold text-primary-dark">₹ {totals.subtotal.toLocaleString()}</span>
+                <span className="font-semibold text-primary-dark font-mono">₹ {formatINR(totals.subtotal)}</span>
               </div>
 
               {/* Discount */}
               <div className="flex justify-between items-center gap-2">
                 <label className="text-secondary shrink-0">Discount</label>
                 <select
-                  className="neo-input text-xs py-1 w-28"
+                  className="neo-input text-xs py-1 px-2 w-28"
                   value={discountPercent}
                   onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
                 >
@@ -635,24 +676,24 @@ export default function CreateInvoice() {
               {discountPercent > 0 && (
                 <div className="flex justify-between text-green-600 text-xs">
                   <span>Discount ({discountPercent}%)</span>
-                  <span className="font-semibold">- ₹ {totals.discountAmount.toLocaleString()}</span>
+                  <span className="font-semibold font-mono">- ₹ {formatINR(totals.discountAmount)}</span>
                 </div>
               )}
 
               {isGstInfo.isIgst ? (
                 <div className="flex justify-between text-secondary">
                   <span>IGST</span>
-                  <span className="font-semibold text-primary-dark">₹ {totals.taxTotal.toLocaleString()}</span>
+                  <span className="font-semibold text-primary-dark font-mono">₹ {formatINR(totals.taxTotal)}</span>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between text-secondary">
-                    <span>CGST (Half)</span>
-                    <span className="font-semibold text-primary-dark">₹ {(totals.taxTotal / 2).toLocaleString()}</span>
+                    <span>CGST (9%)</span>
+                    <span className="font-semibold text-primary-dark font-mono">₹ {formatINR(totals.taxTotal / 2)}</span>
                   </div>
                   <div className="flex justify-between text-secondary">
-                    <span>SGST (Half)</span>
-                    <span className="font-semibold text-primary-dark">₹ {(totals.taxTotal / 2).toLocaleString()}</span>
+                    <span>SGST (9%)</span>
+                    <span className="font-semibold text-primary-dark font-mono">₹ {formatINR(totals.taxTotal / 2)}</span>
                   </div>
                 </>
               )}
@@ -660,9 +701,9 @@ export default function CreateInvoice() {
               {/* Charge */}
               <div className="flex justify-between items-center gap-2">
                 <label className="text-secondary shrink-0">Design Charge</label>
-                <SpeechInput
+                <input
                   type="number"
-                  className="neo-input text-xs py-1 w-28 font-mono"
+                  className="neo-input text-xs py-1 px-2 w-28 font-mono"
                   placeholder="0.00"
                   value={chargeAmount || ''}
                   onChange={(e) => setChargeAmount(parseFloat(e.target.value) || 0)}
@@ -671,27 +712,28 @@ export default function CreateInvoice() {
               {chargeAmount > 0 && (
                 <div className="flex justify-between text-orange-600 text-xs">
                   <span>Design Charge</span>
-                  <span className="font-semibold">+ ₹ {totals.chargeAmount.toLocaleString()}</span>
+                  <span className="font-semibold font-mono">+ ₹ {formatINR(totals.chargeAmount)}</span>
                 </div>
               )}
 
               <div className="flex justify-between text-secondary">
                 <span>Round-off</span>
-                <span className="font-semibold text-primary-dark">₹ {totals.roundOff.toFixed(2)}</span>
+                <span className="font-semibold text-primary-dark font-mono">₹ {formatINR(totals.roundOff)}</span>
+              </div>
+              <div className="h-px bg-shadow-darker/20 my-1.5"></div>
+              <div className="flex justify-between items-baseline text-base pt-0.5">
+                <span className="font-bold text-primary-dark">Grand Total</span>
+                <span className="text-lg font-extrabold text-primary font-mono">₹ {formatINR(totals.grandTotal)}</span>
               </div>
               <div className="h-px bg-shadow-darker/20 my-2"></div>
-              <div className="flex justify-between text-lg">
-                <span className="font-bold text-primary-dark">Grand Total</span>
-                <span className="font-bold text-primary-dark">₹ {totals.grandTotal.toLocaleString()}</span>
-              </div>
-              <div className="h-px bg-shadow-darker/20 my-4"></div>
-              <h4 className="font-semibold text-primary-dark mb-4 text-sm mt-4">Advance Payment</h4>
-              <div className="space-y-3">
+
+              <h4 className="font-semibold text-primary-dark text-xs pt-1">Advance Payment</h4>
+              <div className="space-y-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-secondary px-1">Amount</label>
-                  <SpeechInput
+                  <label className="text-[11px] font-semibold text-secondary px-0.5">Amount</label>
+                  <input
                     type="number"
-                    className="neo-input w-full"
+                    className="neo-input w-full font-mono font-semibold text-xs py-1.5"
                     value={advanceAmount === 0 ? '0' : (advanceAmount || '')}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);
@@ -700,53 +742,50 @@ export default function CreateInvoice() {
                     max={totals.grandTotal}
                   />
                 </div>
-                <div className="animate-fade-in space-y-3">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-secondary px-1">Method</label>
-                      <select className="neo-input w-full text-xs" value={advancePaymentMethod} onChange={(e) => setAdvancePaymentMethod(e.target.value)}>
-                        <option value="Bank Transfer">Bank Transfer</option>
-                        <option value="Cash">Cash</option>
-                        <option value="GPay">GPay</option>
-                        <option value="PhonePe">PhonePe</option>
-                        <option value="Paytm">Paytm</option>
-                        <option value="UPI">UPI</option>
-                        <option value="NEFT">NEFT</option>
-                        <option value="RTGS">RTGS</option>
-                        <option value="IMPS">IMPS</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-semibold text-secondary px-1">Date</label>
-                      <input type="date" className="neo-input w-full text-xs" value={advancePaymentDate} onChange={(e) => setAdvancePaymentDate(e.target.value)} />
-                    </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-0.5">
+                    <label className="text-[11px] font-semibold text-secondary px-0.5">Method</label>
+                    <select className="neo-input w-full text-xs py-1" value={advancePaymentMethod} onChange={(e) => setAdvancePaymentMethod(e.target.value)}>
+                      <option value="Bank Transfer">Bank Transfer</option>
+                      <option value="Cash">Cash</option>
+                      <option value="GPay">GPay</option>
+                      <option value="PhonePe">PhonePe</option>
+                      <option value="Paytm">Paytm</option>
+                      <option value="UPI">UPI</option>
+                      <option value="NEFT">NEFT</option>
+                      <option value="RTGS">RTGS</option>
+                      <option value="IMPS">IMPS</option>
+                    </select>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-secondary px-1">Ref Number (Optional)</label>
-                    <SpeechInput type="text" className="neo-input w-full" placeholder="Transaction ID, Cheque No..." value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
+                  <div className="space-y-0.5">
+                    <label className="text-[11px] font-semibold text-secondary px-0.5">Date</label>
+                    <input type="date" className="neo-input w-full text-xs py-1" value={advancePaymentDate} onChange={(e) => setAdvancePaymentDate(e.target.value)} />
                   </div>
-                  <div className="h-px bg-shadow-darker/20 my-4"></div>
-                  <div className="flex justify-between text-lg mt-4">
-                    <span className="font-bold text-primary-dark">Balance</span>
-                    <span className="font-bold text-error">₹ {Math.max(0, totals.grandTotal - advanceAmount).toLocaleString()}</span>
-                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  <label className="text-[11px] font-semibold text-secondary px-0.5">Ref No. (Optional)</label>
+                  <input type="text" className="neo-input w-full text-xs py-1" placeholder="Txn ID, Cheque No..." value={advanceReferenceNumber} onChange={(e) => setAdvanceReferenceNumber(e.target.value)} />
+                </div>
+                <div className="h-px bg-shadow-darker/20 my-1.5"></div>
+                <div className="flex justify-between items-baseline text-sm pt-0.5">
+                  <span className="font-bold text-primary-dark">Balance</span>
+                  <span className="font-bold text-error font-mono">₹ {formatINR(Math.max(0, totals.grandTotal - advanceAmount))}</span>
                 </div>
               </div>
             </div>
           </div>
 
-
-          <div className="neo-card p-4 space-y-3 shadow-[5px_5px_15px_#D1C4B2,-5px_-5px_15px_#FFFFFF] border border-warning/10">
-            <div className="bg-warning/10 text-orange-800 px-3 py-2 rounded-lg text-sm border border-warning/20 mb-4 flex gap-2 items-start">
-              <ShieldCheck size={18} className="mt-0.5 shrink-0" />
+          <div className="neo-card p-3 space-y-2.5 shadow-[5px_5px_15px_#D1C4B2,-5px_-5px_15px_#FFFFFF] border border-warning/10">
+            <div className="bg-warning/10 text-orange-800 px-2.5 py-1.5 rounded-lg text-xs border border-warning/20 flex gap-2 items-start leading-snug">
+              <ShieldCheck size={15} className="mt-0.5 shrink-0" />
               <span><strong>Rule #2:</strong> Fiscal year numbering is atomic. Invoices are <strong>permanently locked</strong> upon creation.</span>
             </div>
             <button
-              className="w-full neo-btn-primary flex justify-center items-center gap-2"
+              className="w-full neo-btn-primary flex justify-center items-center gap-2 py-2.5 text-sm font-semibold"
               onClick={handleGenerateInvoice}
               disabled={isSaving}
             >
-              {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {isSaving ? (id ? 'Updating...' : 'Generating...') : (id ? 'Update Invoice' : 'Generate Invoice')}
             </button>
           </div>

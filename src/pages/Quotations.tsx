@@ -433,7 +433,9 @@ export default function Quotations() {
                   <td className="py-4 px-4 pl-0 font-medium text-primary-dark">{q.number}</td>
                   <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id]?.name || 'Loading...'}</td>
                   <td className="py-4 px-4 text-secondary">{q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
-                  <td className="py-4 px-4 font-bold text-primary-dark text-right">{q.grand_total?.toLocaleString() || '0'}</td>
+                  <td className="py-4 px-4 font-bold text-primary-dark text-right">
+                    {q.grand_total ? q.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </td>
                   <td className="py-4 px-4 text-center">{getStatusBadge(q)}</td>
                   <td className="py-4 px-4 pr-0 text-right">
                     <div className="flex items-center justify-end gap-2">
@@ -497,7 +499,9 @@ export default function Quotations() {
                     </p>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1">
-                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {q.grand_total?.toLocaleString() || '0'}</div>
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {q.grand_total ? q.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
                     <div className="mt-1">{getStatusBadge(q)}</div>
                   </div>
                 </div>

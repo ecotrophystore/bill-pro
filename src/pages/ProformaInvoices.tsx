@@ -348,10 +348,10 @@ export default function ProformaInvoices() {
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
-                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div>₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</div>
                     {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
                       <div className="text-xs text-orange-600 font-semibold mt-0.5">
-                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                        Bal: ₹ {inv.balance_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     )}
                   </td>
@@ -406,7 +406,9 @@ export default function ProformaInvoices() {
                     </p>
                   </div>
                   <div className="text-right flex flex-col items-end">
-                    <div className="font-black text-lg text-primary-dark tracking-tight">₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
                     <div className="mt-1">
                       {(inv as any).conversion_status === 'converted' ? (
                         <span className="neo-badge text-success bg-transparent shadow-neo-surface">Converted</span>
