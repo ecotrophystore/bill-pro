@@ -502,33 +502,6 @@ export function generatePurchaseExpenseTrends(
     map[key].expenses += amt;
   });
 
-  const sortedKeys = Object.keys(map).sort();
-
-  // If there is only 1 point (e.g. all purchases are on Oct 3), add adjacent days/periods with 0 so AreaChart renders a visible bell/peak curve
-  if (sortedKeys.length === 1 && granularity === 'daily') {
-    const singleKey = sortedKeys[0];
-    const [y, m, d] = singleKey.split('-').map(Number);
-    const prevDate = new Date(y, m - 1, d - 1);
-    const nextDate = new Date(y, m - 1, d + 1);
-    const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
-    const nextKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
-    
-    if (!map[prevKey]) {
-      map[prevKey] = {
-        purchases: 0,
-        expenses: 0,
-        displayKey: prevDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
-      };
-    }
-    if (!map[nextKey]) {
-      map[nextKey] = {
-        purchases: 0,
-        expenses: 0,
-        displayKey: nextDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
-      };
-    }
-  }
-
   const finalSortedKeys = Object.keys(map).sort();
   // Limit output points based on granularity for optimal readability
   const maxPoints = granularity === 'daily' ? 31 : granularity === 'yearly' ? 10 : 12;

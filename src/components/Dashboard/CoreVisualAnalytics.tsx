@@ -528,13 +528,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={computedPurchaseResult.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="purchasesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#006766" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#006766" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
+              <BarChart data={computedPurchaseResult.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2D9CD" />
                 <XAxis 
                   dataKey="displayKey" 
@@ -552,18 +546,15 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                   formatter={(val: any) => [`₹${Number(val).toLocaleString('en-IN')}`, 'Vendor Purchases']}
                   labelFormatter={(lbl) => `Time: ${lbl}`}
                   contentStyle={{ backgroundColor: '#F3E9DD', borderRadius: '12px', border: '1px solid #D1C4B2', fontSize: '11px', boxShadow: '2px 2px 5px #D1C4B2' }}
+                  cursor={{ fill: 'rgba(0, 103, 102, 0.08)' }}
                 />
-                <Area 
-                  type="monotone" 
+                <Bar 
                   dataKey="purchases" 
-                  stroke="#006766" 
-                  strokeWidth={2.5} 
-                  fillOpacity={1} 
-                  fill="url(#purchasesGrad)" 
-                  dot={{ r: 4, strokeWidth: 2, fill: '#F59E0B', stroke: '#006766' }}
-                  activeDot={{ r: 6, stroke: '#004D40', strokeWidth: 2, fill: '#F59E0B' }}
+                  fill="#006766" 
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={42}
                 />
-              </AreaChart>
+              </BarChart>
             </ResponsiveContainer>
           )}
         </div>
@@ -658,13 +649,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={computedExpenseResult.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="expensesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#006766" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#006766" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
+              <BarChart data={computedExpenseResult.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2D9CD" />
                 <XAxis 
                   dataKey="displayKey" 
@@ -682,18 +667,15 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                   formatter={(val: any) => [`₹${Number(val).toLocaleString('en-IN')}`, 'Operating Expenses']}
                   labelFormatter={(lbl) => `Time: ${lbl}`}
                   contentStyle={{ backgroundColor: '#F3E9DD', borderRadius: '12px', border: '1px solid #D1C4B2', fontSize: '11px', boxShadow: '2px 2px 5px #D1C4B2' }}
+                  cursor={{ fill: 'rgba(0, 103, 102, 0.08)' }}
                 />
-                <Area 
-                  type="monotone" 
+                <Bar 
                   dataKey="expenses" 
-                  stroke="#006766" 
-                  strokeWidth={2.5} 
-                  fillOpacity={1} 
-                  fill="url(#expensesGrad)" 
-                  dot={{ r: 4, strokeWidth: 2, fill: '#F59E0B', stroke: '#006766' }}
-                  activeDot={{ r: 6, stroke: '#004D40', strokeWidth: 2, fill: '#F59E0B' }}
+                  fill="#006766" 
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={42}
                 />
-              </AreaChart>
+              </BarChart>
             </ResponsiveContainer>
           )}
         </div>
