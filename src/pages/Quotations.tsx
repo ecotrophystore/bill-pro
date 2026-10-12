@@ -6,6 +6,7 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteD
 import { httpsCallable } from 'firebase/functions';
 import type { Quotation, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
@@ -20,6 +21,8 @@ export default function Quotations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [shareQuotation, setShareQuotation] = useState<Quotation | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
  
@@ -127,6 +130,11 @@ export default function Quotations() {
     } else {
       navigate(targetRoute);
     }
+  };
+
+  const openShareModal = (q: Quotation) => {
+    setShareQuotation(q);
+    setIsShareModalOpen(true);
   };
 
   const updateStatus = async (q: Quotation, newStatus: string) => {
@@ -461,7 +469,7 @@ export default function Quotations() {
                         <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Quotation"><Edit size={18} /></button>
                         <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="View PDF"><FileText size={18} /></button>
                         <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Download PDF"><Download size={18} /></button>
-                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'share', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Share PDF"><Share2 size={18} /></button>
+                        <button onClick={() => openShareModal(q)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-emerald-700" title="Share via WhatsApp"><Share2 size={18} /></button>
                         <button onClick={() => deleteQuotation(q)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Quotation"><Trash2 size={18} /></button>
                     </div>
                   </td>
@@ -518,7 +526,7 @@ export default function Quotations() {
                     <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
                     <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
                     <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
-                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'share', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Share2 size={16} /></button>
+                    <button onClick={() => openShareModal(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
                     <button onClick={() => deleteQuotation(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
                   </div>
                 </div>
@@ -527,6 +535,20 @@ export default function Quotations() {
           </div>
         </div>
       </div>
+
+      {shareQuotation && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareQuotation(null);
+          }}
+          document={shareQuotation}
+          documentType="Quotation"
+          customer={customers[shareQuotation.customer_id]}
+          settings={settings}
+        />
+      )}
     </div>
   );
 }

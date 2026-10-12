@@ -358,10 +358,31 @@ export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, 
     return;
   }
   
-  if (action === 'share' || action === 'blob') {
+  if (action === 'blob') {
     return new Promise<Blob>((resolve) => {
       html2pdf().set(opt).from(element as HTMLElement).output('blob').then((blob: Blob) => {
         document.body.removeChild(container);
+        resolve(blob);
+      });
+    });
+  }
+
+  if (action === 'share') {
+    return new Promise<Blob>((resolve) => {
+      html2pdf().set(opt).from(element as HTMLElement).output('blob').then(async (blob: Blob) => {
+        document.body.removeChild(container);
+        try {
+          const file = new File([blob], opt.filename, { type: 'application/pdf' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              title: opt.filename,
+              text: `${prefix} for ${buyerName}`,
+              files: [file]
+            });
+          }
+        } catch (shareErr) {
+          console.warn('Web share was dismissed or unsupported:', shareErr);
+        }
         resolve(blob);
       });
     });

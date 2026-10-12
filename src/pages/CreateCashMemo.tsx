@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, ShieldCheck, User } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, functions } from '../lib/firebase';
-import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
@@ -34,6 +34,7 @@ export default function CreateCashMemo() {
   const [chargeAmount, setChargeAmount] = useState(0);
   const [paymentStatus, setPaymentStatus] = useState<'unpaid' | 'paid'>('unpaid');
   const [documentNumber, setDocumentNumber] = useState('');
+  const [memoDate, setMemoDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
@@ -69,6 +70,11 @@ export default function CreateCashMemo() {
             setChargeAmount(data.charge_amount || 0);
             setPaymentStatus(data.payment_status || 'unpaid');
             setDocumentNumber(data.number || '');
+            if (data.custom_date) {
+              setMemoDate(data.custom_date);
+            } else if (data.created_at?.toDate) {
+              setMemoDate(data.created_at.toDate().toISOString().split('T')[0]);
+            }
           }
         } else {
           try {
@@ -166,6 +172,10 @@ export default function CreateCashMemo() {
       alert("Please select a customer.");
       return;
     }
+    if (!memoDate.trim()) {
+      alert("Date is required.");
+      return;
+    }
     if (!auth?.currentUser || !functions) {
       alert("System connectivity error. Please refresh.");
       return;
@@ -180,6 +190,8 @@ export default function CreateCashMemo() {
           number: documentNumber || undefined,
           customer_id: isWalkIn ? null : selectedCustomerId,
           customer_name: selectedCustomerName,
+          custom_date: memoDate,
+          created_at: memoDate ? Timestamp.fromDate(new Date(memoDate + 'T12:00:00')) : serverTimestamp(),
           items: items,
           discount_percent: discountPercent,
           advance_amount: advanceAmount,
@@ -214,6 +226,7 @@ export default function CreateCashMemo() {
       const createCashMemoFn = httpsCallable(functions, 'createCashMemo');
       const memoData = {
         number: documentNumber || undefined,
+        custom_date: memoDate,
         customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
         customer_name: isWalkIn ? walkInName : selectedCustomerName,
         walk_in_customer: isWalkIn,
@@ -237,6 +250,7 @@ export default function CreateCashMemo() {
       try {
         const memoData = {
           number: documentNumber || undefined,
+          custom_date: memoDate,
           customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
           customer_name: isWalkIn ? walkInName : selectedCustomerName,
           walk_in_customer: isWalkIn,
@@ -350,7 +364,12 @@ export default function CreateCashMemo() {
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-semibold text-primary-dark px-1">Date</label>
-                <input type="date" className="neo-input w-full" defaultValue={new Date().toISOString().split('T')[0]} readOnly />
+                <input 
+                  type="date" 
+                  className="neo-input w-full" 
+                  value={memoDate} 
+                  onChange={(e) => setMemoDate(e.target.value)} 
+                />
               </div>
             </div>
           </div>

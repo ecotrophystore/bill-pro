@@ -1,477 +1,513 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
-import { collection, query, onSnapshot, where } from 'firebase/firestore';
-import { TrendingUp, Clock, AlertCircle, FileText, Loader2, IndianRupee, Plus, Calendar, Users, CheckSquare, Activity, ShieldAlert, BadgeCheck, Target } from 'lucide-react';
+import { collection, onSnapshot, getDocs, query, orderBy } from 'firebase/firestore';
+import { 
+  Calendar, 
+  FileText, 
+  Loader2, 
+  Plus, 
+  IndianRupee, 
+  Activity, 
+  Layers, 
+  RefreshCw,
+  Download,
+  Filter,
+  CheckCircle2,
+  Cloud
+} from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import type { Invoice } from '../types';
-import { useCRMPermission } from '../hooks/useCRMPermission';
-
-type DateFilter = 'today' | 'week' | 'month' | 'fy' | 'custom' | 'specific_date' | 'specific_month' | 'specific_year';
-
-const getFiscalYearStart = () => {
-  const now = new Date();
-  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
-  return new Date(year, 3, 1);
-};
+import type { Invoice, CashMemo, ProformaInvoice, Quotation, Lead } from '../types';
+import { 
+  ExecutiveSummaryCards, 
+  type DrillDownType 
+} from '../components/Dashboard/ExecutiveSummaryCards';
+import { CoreVisualAnalytics } from '../components/Dashboard/CoreVisualAnalytics';
+import { ActionableOperationalTables } from '../components/Dashboard/ActionableOperationalTables';
+import { DrillDownModal } from '../components/Dashboard/DrillDownModal';
+import {
+  type DashboardDateFilter,
+  getDateRangeBounds,
+  calculateExecutiveMetrics,
+  generateSalesTrends,
+  generateMonthlyComparison,
+  generateLeadsByPipeline,
+  generatePurchaseExpenseTrends,
+  getDocAmount,
+  getItemDate
+} from '../utils/dashboardMetrics';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [metrics, setMetrics] = useState({
-    totalRevenue: 0,
-    pendingInvoices: 0,
-    unreconciledCount: 0,
-    recentInvoices: [] as Invoice[],
-    pendingQuotes: 0,
-    pendingPurchases: 0
-  });
+
+  // Firestore real-time data states
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [cashMemos, setCashMemos] = useState<CashMemo[]>([]);
+  const [proformaInvoices, setProformaInvoices] = useState<ProformaInvoice[]>([]);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [purchases, setPurchases] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('month');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date>(new Date());
+
+  // Global Date Filter states (defaulting to 'all' so all real historical records appear immediately)
+  const [dateFilter, setDateFilter] = useState<DashboardDateFilter>('all');
   const [customStart, setCustomStart] = useState<string>('');
   const [customEnd, setCustomEnd] = useState<string>('');
-  const [specificDate, setSpecificDate] = useState<string>('');
-  const [specificMonth, setSpecificMonth] = useState<string>('');
-  const [specificYear, setSpecificYear] = useState<string>(new Date().getFullYear().toString());
-  const [crmStats, setCrmStats] = useState({ total: 0, overdue: 0, qualified: 0 });
-  const canViewCRM = useCRMPermission().hasPermission('view_lead');
 
+  // Drill-down Modal states
+  const [drillDownType, setDrillDownType] = useState<DrillDownType | string | null>(null);
+  const [isDrillDownOpen, setIsDrillDownOpen] = useState(false);
+
+  // 1. Real-time Multi-Collection Firestore Sync
   useEffect(() => {
-    if (!db) return;
-
-    let startDate: Date | null = null;
-    let endDate: Date | null = null;
-    const now = new Date();
-
-    switch (dateFilter) {
-      case 'today':
-        startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        break;
-      case 'week':
-        startDate = new Date(now);
-        startDate.setDate(now.getDate() - now.getDay());
-        startDate.setHours(0, 0, 0, 0);
-        break;
-      case 'month':
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-        break;
-      case 'fy':
-        startDate = getFiscalYearStart();
-        break;
-      case 'custom':
-        if (customStart) startDate = new Date(customStart);
-        if (customEnd) endDate = new Date(customEnd);
-        if (endDate) endDate.setHours(23, 59, 59, 999);
-        break;
-      case 'specific_date':
-        if (specificDate) {
-          startDate = new Date(specificDate);
-          startDate.setHours(0, 0, 0, 0);
-          endDate = new Date(specificDate);
-          endDate.setHours(23, 59, 59, 999);
-        }
-        break;
-      case 'specific_month':
-        if (specificMonth) {
-          const [yyyy, mm] = specificMonth.split('-');
-          startDate = new Date(parseInt(yyyy), parseInt(mm) - 1, 1);
-          endDate = new Date(parseInt(yyyy), parseInt(mm), 0);
-          endDate.setHours(23, 59, 59, 999);
-        }
-        break;
-      case 'specific_year':
-        if (specificYear) {
-          startDate = new Date(parseInt(specificYear), 0, 1);
-          endDate = new Date(parseInt(specificYear), 11, 31);
-          endDate.setHours(23, 59, 59, 999);
-        }
-        break;
+    if (!db) {
+      setLoading(false);
+      return;
     }
 
-    // Revenue & Pending Invoices
-    const invQuery = query(collection(db, 'invoices'));
-    const unsubscribeInvoices = onSnapshot(invQuery, (snapshot) => {
-      let invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
-      
-      // Filter by date
-      if (startDate || endDate) {
-        invs = invs.filter(inv => {
-          if (!inv.created_at) return false;
-          
-          let invDate: Date;
-          if (typeof (inv.created_at as any).toDate === 'function') {
-            invDate = (inv.created_at as any).toDate();
-          } else if ((inv.created_at as any).seconds) {
-            invDate = new Date((inv.created_at as any).seconds * 1000);
-          } else {
-            invDate = new Date(inv.created_at as unknown as string);
-          }
-
-          if (startDate && invDate < startDate) return false;
-          if (endDate && invDate > endDate) return false;
-          return true;
-        });
+    let loadedCount = 0;
+    const totalCollections = 7;
+    const checkAllLoaded = () => {
+      loadedCount++;
+      if (loadedCount >= totalCollections) {
+        setLoading(false);
+        setLastSyncedAt(new Date());
       }
+    };
 
-      const revenue = invs.filter(i => i.payment_status === 'paid').reduce((sum, i) => sum + i.grand_total, 0);
-      const pending = invs.filter(i => i.payment_status === 'unpaid' || i.payment_status === 'partial').reduce((sum, i) => sum + (i.balance_amount || i.grand_total), 0);
-      
-      const getMillis = (dateObj: any) => {
-        if (!dateObj) return 0;
-        if (typeof dateObj.toMillis === 'function') return dateObj.toMillis();
-        if (dateObj.seconds) return dateObj.seconds * 1000;
-        return new Date(dateObj).getTime() || 0;
-      };
+    // A. Sync Invoices
+    const invUnsub = onSnapshot(
+      collection(db, 'invoices'),
+      (snap) => {
+        setInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice)));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Invoices sync notice:", err);
+        checkAllLoaded();
+      }
+    );
 
-      setMetrics(prev => ({
-        ...prev,
-        totalRevenue: revenue,
-        pendingInvoices: pending,
-        recentInvoices: [...invs].sort((a, b) => getMillis(b.created_at) - getMillis(a.created_at)).slice(0, 5)
-      }));
-      setLoading(false);
-    }, (error) => {
-      console.error("Dashboard invoices error:", error);
-      setLoading(false);
-    });
+    // B. Sync Cash Memos
+    const memoUnsub = onSnapshot(
+      collection(db, 'cash_memos'),
+      (snap) => {
+        setCashMemos(snap.docs.map(d => ({ id: d.id, ...d.data() } as CashMemo)));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Cash memos sync notice:", err);
+        checkAllLoaded();
+      }
+    );
 
-    // Pending Quotations (Conversion Requested)
-    const quoteQuery = query(collection(db, 'quotations'), where('status', '==', 'convert_requested'));
-    const unsubscribeQuotes = onSnapshot(quoteQuery, (snapshot) => {
-      setMetrics(prev => ({
-        ...prev,
-        pendingQuotes: snapshot.size
-      }));
-    }, (error) => {
-      console.error("Dashboard quotations error:", error);
-    });
+    // C. Sync Proforma Invoices
+    const piUnsub = onSnapshot(
+      collection(db, 'proforma_invoices'),
+      (snap) => {
+        setProformaInvoices(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProformaInvoice)));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Proforma invoices sync notice:", err);
+        checkAllLoaded();
+      }
+    );
 
-    // Pending Purchases count
-    const purchaseQuery = query(collection(db, 'purchases'), where('status', '==', 'pending'));
-    const unsubscribePurchases = onSnapshot(purchaseQuery, (snapshot) => {
-      setMetrics(prev => ({
-        ...prev,
-        pendingPurchases: snapshot.size
-      }));
-    }, (error) => {
-      console.error("Dashboard purchases error:", error);
-    });
+    // D. Sync Quotations
+    const qtnUnsub = onSnapshot(
+      collection(db, 'quotations'),
+      (snap) => {
+        setQuotations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Quotation)));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Quotations sync notice:", err);
+        checkAllLoaded();
+      }
+    );
+
+    // E. Sync Leads & Production Orders
+    const leadUnsub = onSnapshot(
+      collection(db, 'leads'),
+      (snap) => {
+        setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Leads sync notice:", err);
+        checkAllLoaded();
+      }
+    );
+
+    // F. Sync Purchases
+    const purchaseUnsub = onSnapshot(
+      collection(db, 'purchases'),
+      (snap) => {
+        setPurchases(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Purchases sync notice:", err);
+        checkAllLoaded();
+      }
+    );
+
+    // G. Sync Expenses
+    // Check localStorage fallback first
+    let localExpenses: any[] = [];
+    try {
+      const rawLocal = localStorage.getItem('ecobill_saved_expenses');
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          localExpenses = parsed;
+          setExpenses(parsed);
+        }
+      }
+    } catch (e) {
+      console.warn("Local expenses check error:", e);
+    }
+
+    const expenseUnsub = onSnapshot(
+      collection(db, 'expenses'),
+      (snap) => {
+        const remoteExpenses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (remoteExpenses.length > 0) {
+          setExpenses(remoteExpenses);
+        } else if (localExpenses.length > 0) {
+          setExpenses(localExpenses);
+        } else {
+          setExpenses([]);
+        }
+        checkAllLoaded();
+      },
+      (err) => {
+        console.warn("Expenses sync notice:", err);
+        if (localExpenses.length > 0) setExpenses(localExpenses);
+        checkAllLoaded();
+      }
+    );
 
     return () => {
-      unsubscribeInvoices();
-      unsubscribeQuotes();
-      unsubscribePurchases();
+      invUnsub();
+      memoUnsub();
+      piUnsub();
+      qtnUnsub();
+      leadUnsub();
+      purchaseUnsub();
+      expenseUnsub();
     };
-  }, [dateFilter, customStart, customEnd, specificDate, specificMonth, specificYear]);
-
-  // CRM stats subscription (independent of date filter)
-  useEffect(() => {
-    if (!db) return;
-    const unsub = onSnapshot(collection(db, 'leads'), (snap) => {
-      const leads = snap.docs.map((d) => d.data() as any);
-      const total = leads.length;
-      const now = new Date();
-      const overdue = leads.filter((l: any) => {
-        if (!l.next_follow_up_date || l.status === 'lost') return false;
-        let d: Date;
-        if (typeof l.next_follow_up_date.toDate === 'function') d = l.next_follow_up_date.toDate();
-        else if (l.next_follow_up_date.seconds) d = new Date(l.next_follow_up_date.seconds * 1000);
-        else d = new Date(l.next_follow_up_date);
-        return !isNaN(d.getTime()) && d < now;
-      }).length;
-      const qualified = leads.filter((l: any) => l.status === 'qualified').length;
-      setCrmStats({ total, overdue, qualified });
-    });
-    return () => unsub();
   }, []);
 
+  // Manual Triggered Refresh
+  const handleManualRefresh = async () => {
+    if (!db) return;
+    setIsRefreshing(true);
+    try {
+      const [invSnap, memoSnap, piSnap, qtnSnap, leadSnap, purchSnap, expSnap] = await Promise.all([
+        getDocs(collection(db, 'invoices')).catch(() => null),
+        getDocs(collection(db, 'cash_memos')).catch(() => null),
+        getDocs(collection(db, 'proforma_invoices')).catch(() => null),
+        getDocs(collection(db, 'quotations')).catch(() => null),
+        getDocs(collection(db, 'leads')).catch(() => null),
+        getDocs(collection(db, 'purchases')).catch(() => null),
+        getDocs(collection(db, 'expenses')).catch(() => null)
+      ]);
+
+      if (invSnap) setInvoices(invSnap.docs.map(d => ({ id: d.id, ...d.data() } as Invoice)));
+      if (memoSnap) setCashMemos(memoSnap.docs.map(d => ({ id: d.id, ...d.data() } as CashMemo)));
+      if (piSnap) setProformaInvoices(piSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProformaInvoice)));
+      if (qtnSnap) setQuotations(qtnSnap.docs.map(d => ({ id: d.id, ...d.data() } as Quotation)));
+      if (leadSnap) setLeads(leadSnap.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
+      if (purchSnap) setPurchases(purchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      if (expSnap && expSnap.docs.length > 0) {
+        setExpenses(expSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } else {
+        try {
+          const raw = localStorage.getItem('ecobill_saved_expenses');
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) setExpenses(parsed);
+          }
+        } catch (e) {}
+      }
+
+      setLastSyncedAt(new Date());
+    } catch (e) {
+      console.error("Manual refresh error:", e);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // 2. Computed Financial & Operational Metrics (Guaranteed strict financial accuracy)
+  const bounds = useMemo(() => {
+    return getDateRangeBounds(dateFilter, customStart, customEnd);
+  }, [dateFilter, customStart, customEnd]);
+
+  const metrics = useMemo(() => {
+    return calculateExecutiveMetrics(leads, invoices, cashMemos, proformaInvoices, bounds);
+  }, [leads, invoices, cashMemos, proformaInvoices, bounds]);
+
+  const salesTrends = useMemo(() => {
+    return generateSalesTrends(invoices, cashMemos, bounds);
+  }, [invoices, cashMemos, bounds]);
+
+  const monthlyComparison = useMemo(() => {
+    return generateMonthlyComparison(invoices, cashMemos, proformaInvoices);
+  }, [invoices, cashMemos, proformaInvoices]);
+
+  const pipelineDistribution = useMemo(() => {
+    return generateLeadsByPipeline(leads);
+  }, [leads]);
+
+  // Purchases & Expenses Trends
+  const purchaseExpenseResult = useMemo(() => {
+    return generatePurchaseExpenseTrends(purchases, expenses, bounds);
+  }, [purchases, expenses, bounds]);
+
+  // Handle Card & Chart Drill-downs
+  const handleDrillDown = (type: DrillDownType | string) => {
+    setDrillDownType(type);
+    setIsDrillDownOpen(true);
+  };
+
+  // PDF Executive Report Generator
   const handleGenerateReport = () => {
     const doc = new jsPDF();
     
-    // Title
-    doc.setFontSize(22);
-    doc.setTextColor(30, 41, 59);
-    doc.text("EcoBill Financial Report", 14, 22);
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(0, 77, 64);
+    doc.text("EcoBill Executive & Operations Report", 14, 20);
     
-    // Subtitle
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 30);
-    
-    let filterLabel = dateFilter.toUpperCase();
-    if (dateFilter === 'today') {
-      filterLabel = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    } else if (dateFilter === 'week') {
-      const now = new Date();
-      const start = new Date(now);
-      start.setDate(now.getDate() - now.getDay());
-      filterLabel = `${start.toLocaleDateString()} to ${now.toLocaleDateString()}`;
-    } else if (dateFilter === 'month') {
-      filterLabel = new Date().toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    } else if (dateFilter === 'fy') {
-      const start = getFiscalYearStart();
-      filterLabel = `FY ${start.getFullYear()}-${start.getFullYear() + 1}`;
-    } else if (dateFilter === 'custom') {
-      filterLabel = `${customStart} to ${customEnd}`;
-    } else if (dateFilter === 'specific_date') {
-      filterLabel = specificDate ? new Date(specificDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'None';
-    } else if (dateFilter === 'specific_month') {
-      filterLabel = specificMonth;
-    } else if (dateFilter === 'specific_year') {
-      filterLabel = specificYear;
-    }
-    doc.text(`Date Filter: ${filterLabel}`, 14, 36);
+    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
+    const periodLabel = bounds.isAllTime 
+      ? 'All Time (Complete Historical Database)' 
+      : `${bounds.start.toLocaleDateString('en-IN')} to ${bounds.end.toLocaleDateString('en-IN')}`;
+    doc.text(`Active Period: ${periodLabel}`, 14, 34);
 
-    // Metrics Table
-    doc.setFontSize(14);
-    doc.setTextColor(30, 41, 59);
-    doc.text("Key Metrics", 14, 48);
-    
+    // Executive Metrics Table
     autoTable(doc, {
-      startY: 52,
-      head: [['Metric', 'Value']],
+      startY: 42,
+      head: [['Executive Metric', 'Value', 'Operational Context']],
       body: [
-        ['Total Revenue', `Rs. ${metrics.totalRevenue.toLocaleString()}`],
-        ['Pending Balance', `Rs. ${metrics.pendingInvoices.toLocaleString()}`],
-        ['Quotes To Convert', metrics.pendingQuotes.toString()]
+        ['Total Leads Captured', metrics.totalLeads.toString(), 'All acquisition channels'],
+        ['Active Production Orders', metrics.activeOrders.toString(), 'Shop floor engraving/printing'],
+        ['Total Gross Sales', `Rs. ${metrics.totalSales.toLocaleString('en-IN')}`, 'Invoices, Memos & Proformas'],
+        ['Payments Received', `Rs. ${metrics.paymentsReceived.toLocaleString('en-IN')}`, 'Realized cash collections'],
+        ['Outstanding Balances', `Rs. ${metrics.outstandingAmounts.toLocaleString('en-IN')}`, 'Pending client accounts'],
+        ['Vendor Purchases', `Rs. ${purchaseExpenseResult.totalPurchases.toLocaleString('en-IN')}`, 'Raw materials & inventory'],
+        ['Operating Expenses', `Rs. ${purchaseExpenseResult.totalExpenses.toLocaleString('en-IN')}`, 'Staff, utility & shop costs'],
+        ['Pending Follow-ups', metrics.pendingFollowups.toString(), 'Urgent priority action items']
       ],
       theme: 'grid',
-      headStyles: { fillColor: [46, 125, 50], textColor: 255, fontStyle: 'bold' }, // Primary green
-      styles: { fontSize: 11, cellPadding: 5 }
-    });
-
-    // Recent Invoices Table
-    doc.setFontSize(14);
-    doc.text("Recent Invoice Activity", 14, (doc as any).lastAutoTable.finalY + 14);
-
-    const tableData = metrics.recentInvoices.map(inv => {
-      let dateStr = 'Unknown Date';
-      if (inv.created_at) {
-        if (typeof (inv.created_at as any).toDate === 'function') {
-          dateStr = (inv.created_at as any).toDate().toLocaleDateString();
-        } else if ((inv.created_at as any).seconds) {
-          dateStr = new Date((inv.created_at as any).seconds * 1000).toLocaleDateString();
-        } else {
-          const d = new Date(inv.created_at as unknown as string);
-          if (!isNaN(d.getTime())) dateStr = d.toLocaleDateString();
-        }
-      }
-      return [
-        inv.number,
-        inv.customer_name || 'N/A',
-        inv.status.toUpperCase(),
-        dateStr,
-        `Rs. ${inv.grand_total.toLocaleString()}`,
-        `Rs. ${(inv.balance_amount || 0).toLocaleString()}`
-      ];
-    });
-
-    autoTable(doc, {
-      startY: (doc as any).lastAutoTable.finalY + 18,
-      head: [['Invoice No', 'Customer', 'Status', 'Date', 'Grand Total', 'Balance']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' }, // Dark slate
+      headStyles: { fillColor: [0, 77, 64], textColor: 255, fontStyle: 'bold' },
       styles: { fontSize: 10, cellPadding: 4 }
     });
 
-    doc.save(`EcoBill_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+    // Recent Invoices Table
+    const recentInvoices = invoices.filter(i => i.status !== 'cancelled').slice(0, 15);
+    const invoiceRows = recentInvoices.map(inv => [
+      inv.number,
+      inv.customer_name || 'Walk-in',
+      inv.payment_status.toUpperCase(),
+      `Rs. ${getDocAmount(inv).toLocaleString('en-IN')}`,
+      `Rs. ${(inv.balance_amount || 0).toLocaleString('en-IN')}`
+    ]);
+
+    doc.text("Recent Invoices & Payment Ledger", 14, (doc as any).lastAutoTable.finalY + 12);
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 16,
+      head: [['Invoice #', 'Customer', 'Status', 'Grand Total', 'Balance']],
+      body: invoiceRows,
+      theme: 'striped',
+      headStyles: { fillColor: [30, 41, 59], textColor: 255 },
+      styles: { fontSize: 9, cellPadding: 3.5 }
+    });
+
+    doc.save(`EcoBill_Executive_Summary_${new Date().toISOString().split('T')[0]}.pdf`);
   };
+
+  const totalRecordCount = invoices.length + cashMemos.length + proformaInvoices.length + leads.length + quotations.length + purchases.length + expenses.length;
 
   if (loading) {
     return (
-      <div className="space-y-6 animate-pulse">
+      <div className="space-y-6 animate-pulse p-2">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <div className="h-8 w-48 bg-shadow-darker/10 rounded-lg mb-2"></div>
-            <div className="h-4 w-64 bg-shadow-darker/10 rounded-lg"></div>
+            <div className="h-8 w-56 bg-shadow-darker/10 rounded-xl mb-2"></div>
+            <div className="h-4 w-72 bg-shadow-darker/10 rounded-lg"></div>
           </div>
-          <div className="flex gap-4">
-            <div className="h-10 w-32 bg-shadow-darker/10 rounded-xl"></div>
-            <div className="h-10 w-32 bg-shadow-darker/10 rounded-xl hidden sm:block"></div>
-          </div>
+          <div className="h-10 w-44 bg-shadow-darker/10 rounded-xl"></div>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="neo-card h-36 bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl"></div>
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+          {[1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} className="neo-card h-28 bg-shadow-darker/5 rounded-2xl border border-shadow-darker/10"></div>
           ))}
         </div>
-
-        <div className="neo-card h-24 bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl mt-6"></div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-          <div className="neo-card lg:col-span-3 min-h-[400px] bg-shadow-darker/5 shadow-none border border-shadow-darker/10 rounded-2xl"></div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          <div className="neo-card h-80 bg-shadow-darker/5 rounded-2xl border border-shadow-darker/10"></div>
+          <div className="neo-card h-80 bg-shadow-darker/5 rounded-2xl border border-shadow-darker/10"></div>
         </div>
       </div>
     );
   }
+
   return (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+    <div className="space-y-8 animate-fade-in pb-12">
+      
+      {/* 1. Header & Live Sync Banner */}
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">Dashboard</h1>
-          <p className="text-secondary mt-1">Overview of EcoBill financial activity.</p>
-        </div>
-        <div className="flex flex-wrap gap-4 items-center w-full sm:w-auto">
-          <div className="flex items-center gap-2 bg-transparent p-1 rounded-xl shadow-neo-raised border border-shadow-darker/10 flex-1 sm:flex-none">
-            <Calendar size={16} className="text-secondary ml-2" />
-            <select 
-              value={dateFilter} 
-              onChange={(e) => setDateFilter(e.target.value as DateFilter)}
-              className="bg-transparent border-none text-sm font-semibold text-primary-dark focus:ring-0 py-1.5 cursor-pointer w-full sm:w-auto"
-            >
-              <option value="today">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="fy">This Financial Year</option>
-              <option value="specific_date">Specific Date</option>
-              <option value="specific_month">Specific Month</option>
-              <option value="specific_year">Specific Year</option>
-              <option value="custom">Custom Range</option>
-            </select>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-3xl font-semibold tracking-tight text-primary-dark">
+              Executive Command Dashboard
+            </h1>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-800 text-xs font-bold border border-emerald-500/20">
+              <Cloud size={13} className="text-emerald-600" />
+              Live Firestore Synced
+            </span>
           </div>
-          
+          <p className="text-secondary text-sm mt-1">
+            Real-time business performance from {totalRecordCount} records ({invoices.length} Invoices, {purchases.length} Purchases, {expenses.length} Expenses, {leads.length} Leads).
+          </p>
+        </div>
+
+        {/* Global Date Filter Selector & Sync Actions */}
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          {/* Quick Date Pills */}
+          <div className="inline-flex rounded-xl bg-surface p-1 border border-shadow-darker/10 shadow-sm overflow-x-auto max-w-full">
+            {(['all', 'today', 'week', 'month', 'fy', 'custom'] as DashboardDateFilter[]).map((f) => {
+              const labels: Record<DashboardDateFilter, string> = {
+                all: 'All Time',
+                today: 'Today',
+                week: 'This Week',
+                month: 'This Month',
+                fy: 'This FY',
+                year: 'This Year',
+                custom: 'Custom'
+              };
+              const isActive = dateFilter === f;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setDateFilter(f)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                    isActive
+                      ? 'bg-primary text-white shadow-xs'
+                      : 'text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  {labels[f]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom Date Pickers */}
           {dateFilter === 'custom' && (
             <div className="flex items-center gap-2 animate-fade-in">
-              <input type="date" className="neo-input text-xs !py-1.5" value={customStart} onChange={e => setCustomStart(e.target.value)} />
-              <span className="text-secondary text-xs">to</span>
-              <input type="date" className="neo-input text-xs !py-1.5" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              <input 
+                type="date" 
+                value={customStart} 
+                onChange={e => setCustomStart(e.target.value)} 
+                className="neo-input text-xs !py-1.5"
+                title="Start Date"
+              />
+              <span className="text-secondary text-xs font-bold">to</span>
+              <input 
+                type="date" 
+                value={customEnd} 
+                onChange={e => setCustomEnd(e.target.value)} 
+                className="neo-input text-xs !py-1.5"
+                title="End Date"
+              />
             </div>
           )}
 
-          {dateFilter === 'specific_date' && (
-            <div className="animate-fade-in">
-              <input type="date" className="neo-input text-xs !py-1.5" value={specificDate} onChange={e => setSpecificDate(e.target.value)} />
-            </div>
-          )}
+          {/* Refresh Real Data Button */}
+          <button 
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="neo-btn flex items-center gap-1.5 text-xs py-2 px-3 font-bold text-primary-dark hover:text-primary"
+            title="Force refresh database records"
+          >
+            <RefreshCw size={13} className={isRefreshing ? "animate-spin text-primary" : "text-primary"} />
+            {isRefreshing ? 'Syncing...' : 'Sync Data'}
+          </button>
 
-          {dateFilter === 'specific_month' && (
-            <div className="animate-fade-in">
-              <input type="month" className="neo-input text-xs !py-1.5" value={specificMonth} onChange={e => setSpecificMonth(e.target.value)} />
-            </div>
-          )}
-
-          {dateFilter === 'specific_year' && (
-            <div className="animate-fade-in">
-              <input type="number" min="2000" max="2100" placeholder="YYYY" className="neo-input text-xs !py-1.5 w-24" value={specificYear} onChange={e => setSpecificYear(e.target.value)} />
-            </div>
-          )}
-
-          <button onClick={handleGenerateReport} className="neo-btn-primary">Generate Report</button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
-          <div className="flex justify-between items-start">
-            <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Revenue</span>
-            <TrendingUp size={18} className="text-secondary opacity-50 group-hover:text-primary-dark transition-colors" />
-          </div>
-          <div className="flex items-baseline gap-1">
-             <span className="text-2xl font-black text-primary-dark tracking-tight">₹ {metrics.totalRevenue.toLocaleString()}</span>
-          </div>
-        </div>
-
-        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default border-l-4 border-warning/20">
-          <div className="flex justify-between items-start">
-            <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Pending</span>
-            <Clock size={18} className="text-warning opacity-50 group-hover:opacity-100 transition-opacity" />
-          </div>
-          <span className="text-2xl font-black text-warning tracking-tight">₹ {metrics.pendingInvoices.toLocaleString()}</span>
-        </div>
-
-        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
-          <div className="flex justify-between items-start">
-            <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Quotes To Convert</span>
-            <AlertCircle size={18} className="text-error opacity-50" />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`text-2xl font-black tracking-tight ${metrics.pendingQuotes > 0 ? 'text-error' : 'text-success'}`}>{metrics.pendingQuotes}</span>
-            {metrics.pendingQuotes > 0 && (
-              <span className="neo-badge-error text-[10px] py-0.5 shadow-none ring-1 ring-error/20">Action Needed</span>
-            )}
-          </div>
-        </div>
-
-        <div className="neo-card flex flex-col justify-between h-36 bg-transparent shadow-neo-surface group hover:shadow-neo-inset transition-all cursor-default">
-          <div className="flex justify-between items-start">
-            <span className="text-secondary font-semibold text-sm uppercase tracking-wider">Quick Actions</span>
-            <FileText size={18} className="text-primary-dark opacity-30" />
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => navigate('/invoices/new')} title="Create Invoice" className="flex-1 h-12 rounded-xl bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors shadow-sm border border-shadow-darker/10">
-              <Plus size={20} className="text-primary-dark" />
-            </button>
-            <button onClick={() => navigate('/cash-memos/new')} title="Create Cash Memo" className="flex-1 h-12 rounded-xl bg-shadow-darker/5 flex items-center justify-center hover:bg-shadow-darker/10 transition-colors shadow-sm border border-shadow-darker/10">
-              <IndianRupee size={20} className="text-primary-dark" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* CRM Quick Stats */}
-      {canViewCRM && (
-        <div className="neo-card flex flex-wrap items-center justify-between gap-4 !py-4 border-l-4 border-primary/30 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <Target size={18} className="text-primary" />
-            <span className="font-bold text-primary-dark text-sm">CRM Summary</span>
-          </div>
-          <div className="flex flex-wrap gap-6 text-sm">
-            <div className="text-center">
-              <p className="font-black text-xl text-primary-dark">{crmStats.total}</p>
-              <p className="text-xs text-secondary mt-0.5">Total Leads</p>
-            </div>
-            <div className="text-center">
-              <p className={`font-black text-xl ${crmStats.overdue > 0 ? 'text-warning' : 'text-secondary'}`}>{crmStats.overdue}</p>
-              <p className="text-xs text-secondary mt-0.5">Overdue</p>
-            </div>
-            <div className="text-center">
-              <p className="font-black text-xl text-success">{crmStats.qualified}</p>
-              <p className="text-xs text-secondary mt-0.5">Qualified</p>
-            </div>
-          </div>
-          <button onClick={() => navigate('/crm-dashboard')} className="neo-btn text-xs flex items-center gap-1.5">
-            <Activity size={13} /> Full CRM Dashboard
+          {/* Export PDF Button */}
+          <button 
+            type="button"
+            onClick={handleGenerateReport} 
+            className="neo-btn-primary flex items-center gap-1.5 text-xs py-2 px-3.5 font-bold"
+          >
+            <Download size={14} /> Export Report
           </button>
         </div>
-      )}
+      </div>
 
-      {/* Main interaction space */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-        <div className="neo-card lg:col-span-3 min-h-[400px]">
-          <h3 className="mb-4">Recent Activity</h3>
-          <div className="space-y-4">
-            {metrics.recentInvoices.length === 0 ? (
-              <div className="py-20 text-center text-secondary opacity-50 border-2 border-dashed border-shadow-darker/10 rounded-xl">
-                 <FileText size={32} className="mx-auto mb-2 opacity-20" />
-                 No activity yet.
-              </div>
-            ) : metrics.recentInvoices.map(inv => (
-              <div key={inv.id} className="flex justify-between items-center p-4 neo-input hover:shadow-neo-pressed transition-shadow cursor-default border border-transparent">
-                <div>
-                  <p className="font-bold text-primary-dark">{inv.number}</p>
-                  <p className="text-sm text-secondary font-medium">
-                    {inv.customer_name || 'Walk-in Customer'} • {
-                      inv.created_at ? (
-                        typeof (inv.created_at as any).toDate === 'function' 
-                          ? (inv.created_at as any).toDate().toLocaleDateString()
-                          : new Date((inv.created_at as any).seconds ? (inv.created_at as any).seconds * 1000 : inv.created_at as unknown as string).toLocaleDateString()
-                      ) : 'Unknown Date'
-                    }
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-black text-primary-dark">₹ {inv.grand_total.toLocaleString()}</p>
-                  <span className={`text-[10px] font-black uppercase tracking-widest ${
-                    inv.payment_status === 'paid' ? 'text-success' : inv.payment_status === 'partial' ? 'text-warning' : 'text-error'
-                  }`}>{inv.payment_status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>      </div>
+      {/* 2. Executive Summary Cards (6 Real-Time Metrics) */}
+      <section aria-label="Executive Summary Cards">
+        <ExecutiveSummaryCards 
+          metrics={metrics}
+          onCardClick={handleDrillDown}
+        />
+      </section>
+
+      {/* 3. Core Visual Analytics & Charts (Including Purchases & Expenses Graph) */}
+      <section aria-label="Core Visual Analytics">
+        <CoreVisualAnalytics 
+          salesTrends={salesTrends}
+          monthlyComparison={monthlyComparison}
+          pipelineDistribution={pipelineDistribution}
+          collectionsReceived={metrics.paymentsReceived}
+          outstandingBalance={metrics.outstandingAmounts}
+          purchaseExpenseTrends={purchaseExpenseResult.data}
+          totalPurchases={purchaseExpenseResult.totalPurchases}
+          totalExpenses={purchaseExpenseResult.totalExpenses}
+          totalOutflow={purchaseExpenseResult.totalOutflow}
+          purchases={purchases}
+          expenses={expenses}
+          globalBounds={bounds}
+          onStageClick={handleDrillDown}
+          onCollectionsClick={() => handleDrillDown('payments_received')}
+          onOutstandingClick={() => handleDrillDown('outstanding_amounts')}
+        />
+      </section>
+
+      {/* 4. Actionable Operational Tables */}
+      <section aria-label="Actionable Operational Tables">
+        <ActionableOperationalTables 
+          leads={leads}
+          invoices={invoices}
+          cashMemos={cashMemos}
+          proformaInvoices={proformaInvoices}
+        />
+      </section>
+
+      {/* 5. Interactive Drill-Down Modal */}
+      <DrillDownModal 
+        isOpen={isDrillDownOpen}
+        onClose={() => setIsDrillDownOpen(false)}
+        type={drillDownType}
+        leads={leads}
+        invoices={invoices}
+        cashMemos={cashMemos}
+        proformaInvoices={proformaInvoices}
+        quotations={quotations}
+      />
+
     </div>
   );
 }
-

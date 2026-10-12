@@ -6,6 +6,7 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateD
 import type { CashMemo, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
@@ -20,9 +21,29 @@ export default function CashMemos() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedMemo, setSelectedMemo] = useState<CashMemo | null>(null);
+  const [shareMemo, setShareMemo] = useState<CashMemo | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
+
+  const getMemoDate = (memo: CashMemo): Date => {
+    const custom = (memo as any).custom_date || (memo as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return memo.created_at?.toDate ? memo.created_at.toDate() : new Date();
+  };
+
+  const formatMemoDate = (memo: CashMemo): string => {
+    const custom = (memo as any).custom_date || (memo as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return memo.created_at?.toDate ? memo.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...';
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -112,6 +133,11 @@ export default function CashMemos() {
     setIsPaymentModalOpen(true);
   };
 
+  const openShareModal = (memo: CashMemo) => {
+    setShareMemo(memo);
+    setIsShareModalOpen(true);
+  };
+
   const handleVoiceCashMemo = (customerName: string | null, items: any[], customerType?: string | null) => {
     navigate('/cash-memos/new', { state: { voiceData: { customerName, items, customerType } } });
   };
@@ -123,7 +149,7 @@ export default function CashMemos() {
 
     const now = new Date();
     filteredMemos = filteredMemos.filter(memo => {
-      const date = memo.created_at ? memo.created_at.toDate() : new Date();
+      const date = getMemoDate(memo);
       if (options.type === 'month') {
         return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
       } else if (options.type === 'fy') {
@@ -180,7 +206,7 @@ export default function CashMemos() {
       const reportData = filteredMemos.map(memo => ({
         'Memo Number': memo.number,
         'Customer': memo.walk_in_customer ? (memo.customer_name || 'Walk-in Customer') : (customers[memo.customer_id]?.name || 'Unknown Customer'),
-        'Date': memo.created_at ? memo.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+        'Date': formatMemoDate(memo),
         'Subtotal (₹)': memo.subtotal || 0,
         'Grand Total (₹)': memo.grand_total || 0,
         'Payment Status': (memo.payment_status || 'unpaid').toUpperCase()
@@ -204,7 +230,7 @@ export default function CashMemos() {
         body: filteredMemos.map(memo => [
           memo.number,
           memo.walk_in_customer ? (memo.customer_name || 'Walk-in Customer') : (customers[memo.customer_id]?.name || 'Unknown Customer'),
-          memo.created_at ? memo.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+          formatMemoDate(memo),
           `Rs. ${memo.grand_total?.toLocaleString() || '0'}`,
           (memo.payment_status || 'unpaid').toUpperCase()
         ]),
@@ -302,7 +328,7 @@ export default function CashMemos() {
                       customers[memo.customer_id]?.name || 'Loading Profile...'
                     )}
                   </td>
-                  <td className="p-4 text-secondary">{memo.created_at?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                  <td className="p-4 text-secondary">{formatMemoDate(memo)}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">₹ {memo.grand_total?.toLocaleString()}</td>
                   <td className="p-4 text-center">
                     <select 
@@ -338,7 +364,7 @@ export default function CashMemos() {
                         <>
                           <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
                           <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
-                          <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'share', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Share"><Share2 size={18} /></button>
+                          <button onClick={() => openShareModal(memo)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
                         </>
                       ) : (
                         <span className="text-[10px] text-secondary/60 italic max-w-[120px] leading-tight text-center">
@@ -374,7 +400,7 @@ export default function CashMemos() {
                       )}
                     </p>
                     <p className="text-xs text-secondary/70 mt-1">
-                      {memo.created_at?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      {formatMemoDate(memo)}
                     </p>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1">
@@ -412,7 +438,7 @@ export default function CashMemos() {
                     <>
                       <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
                       <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
-                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'share', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Share2 size={16} /></button>
+                      <button onClick={() => openShareModal(memo)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
                     </>
                   ) : (
                     <div className="flex-[2] flex justify-center py-2 text-[10px] text-secondary/60 italic">
@@ -437,6 +463,20 @@ export default function CashMemos() {
           document={selectedMemo}
           documentType="cash_memo"
           onPaymentUpdated={() => {}}
+        />
+      )}
+
+      {shareMemo && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareMemo(null);
+          }}
+          document={shareMemo}
+          documentType="Cash Memo"
+          customer={customers[shareMemo.customer_id] || shareMemo.customer_name}
+          settings={settings}
         />
       )}
     </div>

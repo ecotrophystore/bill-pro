@@ -7,6 +7,7 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateD
 import type { ProformaInvoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
@@ -25,7 +26,9 @@ export default function ProformaInvoices() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<ProformaInvoice | null>(null);
+  const [shareInvoice, setShareInvoice] = useState<ProformaInvoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
   const { settings } = useSettings();
@@ -73,6 +76,11 @@ export default function ProformaInvoices() {
   const openPaymentModal = (inv: ProformaInvoice) => {
     setSelectedInvoice(inv);
     setIsPaymentModalOpen(true);
+  };
+
+  const openShareModal = (inv: ProformaInvoice) => {
+    setShareInvoice(inv);
+    setIsShareModalOpen(true);
   };
 
   const deleteInvoice = async (id: string) => {
@@ -370,7 +378,7 @@ export default function ProformaInvoices() {
                       <button onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Proforma Invoice"><Edit size={18} /></button>
                       <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
                       <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
-                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'share', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Share"><Share2 size={18} /></button>
+                      <button onClick={() => openShareModal(inv)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
                       <button onClick={() => deleteInvoice(inv.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Proforma Invoice"><Trash2 size={18} /></button>
                     </div>
                   </td>
@@ -430,7 +438,7 @@ export default function ProformaInvoices() {
                     <button onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
                     <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
                     <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
-                    <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'share', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Share2 size={16} /></button>
+                    <button onClick={() => openShareModal(inv)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
                     <button onClick={() => deleteInvoice(inv.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
                   </div>
                 </div>
@@ -450,6 +458,20 @@ export default function ProformaInvoices() {
           document={selectedInvoice}
           documentType="proforma_invoice"
           onPaymentUpdated={() => {}}
+        />
+      )}
+
+      {shareInvoice && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareInvoice(null);
+          }}
+          document={shareInvoice}
+          documentType="Proforma Invoice"
+          customer={customers[shareInvoice.customer_id]}
+          settings={settings}
         />
       )}
     </div>

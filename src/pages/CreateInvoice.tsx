@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, ShieldCheck } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, functions } from '../lib/firebase';
-import { collection, getDocs, doc, getDoc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, query, where, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
@@ -70,6 +70,11 @@ export default function CreateInvoice() {
             setDiscountPercent(data.discount_percent || 0);
             setChargeAmount(data.charge_amount || 0);
             setDocumentNumber(data.number || '');
+            if (data.custom_date) {
+              setInvoiceDate(data.custom_date);
+            } else if (data.created_at?.toDate) {
+              setInvoiceDate(data.created_at.toDate().toISOString().split('T')[0]);
+            }
           }
         } else {
           try {
@@ -258,6 +263,8 @@ export default function CreateInvoice() {
           number: documentNumber || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
+          custom_date: invoiceDate,
+          created_at: invoiceDate ? Timestamp.fromDate(new Date(invoiceDate + 'T12:00:00')) : undefined,
           is_igst: isGstInfo.isIgst,
           items: mappedItems,
           discount_percent: discountPercent,
@@ -329,6 +336,7 @@ export default function CreateInvoice() {
           advance_reference_number: advanceReferenceNumber,
           payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
           balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+          custom_date: invoiceDate,
           ...totals
         };
         const { clientCreateInvoice } = await import('../utils/clientBillingCreator');

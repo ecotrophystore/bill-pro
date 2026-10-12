@@ -5,6 +5,13 @@ export function getDocumentNumber(docData: DocumentData) {
 }
 
 export function getDocumentDate(docData: DocumentData) {
+  const custom = (docData as any).custom_date || (docData as any).date;
+  if (custom) {
+    const d = new Date(custom);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-GB');
+    }
+  }
   return docData.created_at?.toDate ? docData.created_at.toDate().toLocaleDateString('en-GB') : new Date().toLocaleDateString('en-GB');
 }
 

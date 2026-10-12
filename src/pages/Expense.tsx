@@ -1672,6 +1672,160 @@ export default function ExpensePage() {
         </div>
       )}
 
+      {/* Visual Analytics & Breakdown Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        
+        {/* Purpose Breakdown */}
+        <div className="neo-card p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
+            <Layers size={18} className="text-primary" />
+            <h4 className="font-bold text-sm text-primary-dark">Purpose Breakdown</h4>
+          </div>
+          
+          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+            {purposeExpenses.length === 0 ? (
+              <p className="text-xs text-secondary py-8 text-center">No purpose data recorded.</p>
+            ) : (
+              purposeExpenses.map(c => (
+                <div 
+                  key={c.purpose} 
+                  className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    setFilterPurpose(c.purpose);
+                    window.scrollTo({ top: 400, behavior: 'smooth' });
+                  }}
+                  title={`Click to filter by ${c.purpose}`}
+                >
+                  <div>
+                    <span className="font-bold text-primary-dark block max-w-[120px] truncate" title={c.purpose}>{c.purpose}</span>
+                    <span className="text-[10px] text-secondary">{c.count} transaction(s)</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-black text-[#004D40] block">₹{c.total.toLocaleString('en-IN')}</span>
+                    <span className="text-[9px] text-primary">GST: ₹{c.gst.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Member-wise Disbursement Breakdown */}
+        <div className="neo-card p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
+            <User size={18} className="text-primary" />
+            <h4 className="font-bold text-sm text-primary-dark">Member-Wise Demands</h4>
+          </div>
+          
+          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+            {memberExpenses.length === 0 ? (
+              <p className="text-xs text-secondary py-8 text-center">No member data recorded.</p>
+            ) : (
+              memberExpenses.map(m => (
+                <div key={m.member} className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs">
+                  <div>
+                    <span className="font-bold text-primary-dark block">{m.member}</span>
+                    <span className="text-[10px] text-secondary">{m.count} transaction(s)</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-black text-[#004D40] block">₹{m.total.toLocaleString('en-IN')}</span>
+                    <span className="text-[9px] text-primary">GST: ₹{m.gst.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* Tax Breakdown Analysis */}
+        <div className="neo-card p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
+            <Tags size={18} className="text-primary" />
+            <h4 className="font-bold text-sm text-primary-dark">Tax Distribution</h4>
+          </div>
+
+          <div className="space-y-4 py-2">
+            <div>
+              <div className="flex justify-between text-xs font-bold mb-1.5">
+                <span className="text-primary">GST Invoices ({taxBreakdown.total > 0 ? Math.round((taxBreakdown.gstPaid / taxBreakdown.total) * 100) : 0}%)</span>
+                <span>₹{taxBreakdown.gstPaid.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="w-full h-2.5 bg-shadow-darker/10 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-primary rounded-full transition-all duration-500" 
+                  style={{ width: `${taxBreakdown.total > 0 ? (taxBreakdown.gstPaid / taxBreakdown.total) * 100 : 0}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-xs font-bold mb-1.5">
+                <span className="text-secondary">Non-GST / Cash ({taxBreakdown.total > 0 ? Math.round((taxBreakdown.nonGstPaid / taxBreakdown.total) * 100) : 0}%)</span>
+                <span>₹{taxBreakdown.nonGstPaid.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="w-full h-2.5 bg-shadow-darker/10 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-secondary/50 rounded-full transition-all duration-500" 
+                  style={{ width: `${taxBreakdown.total > 0 ? (taxBreakdown.nonGstPaid / taxBreakdown.total) * 100 : 0}%` }}
+                ></div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-primary/5 rounded-xl text-[11px] text-secondary mt-2">
+              <span className="font-bold text-primary-dark block mb-0.5">Input Tax Credit (ITC) Summary</span>
+              Total recoverable GST across all records stands at ₹{stats.gstTotal.toLocaleString('en-IN')}.
+            </div>
+          </div>
+        </div>
+
+        {/* Monthly Trend Mini-Bar */}
+        <div className="neo-card p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
+            <DollarSign size={18} className="text-primary" />
+            <h4 className="font-bold text-sm text-primary-dark">Monthly Spend Trend</h4>
+          </div>
+
+          <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
+            {monthlyExpenses.length === 0 ? (
+              <p className="text-xs text-secondary py-8 text-center">No monthly trend data available.</p>
+            ) : (
+              monthlyExpenses.map(item => (
+                <div 
+                  key={item.month} 
+                  className="space-y-1 cursor-pointer hover:bg-primary/5 p-2 rounded-xl transition-colors"
+                  onClick={() => {
+                    const y = parseInt(item.month.split('-')[0]);
+                    const m = parseInt(item.month.split('-')[1]);
+                    // Pad month and date with zero if needed
+                    const startStr = `${y}-${m.toString().padStart(2, '0')}-01`;
+                    const end = new Date(y, m, 0);
+                    const endStr = `${y}-${m.toString().padStart(2, '0')}-${end.getDate().toString().padStart(2, '0')}`;
+                    setFilterFromDate(startStr);
+                    setFilterToDate(endStr);
+                    window.scrollTo({ top: 400, behavior: 'smooth' });
+                  }}
+                  title="Click to view expenses for this month"
+                >
+                  <div className="flex justify-between text-[11px] font-bold">
+                    <span className="text-secondary font-semibold group-hover:text-primary transition-colors">
+                      {new Date(item.month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                    </span>
+                    <span className="text-primary-dark">₹{item.total.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="w-full h-2 bg-shadow-darker/10 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-primary to-primary-dark rounded-full transition-all duration-500"
+                      style={{ width: `${(item.total / maxMonthlyExpense) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+      </div>
+
       {/* 5. Persistent Saved Database & Reports Section */}
       <div className="neo-card p-6 space-y-5 border border-shadow-darker/10 shadow-sm">
         {/* Ledger Header */}
@@ -2257,160 +2411,6 @@ export default function ExpensePage() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* 6. Visual Analytics & Member Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-8">
-        
-        {/* Purpose Breakdown */}
-        <div className="neo-card p-6 space-y-4">
-          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
-            <Layers size={18} className="text-primary" />
-            <h4 className="font-bold text-sm text-primary-dark">Purpose Breakdown</h4>
-          </div>
-          
-          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
-            {purposeExpenses.length === 0 ? (
-              <p className="text-xs text-secondary py-8 text-center">No purpose data recorded.</p>
-            ) : (
-              purposeExpenses.map(c => (
-                <div 
-                  key={c.purpose} 
-                  className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-primary/10 transition-colors"
-                  onClick={() => {
-                    setFilterPurpose(c.purpose);
-                    window.scrollTo({ top: 400, behavior: 'smooth' });
-                  }}
-                  title={`Click to filter by ${c.purpose}`}
-                >
-                  <div>
-                    <span className="font-bold text-primary-dark block max-w-[120px] truncate" title={c.purpose}>{c.purpose}</span>
-                    <span className="text-[10px] text-secondary">{c.count} transaction(s)</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-black text-[#004D40] block">₹{c.total.toLocaleString('en-IN')}</span>
-                    <span className="text-[9px] text-primary">GST: ₹{c.gst.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Member-wise Disbursement Breakdown */}
-        <div className="neo-card p-6 space-y-4">
-          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
-            <User size={18} className="text-primary" />
-            <h4 className="font-bold text-sm text-primary-dark">Member-Wise Demands</h4>
-          </div>
-          
-          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
-            {memberExpenses.length === 0 ? (
-              <p className="text-xs text-secondary py-8 text-center">No member data recorded.</p>
-            ) : (
-              memberExpenses.map(m => (
-                <div key={m.member} className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs">
-                  <div>
-                    <span className="font-bold text-primary-dark block">{m.member}</span>
-                    <span className="text-[10px] text-secondary">{m.count} transaction(s)</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-black text-[#004D40] block">₹{m.total.toLocaleString('en-IN')}</span>
-                    <span className="text-[9px] text-primary">GST: ₹{m.gst.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Tax Breakdown Analysis */}
-        <div className="neo-card p-6 space-y-4">
-          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
-            <Tags size={18} className="text-primary" />
-            <h4 className="font-bold text-sm text-primary-dark">Tax Distribution</h4>
-          </div>
-
-          <div className="space-y-4 py-2">
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-primary">GST Invoices ({taxBreakdown.total > 0 ? Math.round((taxBreakdown.gstPaid / taxBreakdown.total) * 100) : 0}%)</span>
-                <span>₹{taxBreakdown.gstPaid.toLocaleString('en-IN')}</span>
-              </div>
-              <div className="w-full h-2.5 bg-shadow-darker/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-primary rounded-full transition-all duration-500" 
-                  style={{ width: `${taxBreakdown.total > 0 ? (taxBreakdown.gstPaid / taxBreakdown.total) * 100 : 0}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-bold mb-1.5">
-                <span className="text-secondary">Non-GST / Cash ({taxBreakdown.total > 0 ? Math.round((taxBreakdown.nonGstPaid / taxBreakdown.total) * 100) : 0}%)</span>
-                <span>₹{taxBreakdown.nonGstPaid.toLocaleString('en-IN')}</span>
-              </div>
-              <div className="w-full h-2.5 bg-shadow-darker/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-secondary/50 rounded-full transition-all duration-500" 
-                  style={{ width: `${taxBreakdown.total > 0 ? (taxBreakdown.nonGstPaid / taxBreakdown.total) * 100 : 0}%` }}
-                ></div>
-              </div>
-            </div>
-
-            <div className="p-3 bg-primary/5 rounded-xl text-[11px] text-secondary mt-2">
-              <span className="font-bold text-primary-dark block mb-0.5">Input Tax Credit (ITC) Summary</span>
-              Total recoverable GST across all records stands at ₹{stats.gstTotal.toLocaleString('en-IN')}.
-            </div>
-          </div>
-        </div>
-
-        {/* Monthly Trend Mini-Bar */}
-        <div className="neo-card p-6 space-y-4">
-          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
-            <DollarSign size={18} className="text-primary" />
-            <h4 className="font-bold text-sm text-primary-dark">Monthly Spend Trend</h4>
-          </div>
-
-          <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
-            {monthlyExpenses.length === 0 ? (
-              <p className="text-xs text-secondary py-8 text-center">No monthly trend data available.</p>
-            ) : (
-              monthlyExpenses.map(item => (
-                <div 
-                  key={item.month} 
-                  className="space-y-1 cursor-pointer hover:bg-primary/5 p-2 rounded-xl transition-colors"
-                  onClick={() => {
-                    const y = parseInt(item.month.split('-')[0]);
-                    const m = parseInt(item.month.split('-')[1]);
-                    // Pad month and date with zero if needed
-                    const startStr = `${y}-${m.toString().padStart(2, '0')}-01`;
-                    const end = new Date(y, m, 0);
-                    const endStr = `${y}-${m.toString().padStart(2, '0')}-${end.getDate().toString().padStart(2, '0')}`;
-                    setFilterFromDate(startStr);
-                    setFilterToDate(endStr);
-                    window.scrollTo({ top: 400, behavior: 'smooth' });
-                  }}
-                  title="Click to view expenses for this month"
-                >
-                  <div className="flex justify-between text-[11px] font-bold">
-                    <span className="text-secondary font-semibold group-hover:text-primary transition-colors">
-                      {new Date(item.month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
-                    </span>
-                    <span className="text-primary-dark">₹{item.total.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="w-full h-2 bg-shadow-darker/10 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-gradient-to-r from-primary to-primary-dark rounded-full transition-all duration-500"
-                      style={{ width: `${(item.total / maxMonthlyExpense) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
       </div>
 
       {cropImageUrl && (

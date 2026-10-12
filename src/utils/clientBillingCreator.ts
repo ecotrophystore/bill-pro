@@ -11,7 +11,8 @@ import {
   where,
   orderBy,
   limit,
-  getDocs
+  getDocs,
+  Timestamp
 } from 'firebase/firestore';
 
 import { formatDocumentNumber } from './numberGenerator';
@@ -278,7 +279,8 @@ export async function clientCreateInvoice(rawData: any) {
       balance_amount: rawData.balance_amount || finalGrandTotal,
       payment_history: [],
       created_by: uid,
-      created_at: serverTimestamp(),
+      created_at: rawData.custom_date ? Timestamp.fromDate(new Date(rawData.custom_date + 'T12:00:00')) : serverTimestamp(),
+      custom_date: rawData.custom_date || new Date().toISOString().split('T')[0],
       audit_trail: [{
         action: "direct_creation",
         user: uid,
@@ -477,7 +479,8 @@ export async function clientCreateCashMemo(rawData: any) {
       balance_amount: rawData.balance_amount || finalGrandTotal,
       payment_history: [],
       created_by: uid,
-      created_at: serverTimestamp(),
+      created_at: rawData.custom_date ? Timestamp.fromDate(new Date(rawData.custom_date + 'T12:00:00')) : serverTimestamp(),
+      custom_date: rawData.custom_date || new Date().toISOString().split('T')[0],
       audit_trail: [{
         action: "cash_memo_creation",
         user: uid,

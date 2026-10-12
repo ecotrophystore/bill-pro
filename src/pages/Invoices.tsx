@@ -6,6 +6,7 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateD
 import type { Invoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
@@ -24,9 +25,29 @@ export default function Invoices() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [shareInvoice, setShareInvoice] = useState<Invoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
+
+  const getInvoiceDate = (inv: Invoice): Date => {
+    const custom = (inv as any).custom_date || (inv as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return inv.created_at?.toDate ? inv.created_at.toDate() : new Date();
+  };
+
+  const formatInvoiceDate = (inv: Invoice): string => {
+    const custom = (inv as any).custom_date || (inv as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...';
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -70,6 +91,11 @@ export default function Invoices() {
   const openPaymentModal = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setIsPaymentModalOpen(true);
+  };
+
+  const openShareModal = (inv: Invoice) => {
+    setShareInvoice(inv);
+    setIsShareModalOpen(true);
   };
 
   const deleteInvoice = async (id: string) => {
@@ -124,7 +150,7 @@ export default function Invoices() {
 
     const now = new Date();
     filteredInvoices = filteredInvoices.filter(inv => {
-      const date = inv.created_at ? inv.created_at.toDate() : new Date();
+      const date = getInvoiceDate(inv);
       if (options.type === 'month') {
         return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
       } else if (options.type === 'fy') {
@@ -181,7 +207,7 @@ export default function Invoices() {
       const reportData = filteredInvoices.map(inv => ({
         'Invoice Number': inv.number,
         'Customer': customers[inv.customer_id]?.name || 'Unknown Customer',
-        'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+        'Date': formatInvoiceDate(inv),
         'Subtotal (₹)': inv.subtotal || 0,
         'Tax Amount (₹)': inv.tax_total || 0,
         'Grand Total (₹)': inv.grand_total || 0,
@@ -206,7 +232,7 @@ export default function Invoices() {
         body: filteredInvoices.map(inv => [
           inv.number,
           customers[inv.customer_id]?.name || 'Unknown Customer',
-          inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+          formatInvoiceDate(inv),
           `Rs. ${inv.grand_total?.toLocaleString() || '0'}`,
           (inv.payment_status || 'unpaid').toUpperCase()
         ]),
@@ -296,7 +322,7 @@ export default function Invoices() {
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
-                  <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
+                  <td className="p-4 text-secondary">{formatInvoiceDate(inv)}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
                     <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
                     {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
@@ -319,7 +345,7 @@ export default function Invoices() {
                       <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
                       <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
                       <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
-                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'share', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Share"><Share2 size={18} /></button>
+                      <button onClick={() => openShareModal(inv)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
                       <button onClick={() => deleteInvoice(inv.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
                     </div>
                   </td>
@@ -343,7 +369,7 @@ export default function Invoices() {
                     <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
                     <p className="text-secondary font-medium mt-0.5">{customers[inv.customer_id]?.name || 'Loading...'}</p>
                     <p className="text-xs text-secondary/70 mt-1">
-                      {inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}
+                      {formatInvoiceDate(inv)}
                     </p>
                   </div>
                   <div className="text-right">
@@ -367,7 +393,7 @@ export default function Invoices() {
                   <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
                   <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
                   <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
-                  <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'share', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="Share"><Share2 size={18} /></button>
+                  <button onClick={() => openShareModal(inv)} className="flex-1 flex justify-center py-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
                   <button onClick={() => deleteInvoice(inv.id)} className="flex-1 flex justify-center py-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
                 </div>
               </div>
@@ -386,6 +412,20 @@ export default function Invoices() {
           document={selectedInvoice}
           documentType="invoice"
           onPaymentUpdated={() => {}}
+        />
+      )}
+
+      {shareInvoice && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareInvoice(null);
+          }}
+          document={shareInvoice}
+          documentType="Invoice"
+          customer={customers[shareInvoice.customer_id]}
+          settings={settings}
         />
       )}
     </div>
