@@ -98,13 +98,13 @@ export const ActionableOperationalTables: React.FC<ActionableOperationalTablesPr
         </div>
 
         {/* Tab Buttons */}
-        <div className="inline-flex rounded-xl bg-primary/5 p-1 border border-primary/10 overflow-x-auto max-w-full">
+        <div className="inline-flex rounded-xl bg-surface p-1 border border-shadow-darker/10 overflow-x-auto max-w-full">
           <button
             type="button"
             onClick={() => setActiveTab('followups')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === 'followups'
-                ? 'bg-white text-purple-700 shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -116,7 +116,7 @@ export const ActionableOperationalTables: React.FC<ActionableOperationalTablesPr
             onClick={() => setActiveTab('production')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === 'production'
-                ? 'bg-white text-amber-700 shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >
@@ -128,8 +128,8 @@ export const ActionableOperationalTables: React.FC<ActionableOperationalTablesPr
             onClick={() => setActiveTab('overdue')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === 'overdue'
-                ? 'bg-white text-rose-700 shadow-xs'
-                : 'text-secondary hover:text-primary-dark'
+                ? 'bg-amber-500 text-white shadow-xs'
+                : 'text-amber-900 hover:text-amber-950 font-bold'
             }`}
           >
             <AlertTriangle size={13} />
@@ -140,7 +140,7 @@ export const ActionableOperationalTables: React.FC<ActionableOperationalTablesPr
             onClick={() => setActiveTab('dispatches')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
               activeTab === 'dispatches'
-                ? 'bg-white text-teal-800 shadow-xs'
+                ? 'bg-primary text-white shadow-xs'
                 : 'text-secondary hover:text-primary-dark'
             }`}
           >

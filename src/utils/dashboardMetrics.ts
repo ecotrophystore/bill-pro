@@ -367,16 +367,16 @@ export function generateLeadsByPipeline(leads: Lead[]): { stageId: string; stage
   });
 
   const stagesToDisplay = [
-    { id: 'new_enquiry', color: '#0284c7' },
-    { id: 'requirement_confirmed', color: '#0ea5e9' },
-    { id: 'design_stage', color: '#6366f1' },
-    { id: 'quotation_sent', color: '#8b5cf6' },
-    { id: 'follow_up', color: '#ec4899' },
-    { id: 'advance_payment', color: '#f59e0b' },
-    { id: 'production', color: '#10b981' },
-    { id: 'quality_check', color: '#14b8a6' },
-    { id: 'ready_for_dispatch', color: '#065f46' },
-    { id: 'completed', color: '#059669' }
+    { id: 'new_enquiry', color: '#006766' },
+    { id: 'requirement_confirmed', color: '#004D40' },
+    { id: 'design_stage', color: '#2E7D32' },
+    { id: 'quotation_sent', color: '#388E3C' },
+    { id: 'follow_up', color: '#EAB308' },
+    { id: 'advance_payment', color: '#F59E0B' },
+    { id: 'production', color: '#15803D' },
+    { id: 'quality_check', color: '#0F766E' },
+    { id: 'ready_for_dispatch', color: '#D97706' },
+    { id: 'completed', color: '#047857' }
   ];
 
   return stagesToDisplay.map(st => ({

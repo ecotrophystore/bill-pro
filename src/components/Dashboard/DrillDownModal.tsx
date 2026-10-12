@@ -373,12 +373,14 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
                       <tr key={doc.id} className="hover:bg-primary/5 transition-colors">
                         <td className="p-3 font-bold text-primary-dark">{doc.number}</td>
                         <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
                             doc.docType === 'Invoice'
-                              ? 'bg-emerald-100 text-emerald-800'
+                              ? 'bg-primary/10 text-primary-dark border-primary/20'
                               : doc.docType === 'Cash Memo'
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-indigo-100 text-indigo-800'
+                              ? 'bg-emerald-500/15 text-emerald-900 border-emerald-500/20'
+                              : doc.docType === 'Purchase'
+                              ? 'bg-amber-400/20 text-amber-900 border-amber-500/30'
+                              : 'bg-primary/10 text-primary-dark border-primary/20'
                           }`}>
                             {doc.docType}
                           </span>
@@ -386,12 +388,14 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
                         <td className="p-3 font-medium text-primary-dark">{doc.customer_name}</td>
                         <td className="p-3 text-secondary font-mono text-[11px]">{doc.displayDate}</td>
                         <td className="p-3 font-bold text-primary-dark">₹{doc.grand_total.toLocaleString('en-IN')}</td>
-                        <td className="p-3 font-black text-rose-600">
+                        <td className="p-3 font-black text-amber-950">
                           {doc.balance_amount > 0 ? `₹${doc.balance_amount.toLocaleString('en-IN')}` : '₹0'}
                         </td>
                         <td className="p-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                            doc.payment_status === 'paid' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
+                            doc.payment_status === 'paid' 
+                              ? 'bg-primary/10 text-primary-dark border-primary/20' 
+                              : 'bg-amber-400/20 text-amber-900 border-amber-500/30'
                           }`}>
                             {doc.payment_status}
                           </span>

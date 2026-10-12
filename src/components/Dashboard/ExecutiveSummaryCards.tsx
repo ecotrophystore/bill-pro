@@ -35,8 +35,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: 'Captured inquiries across channels',
       value: metrics.totalLeads.toLocaleString('en-IN'),
       icon: Users,
-      accent: 'border-sky-500/30 text-sky-700 bg-sky-500/10',
+      accent: 'border-primary/20 text-primary-dark bg-primary/10',
       badge: 'All Channels',
+      badgeStyle: 'bg-primary/10 text-primary-dark border-primary/20',
+      isHighlight: false,
       isCurrency: false
     },
     {
@@ -45,8 +47,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: 'Shop floor production underway',
       value: metrics.activeOrders.toLocaleString('en-IN'),
       icon: Layers,
-      accent: 'border-amber-500/30 text-amber-700 bg-amber-500/10',
+      accent: 'border-amber-500/40 text-amber-900 bg-amber-400/20',
       badge: 'In Production',
+      badgeStyle: 'bg-amber-400/20 text-amber-900 border-amber-500/30',
+      isHighlight: true,
       isCurrency: false
     },
     {
@@ -55,8 +59,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: 'Gross revenue for selected timeframe',
       value: `₹${metrics.totalSales.toLocaleString('en-IN')}`,
       icon: TrendingUp,
-      accent: 'border-emerald-500/30 text-[#004D40] bg-emerald-500/10',
+      accent: 'border-primary/30 text-primary-dark bg-primary/15',
       badge: 'Gross Revenue',
+      badgeStyle: 'bg-primary/10 text-primary-dark border-primary/20',
+      isHighlight: false,
       isCurrency: true
     },
     {
@@ -65,8 +71,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: 'Cleared collections & realized cash flow',
       value: `₹${metrics.paymentsReceived.toLocaleString('en-IN')}`,
       icon: CheckCircle2,
-      accent: 'border-teal-500/30 text-teal-800 bg-teal-500/10',
+      accent: 'border-emerald-600/30 text-emerald-900 bg-emerald-500/15',
       badge: 'Cleared Cash',
+      badgeStyle: 'bg-emerald-500/10 text-emerald-900 border-emerald-600/20',
+      isHighlight: false,
       isCurrency: true
     },
     {
@@ -75,8 +83,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: 'Pending client balances requiring follow-up',
       value: `₹${metrics.outstandingAmounts.toLocaleString('en-IN')}`,
       icon: AlertCircle,
-      accent: 'border-rose-500/30 text-rose-700 bg-rose-500/10',
+      accent: 'border-amber-500/40 text-amber-900 bg-amber-400/20',
       badge: 'Pending Dues',
+      badgeStyle: 'bg-amber-400/20 text-amber-900 border-amber-500/30',
+      isHighlight: true,
       isCurrency: true
     },
     {
@@ -85,8 +95,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
       description: "Today's action items & urgent leads",
       value: metrics.pendingFollowups.toLocaleString('en-IN'),
       icon: PhoneCall,
-      accent: 'border-purple-500/30 text-purple-700 bg-purple-500/10',
+      accent: 'border-primary/20 text-primary-dark bg-primary/10',
       badge: 'Action Needed',
+      badgeStyle: 'bg-primary/10 text-primary-dark border-primary/20',
+      isHighlight: false,
       isCurrency: false
     }
   ];
@@ -132,10 +144,10 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
 
             {/* Footer / Drill-down cue */}
             <div className="pt-2 border-t border-shadow-darker/10 flex items-center justify-between text-[10px]">
-              <span className="font-semibold text-secondary">
+              <span className={`px-2 py-0.5 rounded-md font-semibold border ${card.badgeStyle}`}>
                 {card.badge}
               </span>
-              <span className="text-primary font-bold inline-flex items-center gap-0.5 group-hover:underline">
+              <span className={`font-bold inline-flex items-center gap-0.5 group-hover:underline ${card.isHighlight ? 'text-amber-800' : 'text-primary'}`}>
                 View <ArrowUpRight size={11} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
               </span>
             </div>
