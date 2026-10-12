@@ -12,15 +12,16 @@ import {
   Layers,
   FileText,
   Building,
-  Phone
+  Phone,
+  Trash2
 } from 'lucide-react';
-import type { Lead, Invoice, CashMemo, ProformaInvoice, Quotation } from '../../types';
+import type { Lead, Invoice, CashMemo, ProformaInvoice, Quotation, Purchase } from '../../types';
 import type { DrillDownType } from './ExecutiveSummaryCards';
 import { STAGE_LABEL_MAP, parseDate, getDocAmount, getItemDate } from '../../utils/dashboardMetrics';
 
 interface UnifiedSalesRecord {
   id: string;
-  docType: 'Invoice' | 'Cash Memo' | 'Proforma';
+  docType: 'Invoice' | 'Cash Memo' | 'Proforma' | 'Purchase';
   number: string;
   customer_name: string;
   grand_total: number;
@@ -41,6 +42,7 @@ interface DrillDownModalProps {
   cashMemos: CashMemo[];
   proformaInvoices?: ProformaInvoice[];
   quotations?: Quotation[];
+  purchases?: any[];
 }
 
 export const DrillDownModal: React.FC<DrillDownModalProps> = ({
@@ -51,7 +53,8 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
   invoices,
   cashMemos,
   proformaInvoices = [],
-  quotations = []
+  quotations = [],
+  purchases = []
 }) => {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -181,6 +184,31 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
       displayedSales = allSalesRecords.filter(s => s.balance_amount > 0 || s.payment_status === 'unpaid' || s.payment_status === 'partial');
       break;
 
+    case 'purchases':
+      title = 'Vendor Purchase Records';
+      subtitle = 'All procurement and vendor bill entries recorded in the database';
+      isSalesData = true;
+      displayedSales = (purchases || []).map((p: any) => {
+        const amt = Number(p.grandTotal || p.amount || p.total || 0);
+        const vendorName = typeof p.vendor === 'string' ? p.vendor : p.vendor?.name || 'Unknown Vendor';
+        const ref = p.invoice?.invoice_number || p.reference || p.id;
+        const d = getItemDate(p);
+        return {
+          id: p.id,
+          docType: 'Purchase' as const,
+          number: ref,
+          customer_name: vendorName,
+          grand_total: amt,
+          balance_amount: 0,
+          cleared_amount: amt,
+          payment_status: p.status || 'cleared',
+          status: p.status || 'submitted',
+          displayDate: d ? d.toLocaleDateString('en-IN') : 'No Date',
+          route: '/purchases'
+        };
+      });
+      break;
+
     default:
       // Pipeline stage drill-down
       if (typeof type === 'string' && STAGE_LABEL_MAP[type]) {
@@ -241,7 +269,7 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
         </div>
 
         {/* Filter bar inside modal */}
-        <div className="p-4 bg-primary/5 border-b border-shadow-darker/10 flex items-center justify-between gap-3">
+        <div className="p-4 bg-primary/5 border-b border-shadow-darker/10 flex flex-wrap items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" />
             <input
@@ -252,9 +280,11 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
               className="neo-input !py-1.5 !pl-8 text-xs w-full"
             />
           </div>
-          <span className="text-xs text-secondary hidden sm:inline">
-            Click 'View' to inspect any document directly
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-secondary hidden sm:inline">
+              Click 'View' or 'Delete' to manage documents
+            </span>
+          </div>
         </div>
 
         {/* Table Content */}
@@ -367,16 +397,40 @@ export const DrillDownModal: React.FC<DrillDownModalProps> = ({
                           </span>
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onClose();
-                              navigate(doc.route);
-                            }}
-                            className="neo-btn !py-1 !px-2.5 text-xs text-primary font-bold inline-flex items-center gap-1"
-                          >
-                            View <ExternalLink size={12} />
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                navigate(doc.route);
+                              }}
+                              className="neo-btn !py-1 !px-2.5 text-xs text-primary font-bold inline-flex items-center gap-1"
+                            >
+                              View <ExternalLink size={12} />
+                            </button>
+                            {doc.docType === 'Purchase' && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!window.confirm(`Delete purchase record for ${doc.customer_name} (₹${doc.grand_total})?`)) return;
+                                  try {
+                                    const { doc: firestoreDoc, deleteDoc: firestoreDelete } = await import('firebase/firestore');
+                                    const { db } = await import('../../lib/firebase');
+                                    if (!db) return;
+                                    await firestoreDelete(firestoreDoc(db, 'purchases', doc.id));
+                                    alert("Purchase record deleted.");
+                                    onClose();
+                                  } catch (e: any) {
+                                    alert("Failed to delete purchase: " + e.message);
+                                  }
+                                }}
+                                className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 transition-colors"
+                                title="Delete this purchase record"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

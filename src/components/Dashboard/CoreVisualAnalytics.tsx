@@ -68,6 +68,8 @@ interface CoreVisualAnalyticsProps {
   onStageClick?: (stageId: string) => void;
   onCollectionsClick?: () => void;
   onOutstandingClick?: () => void;
+  onPurchasesClick?: () => void;
+  onExpensesClick?: () => void;
 }
 
 const formatCurrency = (val: number) => {
@@ -91,7 +93,9 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
   globalBounds,
   onStageClick,
   onCollectionsClick,
-  onOutstandingClick
+  onOutstandingClick,
+  onPurchasesClick,
+  onExpensesClick
 }) => {
   const navigate = useNavigate();
 
@@ -146,8 +150,8 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
   const outstandingPercentage = 100 - collectionPercentage;
 
   const ratioData = [
-    { name: 'Cleared Collections', value: collectionsReceived, color: '#10b981' },
-    { name: 'Pending Balance', value: outstandingBalance, color: '#f43f5e' }
+    { name: 'Cleared Collections', value: collectionsReceived, color: '#f59e0b' },
+    { name: 'Pending Balance', value: outstandingBalance, color: '#d97706' }
   ];
 
   return (
@@ -157,7 +161,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
       <div className="neo-card p-5 border border-shadow-darker/10 flex flex-col justify-between">
         <div className="flex items-center justify-between pb-3 border-b border-shadow-darker/10 mb-4">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-emerald-500/10 text-[#004D40]">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-700">
               <TrendingUp size={16} />
             </div>
             <div>
@@ -165,7 +169,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
               <p className="text-[11px] text-secondary">Daily revenue velocity & volume fluctuations</p>
             </div>
           </div>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">
             Revenue Curve
           </span>
         </div>
@@ -180,8 +184,8 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
               <AreaChart data={salesTrends} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <defs>
                   <linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.35}/>
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -205,10 +209,12 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                 <Area 
                   type="monotone" 
                   dataKey="sales" 
-                  stroke="#10b981" 
+                  stroke="#f59e0b" 
                   strokeWidth={2.5} 
                   fillOpacity={1} 
                   fill="url(#salesGrad)" 
+                  dot={{ r: 4, strokeWidth: 2, fill: '#ffffff', stroke: '#f59e0b' }}
+                  activeDot={{ r: 6, stroke: '#f59e0b', strokeWidth: 2, fill: '#ffffff' }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -351,7 +357,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
       <div className="neo-card p-5 border border-shadow-darker/10 flex flex-col justify-between">
         <div className="flex items-center justify-between pb-3 border-b border-shadow-darker/10 mb-4">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-teal-500/10 text-teal-800">
+            <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-800">
               <PieChartIcon size={16} />
             </div>
             <div>
@@ -359,7 +365,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
               <p className="text-[11px] text-secondary">Collected revenue vs. pending client balance ratio</p>
             </div>
           </div>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-800">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">
             {collectionPercentage}% Realized
           </span>
         </div>
@@ -398,16 +404,16 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
             <div 
               onClick={onCollectionsClick}
               role="button"
-              className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 cursor-pointer hover:bg-emerald-500/15 transition-all"
+              className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 cursor-pointer hover:bg-amber-500/15 transition-all"
             >
               <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-emerald-900 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
                   Cleared Collections
                 </span>
-                <span className="text-[11px] font-bold text-emerald-800">{collectionPercentage}%</span>
+                <span className="text-[11px] font-bold text-amber-800">{collectionPercentage}%</span>
               </div>
-              <div className="text-base font-black text-emerald-950 mt-1">
+              <div className="text-base font-black text-amber-950 mt-1">
                 ₹{collectionsReceived.toLocaleString('en-IN')}
               </div>
             </div>
@@ -416,16 +422,16 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
             <div 
               onClick={onOutstandingClick}
               role="button"
-              className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 cursor-pointer hover:bg-rose-500/15 transition-all"
+              className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 cursor-pointer hover:bg-amber-500/15 transition-all"
             >
               <div className="flex justify-between items-center text-xs">
-                <span className="font-bold text-rose-900 flex items-center gap-1.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span>
+                <span className="font-bold text-amber-900 flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-600 inline-block"></span>
                   Pending Balances
                 </span>
-                <span className="text-[11px] font-bold text-rose-800">{outstandingPercentage}%</span>
+                <span className="text-[11px] font-bold text-amber-800">{outstandingPercentage}%</span>
               </div>
-              <div className="text-base font-black text-rose-950 mt-1">
+              <div className="text-base font-black text-amber-950 mt-1">
                 ₹{outstandingBalance.toLocaleString('en-IN')}
               </div>
             </div>
@@ -482,10 +488,10 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
 
               {/* Total Summary Badge */}
               <div 
-                onClick={() => navigate('/purchases')}
+                onClick={() => onPurchasesClick ? onPurchasesClick() : navigate('/purchases')}
                 role="button"
                 className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-800 text-xs font-bold hover:bg-amber-500/20 cursor-pointer transition-colors"
-                title="View Purchases"
+                title="Click to view underlying purchase records"
               >
                 ₹{computedPurchaseResult.totalPurchases.toLocaleString('en-IN')}
               </div>
@@ -554,6 +560,8 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                   strokeWidth={2.5} 
                   fillOpacity={1} 
                   fill="url(#purchasesGrad)" 
+                  dot={{ r: 4, strokeWidth: 2, fill: '#ffffff', stroke: '#f59e0b' }}
+                  activeDot={{ r: 6, stroke: '#f59e0b', strokeWidth: 2, fill: '#ffffff' }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -566,7 +574,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
         <div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-shadow-darker/10 mb-3">
             <div className="flex items-center gap-2">
-              <div className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-700">
+              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-700">
                 <Receipt size={16} />
               </div>
               <div>
@@ -588,7 +596,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                     }}
                     className={`px-2 py-0.5 text-[10px] font-bold rounded-md capitalize transition-all ${
                       expenseGranularity === g && !showExpenseCustom
-                        ? 'bg-indigo-600 text-white shadow-xs'
+                        ? 'bg-amber-500 text-white shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
@@ -600,7 +608,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                   onClick={() => setShowExpenseCustom(!showExpenseCustom)}
                   className={`px-2 py-0.5 text-[10px] font-bold rounded-md transition-all ${
                     showExpenseCustom
-                      ? 'bg-indigo-600 text-white shadow-xs'
+                      ? 'bg-amber-500 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -612,7 +620,7 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
               <div 
                 onClick={() => navigate('/expense')}
                 role="button"
-                className="px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-800 text-xs font-bold hover:bg-indigo-500/20 cursor-pointer transition-colors"
+                className="px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-800 text-xs font-bold hover:bg-amber-500/20 cursor-pointer transition-colors"
                 title="View Expense Ledger"
               >
                 ₹{computedExpenseResult.totalExpenses.toLocaleString('en-IN')}
@@ -622,8 +630,8 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
 
           {/* Custom Date Filter Row if active */}
           {showExpenseCustom && (
-            <div className="flex items-center gap-2 mb-3 p-2 bg-indigo-50/50 rounded-lg border border-indigo-200/50 animate-fade-in text-xs">
-              <span className="font-bold text-indigo-900 text-[11px]">Range:</span>
+            <div className="flex items-center gap-2 mb-3 p-2 bg-amber-50/50 rounded-lg border border-amber-200/50 animate-fade-in text-xs">
+              <span className="font-bold text-amber-900 text-[11px]">Range:</span>
               <input 
                 type="date"
                 value={expenseCustomStart}
@@ -653,8 +661,8 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
               <AreaChart data={computedExpenseResult.data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                 <defs>
                   <linearGradient id="expensesGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
@@ -678,10 +686,12 @@ export const CoreVisualAnalytics: React.FC<CoreVisualAnalyticsProps> = ({
                 <Area 
                   type="monotone" 
                   dataKey="expenses" 
-                  stroke="#8b5cf6" 
+                  stroke="#f59e0b" 
                   strokeWidth={2.5} 
                   fillOpacity={1} 
                   fill="url(#expensesGrad)" 
+                  dot={{ r: 4, strokeWidth: 2, fill: '#ffffff', stroke: '#f59e0b' }}
+                  activeDot={{ r: 6, stroke: '#f59e0b', strokeWidth: 2, fill: '#ffffff' }}
                 />
               </AreaChart>
             </ResponsiveContainer>

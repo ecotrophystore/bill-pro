@@ -21,10 +21,10 @@ export function parseDate(val: any): Date | null {
 export function getItemDate(item: any): Date | null {
   if (!item) return null;
   return (
-    parseDate(item.created_at) ||
     parseDate(item.createdAt) ||
-    parseDate(item.custom_date) ||
     parseDate(item.date) ||
+    parseDate(item.created_at) ||
+    parseDate(item.custom_date) ||
     parseDate(item.invoice_date) ||
     parseDate(item.invoice?.invoice_date) ||
     parseDate(item.advance_payment_date) ||
@@ -430,52 +430,20 @@ export function generatePurchaseExpenseTrends(
     }
   }
 
-  // Pre-seed based on granularity
+  // Seed based on granularity
   if (granularity === 'daily') {
-    // If all time or wide range, show last 14 days by default or within custom dates (capped at 31 days)
-    let daysToSeed = 14;
-    let baseEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    if (customEnd) {
-      const ce = new Date(customEnd);
-      if (!isNaN(ce.getTime())) baseEnd = ce;
-    }
-
     if (customStart && customEnd) {
       const diffTime = Math.abs(effEnd.getTime() - effStart.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      daysToSeed = Math.min(Math.max(diffDays, 1), 31);
-    }
-
-    for (let i = daysToSeed - 1; i >= 0; i--) {
-      const d = new Date(baseEnd.getFullYear(), baseEnd.getMonth(), baseEnd.getDate() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      map[key] = {
-        purchases: 0,
-        expenses: 0,
-        displayKey: d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
-      };
-    }
-  } else if (granularity === 'yearly') {
-    // Last 5 years
-    for (let i = 4; i >= 0; i--) {
-      const yr = now.getFullYear() - i;
-      const key = String(yr);
-      map[key] = {
-        purchases: 0,
-        expenses: 0,
-        displayKey: String(yr)
-      };
-    }
-  } else {
-    // Monthly: Last 6 to 12 months
-    for (let i = 7; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      map[key] = {
-        purchases: 0,
-        expenses: 0,
-        displayKey: d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
-      };
+      const diffDays = Math.min(Math.ceil(diffTime / (1000 * 60 * 60 * 24)), 31);
+      for (let i = diffDays - 1; i >= 0; i--) {
+        const d = new Date(effEnd.getFullYear(), effEnd.getMonth(), effEnd.getDate() - i);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        map[key] = {
+          purchases: 0,
+          expenses: 0,
+          displayKey: d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+        };
+      }
     }
   }
 
@@ -486,16 +454,8 @@ export function generatePurchaseExpenseTrends(
     isAllTime: bounds.isAllTime && !customStart && !customEnd
   };
 
-  let validPurchases = purchases.filter(p => isWithinDateRange(p, effectiveBounds));
-  let validExpenses = expenses.filter(e => isWithinDateRange(e, effectiveBounds));
-
-  // Fallback: If filter returns 0 records but database has records, fallback to all records
-  if (validPurchases.length === 0 && purchases.length > 0) {
-    validPurchases = purchases;
-  }
-  if (validExpenses.length === 0 && expenses.length > 0) {
-    validExpenses = expenses;
-  }
+  const validPurchases = purchases.filter(p => isWithinDateRange(p, effectiveBounds));
+  const validExpenses = expenses.filter(e => isWithinDateRange(e, effectiveBounds));
 
   const getKeyForDate = (d: Date): { key: string; displayKey: string } => {
     if (granularity === 'daily') {
@@ -543,9 +503,36 @@ export function generatePurchaseExpenseTrends(
   });
 
   const sortedKeys = Object.keys(map).sort();
+
+  // If there is only 1 point (e.g. all purchases are on Oct 3), add adjacent days/periods with 0 so AreaChart renders a visible bell/peak curve
+  if (sortedKeys.length === 1 && granularity === 'daily') {
+    const singleKey = sortedKeys[0];
+    const [y, m, d] = singleKey.split('-').map(Number);
+    const prevDate = new Date(y, m - 1, d - 1);
+    const nextDate = new Date(y, m - 1, d + 1);
+    const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
+    const nextKey = `${nextDate.getFullYear()}-${String(nextDate.getMonth() + 1).padStart(2, '0')}-${String(nextDate.getDate()).padStart(2, '0')}`;
+    
+    if (!map[prevKey]) {
+      map[prevKey] = {
+        purchases: 0,
+        expenses: 0,
+        displayKey: prevDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+      };
+    }
+    if (!map[nextKey]) {
+      map[nextKey] = {
+        purchases: 0,
+        expenses: 0,
+        displayKey: nextDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })
+      };
+    }
+  }
+
+  const finalSortedKeys = Object.keys(map).sort();
   // Limit output points based on granularity for optimal readability
   const maxPoints = granularity === 'daily' ? 31 : granularity === 'yearly' ? 10 : 12;
-  const data: PurchaseExpensePoint[] = sortedKeys.slice(-maxPoints).map(key => {
+  const data: PurchaseExpensePoint[] = finalSortedKeys.slice(-maxPoints).map(key => {
     const entry = map[key];
     const pAmt = entry.purchases;
     const eAmt = entry.expenses;

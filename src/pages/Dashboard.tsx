@@ -483,6 +483,7 @@ export default function Dashboard() {
           onStageClick={handleDrillDown}
           onCollectionsClick={() => handleDrillDown('payments_received')}
           onOutstandingClick={() => handleDrillDown('outstanding_amounts')}
+          onPurchasesClick={() => handleDrillDown('purchases')}
         />
       </section>
 
@@ -506,6 +507,7 @@ export default function Dashboard() {
         cashMemos={cashMemos}
         proformaInvoices={proformaInvoices}
         quotations={quotations}
+        purchases={purchases}
       />
 
     </div>
