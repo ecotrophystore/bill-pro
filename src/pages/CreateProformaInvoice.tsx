@@ -554,7 +554,12 @@ export default function CreateProformaInvoice() {
               </div>
               {discountPercent > 0 && (
                 <div className="flex justify-between text-green-600 text-xs">
-                  <span>Discount ({discountPercent}%)</span>
+                  <span className="flex items-center gap-1.5">
+                    Discount ({discountPercent}%)
+                    <span className="bg-green-100 text-green-700 text-[10px] font-semibold px-1.5 py-0.5 rounded-full leading-none">
+                      You save ₹ {formatINR(totals.discountAmount)}
+                    </span>
+                  </span>
                   <span className="font-semibold font-mono">- ₹ {formatINR(totals.discountAmount)}</span>
                 </div>
               )}

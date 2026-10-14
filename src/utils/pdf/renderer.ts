@@ -263,7 +263,10 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
                   </tr>
                   ${discountAmt > 0 ? `
                   <tr>
-                      <td class="total-label">Discount (${(docData as any).discount_percent || 0}%)</td>
+                      <td class="total-label">
+                        Discount (${(docData as any).discount_percent || 0}%)
+                        <span style="display:inline-block;margin-left:6px;background:#dcfce7;color:#15803d;font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;vertical-align:middle;">You save ${formatCurrency(discountAmt)}</span>
+                      </td>
                       <td class="total-value">-${formatCurrency(discountAmt)}</td>
                   </tr>
                   ` : ''}
