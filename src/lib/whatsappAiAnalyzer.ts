@@ -38,13 +38,17 @@ export interface WhatsAppAiAnalysisResult {
   internal_audit_log: string;
 }
 
+const DEFAULT_GEMINI_KEY = 'AIzaSyADF4qRiXl1HavHy8GAXVx6XaweqQkq6Yk';
+
 function getGeminiApiKey(): string {
   if (typeof window !== 'undefined') {
     const customKey = localStorage.getItem('VITE_GEMINI_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
     if (customKey) return customKey;
   }
-  return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  const envKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY as string);
+  return envKey || DEFAULT_GEMINI_KEY;
 }
+
 
 /**
  * Robust fallback analyzer if Gemini API is offline/unreachable

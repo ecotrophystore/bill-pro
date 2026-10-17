@@ -1,12 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+const DEFAULT_GEMINI_KEY = 'AIzaSyADF4qRiXl1HavHy8GAXVx6XaweqQkq6Yk';
+
 export function getApiKey(): string {
   if (typeof window !== 'undefined') {
     const customKey = localStorage.getItem('VITE_GEMINI_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
     if (customKey) return customKey;
   }
-  return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  const envKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY as string);
+  return envKey || DEFAULT_GEMINI_KEY;
 }
+
 
 export function setApiKey(key: string): void {
   if (typeof window !== 'undefined') {
@@ -15,7 +19,7 @@ export function setApiKey(key: string): void {
   }
 }
 
-const CANDIDATE_MODELS = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-1.5-flash'];
+const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
 export async function extractDataFromDocument(
   base64Data: string,

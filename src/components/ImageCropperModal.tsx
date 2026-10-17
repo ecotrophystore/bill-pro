@@ -36,38 +36,63 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
     pixelCrop: any
   ): Promise<File | null> => {
     const image = await createImage(imageSrc);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
 
-    if (!ctx) {
-      return null;
-    }
+    // --- Step 1: Draw the full image onto an intermediate canvas ---
+    // This normalises EXIF orientation (browsers auto-rotate <img> but not canvas),
+    // which was causing phone-camera JPEGs to arrive rotated/flipped at the AI.
+    const fullCanvas = document.createElement('canvas');
+    const fullCtx = fullCanvas.getContext('2d');
+    if (!fullCtx) return null;
 
-    canvas.width = image.width;
-    canvas.height = image.height;
+    fullCanvas.width = image.naturalWidth;
+    fullCanvas.height = image.naturalHeight;
+    fullCtx.drawImage(image, 0, 0);
 
-    ctx.drawImage(image, 0, 0);
+    // --- Step 2: Extract just the cropped region ---
+    const croppedCanvas = document.createElement('canvas');
+    const croppedCtx = croppedCanvas.getContext('2d');
+    if (!croppedCtx) return null;
 
-    const data = ctx.getImageData(
+    croppedCanvas.width = pixelCrop.width;
+    croppedCanvas.height = pixelCrop.height;
+
+    croppedCtx.drawImage(
+      fullCanvas,
       pixelCrop.x,
       pixelCrop.y,
+      pixelCrop.width,
+      pixelCrop.height,
+      0,
+      0,
       pixelCrop.width,
       pixelCrop.height
     );
 
-    canvas.width = pixelCrop.width;
-    canvas.height = pixelCrop.height;
-
-    ctx.putImageData(data, 0, 0);
+    // --- Step 3: Downscale if image is too large for the Gemini API inline limit ---
+    // Large phone photos (e.g. 12MP) produce base64 payloads that exceed the limit,
+    // causing the API to return an empty or failed response.
+    const MAX_DIM = 2048;
+    let outputCanvas = croppedCanvas;
+    if (pixelCrop.width > MAX_DIM || pixelCrop.height > MAX_DIM) {
+      const scale = Math.min(MAX_DIM / pixelCrop.width, MAX_DIM / pixelCrop.height);
+      const scaledCanvas = document.createElement('canvas');
+      scaledCanvas.width = Math.round(pixelCrop.width * scale);
+      scaledCanvas.height = Math.round(pixelCrop.height * scale);
+      const scaledCtx = scaledCanvas.getContext('2d');
+      if (scaledCtx) {
+        scaledCtx.drawImage(croppedCanvas, 0, 0, scaledCanvas.width, scaledCanvas.height);
+        outputCanvas = scaledCanvas;
+      }
+    }
 
     return new Promise((resolve) => {
-      canvas.toBlob((file) => {
+      outputCanvas.toBlob((file) => {
         if (file) {
           resolve(new File([file], 'cropped_image.jpeg', { type: 'image/jpeg' }));
         } else {
           resolve(null);
         }
-      }, 'image/jpeg');
+      }, 'image/jpeg', 0.92);
     });
   };
 

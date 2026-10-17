@@ -39,14 +39,16 @@ import {
   FolderKanban,
   SlidersHorizontal,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Key
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ExportReportModal from '../components/Shared/ExportReportModal';
-import { extractDataFromDocument } from '../services/ai';
+import { extractDataFromDocument, getApiKey, setApiKey } from '../services/ai';
+
 import { db, auth } from '../lib/firebase';
 import { 
   collection, 
@@ -141,6 +143,14 @@ export default function ExpensePage() {
   const [isAddDrawerOpen, setIsAddDrawerOpen] = useState(false);
   const [isScanCardOpen, setIsScanCardOpen] = useState(false);
   const [showDetailedStats, setShowDetailedStats] = useState(false);
+
+  // Edit Expense Modal state
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
+  const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
+
+  // Gemini API Key Modal state
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(() => getApiKey());
 
   // Ledger Presentation states
   const [ledgerViewMode, setLedgerViewMode] = useState<'flat' | 'grouped'>('flat');
@@ -460,10 +470,16 @@ export default function ExpensePage() {
             }));
             
             setPreviewRows(prev => [...prev, ...newRows]);
-          } catch(err) {
+          } catch(err: any) {
             console.error(err);
-            alert("Failed to extract data with AI.");
+            const msg = err?.message || String(err);
+            if (msg.includes('API key') || msg.includes('401') || msg.includes('402')) {
+              setShowApiKeyModal(true);
+            } else {
+              alert("Failed to extract data with AI.\n\nReason: " + msg);
+            }
           } finally {
+
             setIsParsing(false);
           }
         };
@@ -594,6 +610,52 @@ export default function ExpensePage() {
   const handleResetPreview = () => {
     if (window.confirm("Are you sure you want to clear the staged preview table?")) {
       setPreviewRows([]);
+    }
+  };
+
+  // Update saved expense in Firestore
+  const handleUpdateSavedExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExpense) return;
+    if (!editingExpense.member || !editingExpense.purpose || !editingExpense.paid) {
+      alert("Please fill in Member Name, Purpose, and Paid Amount.");
+      return;
+    }
+    if (!db) {
+      alert("Database is not connected.");
+      return;
+    }
+
+    setIsUpdatingExpense(true);
+    try {
+      const paid = parseFloat(editingExpense.paid as any) || 0;
+      const requested = parseFloat(editingExpense.requested as any) || paid;
+      const gstPercent = editingExpense.taxStatus === 'GST' ? (parseFloat(editingExpense.gstPercent as any) || 18) : 0;
+      const gstAmount = editingExpense.taxStatus === 'GST' ? exactRound((paid * gstPercent) / (100 + gstPercent)) : 0;
+      const nonGstAmount = editingExpense.taxStatus === 'Non-GST' ? paid : 0;
+
+      await updateDoc(doc(db, 'expenses', editingExpense.id), {
+        date: editingExpense.date,
+        member: editingExpense.member,
+        purpose: editingExpense.purpose,
+        requested: requested,
+        paid: paid,
+        taxStatus: editingExpense.taxStatus,
+        gstPercent: gstPercent,
+        gstAmount: gstAmount,
+        nonGstAmount: nonGstAmount,
+        paymentMode: editingExpense.paymentMode,
+        billNo: editingExpense.billNo || '',
+        notes: editingExpense.notes || '',
+        updated_at: serverTimestamp()
+      });
+
+      setEditingExpense(null);
+    } catch (err: any) {
+      console.error("Error updating expense:", err);
+      alert("Failed to update expense: " + (err.message || "Unknown error"));
+    } finally {
+      setIsUpdatingExpense(false);
     }
   };
 
@@ -897,12 +959,25 @@ export default function ExpensePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setApiKeyInput(getApiKey());
+              setShowApiKeyModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-shadow-dark/40 text-primary-dark text-xs font-bold hover:bg-primary/10 transition-colors shadow-xs"
+            title="Configure Gemini API Key"
+          >
+            <Key size={13} className="text-primary" />
+            AI Key Settings
+          </button>
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary-dark text-xs font-bold shadow-xs">
             <Cloud size={14} className="text-primary" />
             Cloud Synced (Firestore)
           </span>
         </div>
       </div>
+
 
       {/* Legacy Migration Alert Banner */}
       {legacyLocalExpenses.length > 0 && (
@@ -2188,13 +2263,22 @@ export default function ExpensePage() {
 
                           {/* Action */}
                           <td className="p-3.5 text-center">
-                            <button 
-                              onClick={() => handleDeleteSavedExpense(item.id)} 
-                              className="p-1.5 rounded-lg text-secondary hover:text-error hover:bg-error/10 transition-colors opacity-60 group-hover:opacity-100"
-                              title="Delete Expense"
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              <button 
+                                onClick={() => setEditingExpense({ ...item })} 
+                                className="p-1.5 rounded-lg text-secondary hover:text-primary hover:bg-primary/10 transition-colors opacity-70 group-hover:opacity-100"
+                                title="Edit Expense"
+                              >
+                                <Edit size={15} />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteSavedExpense(item.id)} 
+                                className="p-1.5 rounded-lg text-secondary hover:text-error hover:bg-error/10 transition-colors opacity-70 group-hover:opacity-100"
+                                title="Delete Expense"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2341,11 +2425,19 @@ export default function ExpensePage() {
                                   )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2">
                                 <span className="font-bold text-primary-dark">₹{item.paid?.toLocaleString('en-IN')}</span>
                                 <button 
+                                  onClick={() => setEditingExpense({ ...item })} 
+                                  className="text-secondary hover:text-primary p-1 rounded hover:bg-primary/10 transition-colors"
+                                  title="Edit Expense"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button 
                                   onClick={() => handleDeleteSavedExpense(item.id)} 
-                                  className="text-secondary hover:text-error p-1"
+                                  className="text-secondary hover:text-error p-1 rounded hover:bg-error/10 transition-colors"
+                                  title="Delete Expense"
                                 >
                                   <Trash2 size={14} />
                                 </button>
@@ -2424,6 +2516,284 @@ export default function ExpensePage() {
           onCropComplete={handleCropComplete}
         />
       )}
+
+      {/* SEPARATE EDIT EXPENSE MODAL */}
+      {editingExpense && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-lg bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-primary/5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary-dark">
+                  <Edit size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary-dark">Edit Expense</h3>
+                  <p className="text-[11px] text-secondary">Update expense details in cloud ledger</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setEditingExpense(null)} 
+                className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form id="edit-expense-modal-form" onSubmit={handleUpdateSavedExpense} className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
+                  <input 
+                    type="date" 
+                    required 
+                    value={editingExpense.date} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, date: e.target.value })} 
+                    className="neo-input w-full font-semibold" 
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
+                  <select 
+                    value={editingExpense.paymentMode} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, paymentMode: e.target.value as any })} 
+                    className="neo-input w-full font-bold text-primary-dark"
+                  >
+                    <option value="UPI">UPI</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Bank">Bank Transfer</option>
+                    <option value="Card">Card</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid To / Member Name *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="e.g. Ramesh, Office Stationery" 
+                  value={editingExpense.member} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, member: e.target.value })} 
+                  className="neo-input w-full font-semibold" 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Category *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. Refreshments, Rent" 
+                    value={editingExpense.purpose} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, purpose: e.target.value })} 
+                    className="neo-input w-full font-semibold" 
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. INV-1002" 
+                    value={editingExpense.billNo || ''} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, billNo: e.target.value })} 
+                    className="neo-input w-full font-mono text-xs" 
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
+                <input 
+                  type="number" 
+                  step="any"
+                  min="0"
+                  required 
+                  placeholder="0.00" 
+                  value={editingExpense.paid} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, paid: parseFloat(e.target.value) || 0, requested: parseFloat(e.target.value) || 0 })} 
+                  className="neo-input w-full font-black text-lg text-primary-dark" 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
+                  <select 
+                    value={editingExpense.taxStatus} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, taxStatus: e.target.value as any })} 
+                    className="neo-input w-full font-medium"
+                  >
+                    <option value="GST">GST Included</option>
+                    <option value="Non-GST">Non-GST (Exempt)</option>
+                  </select>
+                </div>
+
+                {editingExpense.taxStatus === 'GST' ? (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                    <select 
+                      value={editingExpense.gstPercent} 
+                      onChange={(e) => setEditingExpense({ ...editingExpense, gstPercent: parseFloat(e.target.value) })} 
+                      className="neo-input w-full font-bold text-primary-dark"
+                    >
+                      <option value={5}>5%</option>
+                      <option value={12}>12%</option>
+                      <option value={18}>18%</option>
+                      <option value={28}>28%</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-1 opacity-50">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                    <input type="text" disabled value="0% (Exempt)" className="neo-input w-full cursor-not-allowed text-xs" />
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic tax summary */}
+              {Number(editingExpense.paid) > 0 && (
+                <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 text-xs space-y-1">
+                  <div className="flex justify-between text-secondary">
+                    <span>Net Base:</span>
+                    <strong className="text-primary-dark">
+                      ₹{editingExpense.taxStatus === 'GST' 
+                        ? ((Number(editingExpense.paid) || 0) - exactRound(((Number(editingExpense.paid) || 0) * (editingExpense.gstPercent || 18)) / (100 + (editingExpense.gstPercent || 18)))).toLocaleString('en-IN')
+                        : Number(editingExpense.paid).toLocaleString('en-IN')
+                      }
+                    </strong>
+                  </div>
+                  {editingExpense.taxStatus === 'GST' && (
+                    <div className="flex justify-between text-secondary">
+                      <span>Calculated GST ({editingExpense.gstPercent || 18}%):</span>
+                      <strong className="text-purple-800">
+                        ₹{exactRound(((Number(editingExpense.paid) || 0) * (editingExpense.gstPercent || 18)) / (100 + (editingExpense.gstPercent || 18))).toLocaleString('en-IN')}
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
+                <textarea 
+                  rows={2}
+                  placeholder="Optional notes or reference info..." 
+                  value={editingExpense.notes || ''} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, notes: e.target.value })} 
+                  className="neo-input w-full text-xs font-medium resize-none" 
+                />
+              </div>
+            </form>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-shadow-dark/20 bg-surface flex items-center justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => setEditingExpense(null)}
+                className="neo-btn text-xs py-2 px-4 font-semibold text-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit"
+                form="edit-expense-modal-form"
+                disabled={isUpdatingExpense}
+                className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-5 font-bold shadow-md disabled:opacity-50"
+              >
+                {isUpdatingExpense ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GEMINI API KEY MODAL */}
+
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-md bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-amber-500/10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-700 dark:text-amber-300">
+                  <Key size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary-dark">Configure Gemini API Key</h3>
+                  <p className="text-[11px] text-secondary">Required for OCR & receipt extraction</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowApiKeyModal(false)} 
+                className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-amber-500/10 rounded-xl text-xs text-secondary leading-relaxed border border-amber-500/20">
+                The current Gemini API key is invalid, depleted, or expired.
+                <br />
+                Get a free API key at{' '}
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-primary font-bold underline"
+                >
+                  aistudio.google.com
+                </a>{' '}
+                and paste it below. It will be saved securely in your browser.
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Gemini API Key</label>
+                <input 
+                  type="password"
+                  placeholder="AIzaSy..." 
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="neo-input w-full font-mono text-xs" 
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-shadow-dark/20 bg-surface flex items-center justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="neo-btn text-xs py-2 px-4 font-semibold text-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  if (!apiKeyInput.trim()) {
+                    alert("Please enter a valid Gemini API key.");
+                    return;
+                  }
+                  setApiKey(apiKeyInput.trim());
+                  setShowApiKeyModal(false);
+                  alert("Gemini API key saved successfully! Please try uploading the receipt image again.");
+                }}
+                className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-5 font-bold shadow-md"
+              >
+                <Save size={15} /> Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
