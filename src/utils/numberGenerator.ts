@@ -138,17 +138,31 @@ export async function getNextProposedNumber(
     configuredSeq = settings?.memo_next_number || 1;
   }
 
+  const fy = getFinancialYearInfo(referenceDate);
+  const activeYear = (manualYear && manualYear.trim().length > 0) ? manualYear.trim() : fy.fyHyphen;
+  const activeYearSlash = activeYear.replace(/-/g, '/');
+  const activeYearHyphen = activeYear.replace(/\//g, '-');
+
   let maxExistingSeq = 0;
   if (db) {
     try {
-      const snap = await getDocs(query(collection(db, collectionName), limit(150)));
+      const snap = await getDocs(query(collection(db, collectionName), limit(300)));
       for (const d of snap.docs) {
         const numStr = ((d.data().number || '') as string).trim();
-        const match = numStr.match(/(\d+)(?!.*\d)/);
-        if (match) {
-          const lastPart = parseInt(match[1], 10);
-          if (!isNaN(lastPart) && lastPart > maxExistingSeq) {
-            maxExistingSeq = lastPart;
+        // Check if this document belongs to the active financial year series (or if format has no year)
+        const hasYearInFormat = format.includes('fy') || format.includes('year');
+        const matchesThisYear = !hasYearInFormat || 
+          numStr.includes(activeYearHyphen) || 
+          numStr.includes(activeYearSlash) || 
+          numStr.includes(fy.fullYear.toString());
+
+        if (matchesThisYear) {
+          const match = numStr.match(/(\d+)(?!.*\d)/);
+          if (match) {
+            const lastPart = parseInt(match[1], 10);
+            if (!isNaN(lastPart) && lastPart > maxExistingSeq) {
+              maxExistingSeq = lastPart;
+            }
           }
         }
       }

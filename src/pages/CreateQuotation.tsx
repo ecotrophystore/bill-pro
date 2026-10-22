@@ -6,6 +6,7 @@ import { collection, getDocs, doc, getDoc, updateDoc, addDoc, serverTimestamp } 
 import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
+import { DiscountSelector } from '../components/Billing/DiscountSelector';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
 import { getNextProposedNumber } from '../utils/numberGenerator';
@@ -82,7 +83,7 @@ export default function CreateQuotation() {
         } else {
           // Auto-generate proposed quotation number based on settings
           try {
-            const proposed = await getNextProposedNumber('quotations', 'quotation', companySettings);
+            const proposed = await getNextProposedNumber('quotations', 'quotation', companySettings, quotationDate);
             setDocumentNumber(proposed);
           } catch (numErr) {
             console.warn("Could not generate proposed quotation number:", numErr);
@@ -791,20 +792,13 @@ export default function CreateQuotation() {
               </div>
 
               {/* Document-level Discount */}
-              <div className="flex justify-between items-center gap-2">
-                <label className="text-secondary shrink-0">Discount</label>
-                <select
-                  className="neo-input text-xs py-1 w-28"
-                  value={discountPercent}
-                  onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
-                >
-                  <option value={0}>None (0%)</option>
-                  <option value={5}>5%</option>
-                  <option value={10}>10%</option>
-                  <option value={20}>20%</option>
-                  <option value={30}>30%</option>
-                  <option value={50}>50%</option>
-                </select>
+              <div className="flex justify-between items-start gap-2">
+                <label className="text-secondary shrink-0 pt-1">Discount</label>
+                <DiscountSelector
+                  discountPercent={discountPercent}
+                  onChange={setDiscountPercent}
+                  subtotal={totals.subtotal}
+                />
               </div>
               {discountPercent > 0 && (
                 <div className="flex justify-between text-green-600 text-xs">

@@ -64,6 +64,8 @@ import {
   serverTimestamp 
 } from 'firebase/firestore';
 import { ImageCropperModal } from '../components/ImageCropperModal';
+import { DuplicateBillModal, type DuplicateBillMatch } from '../components/Expense/DuplicateBillModal';
+import toast from 'react-hot-toast';
 
 interface ExpenseItem {
   id: string;
@@ -80,6 +82,7 @@ interface ExpenseItem {
   billNo?: string;
   notes?: string;
   created_at?: any;
+  isDuplicateOverride?: boolean;
 }
 
 export default function ExpensePage() {
@@ -147,6 +150,11 @@ export default function ExpensePage() {
   // Edit Expense Modal state
   const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
   const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
+
+  // Duplicate Bill Detection Modal states
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateBillMatch[]>([]);
+  const [pendingCleanItems, setPendingCleanItems] = useState<ExpenseItem[]>([]);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
 
   // Gemini API Key Modal state
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -368,6 +376,123 @@ export default function ExpensePage() {
 
   const exactRound = (num: number) => Math.round(num * 100) / 100;
 
+  // Helper to detect if any incoming expense is a duplicate/repeated bill
+  const checkDuplicates = (incomingItems: ExpenseItem[]): { cleanItems: ExpenseItem[]; duplicates: DuplicateBillMatch[] } => {
+    const existingPool = [...savedExpenses, ...previewRows];
+    const duplicates: DuplicateBillMatch[] = [];
+    const cleanItems: ExpenseItem[] = [];
+
+    for (const incoming of incomingItems) {
+      let matchedExisting: ExpenseItem | undefined;
+      let reason = '';
+      let source: 'database' | 'staged' = 'database';
+
+      const normIncomingBill = (incoming.billNo || '').trim().toLowerCase();
+      const normIncomingMember = (incoming.member || '').trim().toLowerCase();
+      const normIncomingPurpose = (incoming.purpose || '').trim().toLowerCase();
+      const incomingPaid = Number(incoming.paid) || 0;
+      const incomingDate = (incoming.date || '').trim();
+
+      for (const existing of existingPool) {
+        const normExistingBill = (existing.billNo || '').trim().toLowerCase();
+        const normExistingMember = (existing.member || '').trim().toLowerCase();
+        const normExistingPurpose = (existing.purpose || '').trim().toLowerCase();
+        const existingPaid = Number(existing.paid) || 0;
+        const existingDate = (existing.date || '').trim();
+        const isStaged = previewRows.some(p => p.id === existing.id);
+
+        // 1. Strict Match: Non-empty Bill Number matches existing record
+        if (normIncomingBill && normExistingBill && normIncomingBill === normExistingBill) {
+          matchedExisting = existing;
+          reason = `Matching Bill Number: "${incoming.billNo}" (Recorded on ${existingDate || 'N/A'}, Amount ₹${existingPaid})`;
+          source = isStaged ? 'staged' : 'database';
+          break;
+        }
+
+        // 2. Match on Date + Exact Paid Amount
+        if (incomingDate && existingDate && incomingDate === existingDate && Math.abs(incomingPaid - existingPaid) < 0.01 && incomingPaid > 0) {
+          if (normIncomingMember && normExistingMember && normIncomingMember === normExistingMember) {
+            matchedExisting = existing;
+            reason = `Same Date (${incomingDate}), Amount (₹${incomingPaid}) & Vendor/Member ("${existing.member}")`;
+            source = isStaged ? 'staged' : 'database';
+            break;
+          }
+          if (normIncomingPurpose && normExistingPurpose && normIncomingPurpose === normExistingPurpose) {
+            matchedExisting = existing;
+            reason = `Same Date (${incomingDate}), Amount (₹${incomingPaid}) & Purpose ("${existing.purpose}")`;
+            source = isStaged ? 'staged' : 'database';
+            break;
+          }
+          // Exact Date + Exact Amount
+          matchedExisting = existing;
+          reason = `Same Date (${incomingDate}) and exact Amount (₹${incomingPaid})`;
+          source = isStaged ? 'staged' : 'database';
+          break;
+        }
+      }
+
+      if (matchedExisting) {
+        duplicates.push({
+          incoming,
+          existing: matchedExisting,
+          reason,
+          source
+        });
+      } else {
+        cleanItems.push(incoming);
+      }
+    }
+
+    return { cleanItems, duplicates };
+  };
+
+  // Route incoming items through duplicate detection
+  const handleIncomingExpenses = (items: ExpenseItem[]) => {
+    if (items.length === 0) return;
+    const { cleanItems, duplicates } = checkDuplicates(items);
+
+    if (duplicates.length > 0) {
+      setDuplicateMatches(duplicates);
+      setPendingCleanItems(cleanItems);
+      setIsDuplicateModalOpen(true);
+    } else {
+      setPreviewRows(prev => [...prev, ...cleanItems]);
+      toast.success(
+        items.length === 1 
+          ? 'Bill added to staged queue!' 
+          : `Added ${items.length} bill(s) to staged queue.`
+      );
+    }
+  };
+
+  const handleAcceptDuplicates = (accepted: ExpenseItem[]) => {
+    const combined = [...pendingCleanItems, ...accepted];
+    setPreviewRows(prev => [...prev, ...combined]);
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+    toast.success(`Added ${combined.length} bill(s) to staged queue.`);
+  };
+
+  const handleDiscardDuplicates = () => {
+    if (pendingCleanItems.length > 0) {
+      setPreviewRows(prev => [...prev, ...pendingCleanItems]);
+      toast.success(`Skipped repeated bill(s). Added ${pendingCleanItems.length} unique item(s).`);
+    } else {
+      toast('Repeated bill discarded.', { icon: 'ℹ️' });
+    }
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+  };
+
+  const handleCancelDuplicateModal = () => {
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+    toast('Cancelled upload.', { icon: '🚫' });
+  };
+
   const processFile = (file: File) => {
     setParsedFileName(file.name);
     setIsParsing(true);
@@ -399,11 +524,11 @@ export default function ExpensePage() {
                 gstAmount: gstAmt,
                 nonGstAmount: tax === 'Non-GST' ? paid : 0,
                 paymentMode: (row.PaymentMode || row.payment_mode || 'UPI') as any,
-                billNo: row.BillNo || row.bill_no || '',
+                billNo: (row.BillNo || row.bill_no || row.BillNumber || row.InvoiceNo || row.invoice_no || '').toString().trim(),
                 notes: row.Notes || row.notes || 'Parsed from CSV'
               };
             });
-            setPreviewRows(prev => [...prev, ...parsed]);
+            handleIncomingExpenses(parsed);
             setIsParsing(false);
           }
         });
@@ -434,11 +559,11 @@ export default function ExpensePage() {
               gstAmount: gstAmt,
               nonGstAmount: tax === 'Non-GST' ? paid : 0,
               paymentMode: (row.PaymentMode || row.payment_mode || 'UPI') as any,
-              billNo: row.BillNo || row.bill_no || '',
+              billNo: (row.BillNo || row.bill_no || row.BillNumber || row.InvoiceNo || row.invoice_no || '').toString().trim(),
               notes: row.Notes || row.notes || 'Parsed from XLSX'
             };
           });
-          setPreviewRows(prev => [...prev, ...parsed]);
+          handleIncomingExpenses(parsed);
           setIsParsing(false);
         };
         reader.readAsArrayBuffer(file);
@@ -453,23 +578,35 @@ export default function ExpensePage() {
             // Handle both legacy format (single object) and new format (array of expenses)
             const expensesList = data.expenses || (data.amount ? [data] : []);
             
-            const newRows = expensesList.map((item: any, idx: number) => ({
-              id: `ocr-${Date.now()}-${idx}`,
-              date: item.date || new Date().toISOString().split('T')[0],
-              member: 'Imported Vendor',
-              purpose: item.description || 'Parsed from AI',
-              requested: parseFloat(item.amount) || 0,
-              paid: parseFloat(item.amount) || 0,
-              taxStatus: 'Non-GST',
-              gstPercent: 0,
-              gstAmount: 0,
-              nonGstAmount: parseFloat(item.amount) || 0,
-              paymentMode: 'UPI',
-              billNo: '',
-              notes: (item.notes || 'AI OCR Extraction') + (item.category ? ` [Category: ${item.category}]` : '')
-            }));
+            const newRows = expensesList.map((item: any, idx: number) => {
+              const paid = parseFloat(item.amount) || 0;
+              const rawTax = (item.taxStatus || item.tax_status || '').toString().toLowerCase();
+              const isGst = rawTax.includes('gst') && !rawTax.includes('non');
+              const taxStatus: 'GST' | 'Non-GST' = isGst ? 'GST' : 'Non-GST';
+              const gstPct = parseFloat(item.gstPercent || item.gst_percent || (isGst ? 18 : 0)) || 0;
+              const gstAmt = isGst ? exactRound((paid * gstPct) / (100 + gstPct)) : 0;
+              const nonGstAmt = isGst ? 0 : paid;
+              const extractedBillNo = (item.billNo || item.invoice_number || item.bill_no || item.invoiceNo || item.receiptNo || '').toString().trim();
+              const paymentMode = ['Cash', 'UPI', 'Bank', 'Card'].includes(item.paymentMode) ? item.paymentMode : 'UPI';
+
+              return {
+                id: `ocr-${Date.now()}-${idx}`,
+                date: item.date || new Date().toISOString().split('T')[0],
+                member: item.vendor || item.member || 'Imported Vendor',
+                purpose: item.description || item.purpose || 'Parsed from AI',
+                requested: paid,
+                paid: paid,
+                taxStatus,
+                gstPercent: gstPct,
+                gstAmount: gstAmt,
+                nonGstAmount: nonGstAmt,
+                paymentMode: paymentMode as any,
+                billNo: extractedBillNo,
+                notes: (item.notes || 'AI OCR Extraction') + (item.category ? ` [Category: ${item.category}]` : '')
+              };
+            });
             
-            setPreviewRows(prev => [...prev, ...newRows]);
+            handleIncomingExpenses(newRows);
           } catch(err: any) {
             console.error(err);
             const msg = err?.message || String(err);
@@ -479,7 +616,6 @@ export default function ExpensePage() {
               alert("Failed to extract data with AI.\n\nReason: " + msg);
             }
           } finally {
-
             setIsParsing(false);
           }
         };
@@ -512,11 +648,11 @@ export default function ExpensePage() {
       gstAmount: gstAmt,
       nonGstAmount: manualForm.taxStatus === 'Non-GST' ? paid : 0,
       paymentMode: manualForm.paymentMode,
-      billNo: manualForm.billNo,
+      billNo: manualForm.billNo.trim(),
       notes: manualForm.notes
     };
 
-    setPreviewRows(prev => [...prev, newItem]);
+    handleIncomingExpenses([newItem]);
     
     // Clear manual form (keep date)
     setManualForm(prev => ({
@@ -1285,7 +1421,7 @@ export default function ExpensePage() {
 
       {/* Slide-over Drawer for Add Expense */}
       {isAddDrawerOpen && (
-        <div className="fixed inset-0 z-50 overflow-hidden">
+        <div className="fixed inset-0 z-[70] overflow-hidden">
           {/* Backdrop */}
           <div 
             className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity animate-fade-in"
@@ -1584,12 +1720,19 @@ export default function ExpensePage() {
                       />
                     </td>
                     <td className="p-3">
-                      <input 
-                        type="text" 
-                        value={row.member} 
-                        onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
-                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-28 outline-none font-semibold text-primary-dark"
-                      />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <input 
+                          type="text" 
+                          value={row.member} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-28 outline-none font-semibold text-primary-dark"
+                        />
+                        {row.isDuplicateOverride && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30" title="User confirmed adding this repeated bill">
+                            Repeated
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3">
                       <input 
@@ -1665,13 +1808,20 @@ export default function ExpensePage() {
                         onChange={(e) => handleEditPreviewRow(row.id, 'date', e.target.value)} 
                         className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-semibold text-primary-dark"
                       />
-                      <input 
-                        type="text" 
-                        value={row.member} 
-                        placeholder="Member"
-                        onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
-                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary-dark"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <input 
+                          type="text" 
+                          value={row.member} 
+                          placeholder="Member"
+                          onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary-dark"
+                        />
+                        {row.isDuplicateOverride && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0" title="User confirmed adding this repeated bill">
+                            Repeated
+                          </span>
+                        )}
+                      </div>
                       <input 
                         type="text" 
                         value={row.purpose} 
@@ -2517,9 +2667,19 @@ export default function ExpensePage() {
         />
       )}
 
+      {/* DUPLICATE / REPEATED BILL MODAL */}
+      <DuplicateBillModal
+        isOpen={isDuplicateModalOpen}
+        duplicateMatches={duplicateMatches}
+        cleanItemsCount={pendingCleanItems.length}
+        onAddAnyway={handleAcceptDuplicates}
+        onDiscardDuplicates={handleDiscardDuplicates}
+        onCancelAll={handleCancelDuplicateModal}
+      />
+
       {/* SEPARATE EDIT EXPENSE MODAL */}
       {editingExpense && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
           <div className="w-full max-w-lg bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
             <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-primary/5">
@@ -2717,7 +2877,7 @@ export default function ExpensePage() {
       {/* GEMINI API KEY MODAL */}
 
       {showApiKeyModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
           <div className="w-full max-w-md bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
             <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-amber-500/10">
               <div className="flex items-center gap-2">

@@ -124,9 +124,14 @@ function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
         "expenses": [
           {
             "date": "YYYY-MM-DD",
-            "description": "Short description of what was purchased or the vendor name",
+            "billNo": "Bill number, Invoice number, or Receipt number if present, otherwise empty string",
+            "vendor": "Vendor, Store, Shop, or Member name if present, otherwise empty string",
+            "description": "Short description of what was purchased or service rendered",
             "amount": 0.00,
             "category": "General",
+            "taxStatus": "GST or Non-GST",
+            "gstPercent": 18,
+            "paymentMode": "Cash, UPI, Bank, or Card",
             "notes": "Any extra details"
           }
         ]
