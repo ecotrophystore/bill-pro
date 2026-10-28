@@ -13,6 +13,7 @@ import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
 import ExportReportModal from '../components/Shared/ExportReportModal';
+import ConvertDocumentModal, { type ConvertSourceDoc } from '../components/Billing/ConvertDocumentModal';
 
 export default function ProformaInvoices() {
   const navigate = useNavigate();
@@ -31,6 +32,7 @@ export default function ProformaInvoices() {
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [convertModalDoc, setConvertModalDoc] = useState<ConvertSourceDoc | null>(null);
   const { settings } = useSettings();
 
   useEffect(() => {
@@ -145,26 +147,25 @@ export default function ProformaInvoices() {
     }
   };
 
-  const handleConvertToInvoice = async (inv: ProformaInvoice) => {
+  const handleOpenConvertModal = (inv: ProformaInvoice) => {
     if (inv.payment_status !== 'paid') {
-      alert("Proforma Invoice can only be converted to a Tax Invoice when it is FULLY PAID.");
-      return;
+      const proceed = window.confirm("Proforma Invoice is not marked as fully paid. Do you still want to proceed with conversion?");
+      if (!proceed) return;
     }
-    const confirm = window.confirm(`Convert Proforma "${inv.number}" to a Tax Invoice? This cannot be undone.`);
-    if (!confirm) return;
-    setConvertingId(inv.id);
-    try {
-      const { clientConvertProformaToInvoice, deriveInvoiceNumberFromProforma } = await import('../utils/clientBillingCreator');
-      const result = await clientConvertProformaToInvoice(inv.id);
-      const invoiceNumber = (result as any).invoiceNumber || deriveInvoiceNumberFromProforma(inv.number);
-      alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
-      navigate('/invoices');
-    } catch (fallbackErr: any) {
-      console.error("Conversion failed:", fallbackErr);
-      alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
-    } finally {
-      setConvertingId(null);
-    }
+    setConvertModalDoc({
+      id: inv.id,
+      number: inv.number,
+      customer_id: inv.customer_id,
+      customer_name: customers[inv.customer_id]?.name,
+      customer_type: 'gst',
+      grand_total: inv.grand_total,
+      payment_status: inv.payment_status,
+    });
+  };
+
+  const handleConvertedSuccess = (_targetType: 'invoice' | 'proforma' | 'memo', docNumber: string) => {
+    alert(`Tax Invoice ${docNumber} created successfully!`);
+    navigate('/invoices');
   };
 
   const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
@@ -370,9 +371,9 @@ export default function ProformaInvoices() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
-                      {(inv as any).conversion_status !== 'converted' && inv.payment_status === 'paid' && (
-                        <button onClick={() => handleConvertToInvoice(inv)} disabled={convertingId === inv.id} className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold" title="Convert to Tax Invoice">
-                          {convertingId === inv.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Convert
+                      {(inv as any).conversion_status !== 'converted' && (
+                        <button onClick={() => handleOpenConvertModal(inv)} className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold" title="Convert to Tax Invoice">
+                          <Sparkles size={14} /> Convert
                         </button>
                       )}
                       <button onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Proforma Invoice"><Edit size={18} /></button>
@@ -431,9 +432,9 @@ export default function ProformaInvoices() {
                 </div>
                 
                 <div className="flex flex-col gap-2 pt-2 border-t border-shadow-darker/5">
-                  {(inv as any).conversion_status !== 'converted' && inv.payment_status === 'paid' && (
-                    <button onClick={() => handleConvertToInvoice(inv)} disabled={convertingId === inv.id} className="neo-btn !p-2 w-full text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex justify-center items-center gap-1 text-xs font-bold mb-1">
-                      {convertingId === inv.id ? <><Loader2 size={14} className="animate-spin" /><span>Converting...</span></> : <><Sparkles size={14} /><span>Convert to Tax Invoice</span></>}
+                  {(inv as any).conversion_status !== 'converted' && (
+                    <button onClick={() => handleOpenConvertModal(inv)} className="neo-btn !p-2 w-full text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex justify-center items-center gap-1 text-xs font-bold mb-1">
+                      <Sparkles size={14} /><span>Convert to Tax Invoice</span>
                     </button>
                   )}
                   <div className="flex items-center gap-1">
@@ -474,6 +475,16 @@ export default function ProformaInvoices() {
           documentType="Proforma Invoice"
           customer={customers[shareInvoice.customer_id]}
           settings={settings}
+        />
+      )}
+
+      {convertModalDoc && (
+        <ConvertDocumentModal
+          isOpen={!!convertModalDoc}
+          onClose={() => setConvertModalDoc(null)}
+          sourceDoc={convertModalDoc}
+          sourceType="proforma"
+          onConverted={handleConvertedSuccess}
         />
       )}
     </div>

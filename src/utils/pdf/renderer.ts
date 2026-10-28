@@ -149,11 +149,21 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
     .map((t: string) => `<li>${escapeHtml(t)}</li>`)
     .join('');
 
-  const companyDetails = [
-    settings?.companyAddress ? escapeHtml(settings.companyAddress).replace(/\n/g, '<br>') : '',
-    settings?.companyGstin ? `<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}<br>` : '',
-    settings?.companyEmail ? `<strong>Email:</strong> ${escapeHtml(settings.companyEmail)}` : '',
-  ].join('');
+  const companyParts: string[] = [];
+  if (settings?.companyAddress) {
+    companyParts.push(escapeHtml(settings.companyAddress).replace(/\n/g, '<br>'));
+  }
+  if (settings?.companyGstin) {
+    companyParts.push(`<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}`);
+  }
+  if (settings?.companyPhone) {
+    companyParts.push(`<strong>Phone:</strong> ${escapeHtml(settings.companyPhone)}`);
+  }
+  if (settings?.companyEmail) {
+    companyParts.push(`<strong>Email:</strong> ${escapeHtml(settings.companyEmail)}`);
+  }
+
+  const companyDetails = companyParts.join('<br>');
 
   return `
     <div id="quotation-paper-wrapper">
@@ -329,10 +339,6 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
 
 export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   const { docData, customer, docType } = ctx;
-  if (docType === 'Cash Memo' && (docData as any).payment_status !== 'paid') {
-    alert('Mark this Cash Memo as Paid to enable PDF download.');
-    return;
-  }
 
   const html = buildDocumentHtml(theme, ctx);
   const container = document.createElement('div');

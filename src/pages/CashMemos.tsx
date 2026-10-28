@@ -362,17 +362,9 @@ export default function CashMemos() {
                   <td className="p-4 text-center">
                     <div className="flex justify-center items-center gap-2">
                       <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Cash Memo"><Edit size={18} /></button>
-                      {memo.payment_status === 'paid' ? (
-                        <>
-                          <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
-                          <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
-                          <button onClick={() => openShareModal(memo)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
-                        </>
-                      ) : (
-                        <span className="text-[10px] text-secondary/60 italic max-w-[120px] leading-tight text-center">
-                          Mark Paid to download
-                        </span>
-                      )}
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                      <button onClick={() => openShareModal(memo)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
                       <button onClick={() => deleteCashMemo(memo.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Cash Memo"><Trash2 size={18} /></button>
                     </div>
                   </td>
@@ -437,19 +429,11 @@ export default function CashMemos() {
                 </div>
                 
                 <div className="flex items-center gap-1 pt-2 border-t border-shadow-darker/5">
-                  <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
-                  {memo.payment_status === 'paid' ? (
-                    <>
-                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
-                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
-                      <button onClick={() => openShareModal(memo)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
-                    </>
-                  ) : (
-                    <div className="flex-[2] flex justify-center py-2 text-[10px] text-secondary/60 italic">
-                      Mark Paid to download PDF
-                    </div>
-                  )}
-                  <button onClick={() => deleteCashMemo(memo.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                  <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors" title="Edit"><Edit size={16} /></button>
+                  <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={16} /></button>
+                  <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={16} /></button>
+                  <button onClick={() => openShareModal(memo)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
+                  <button onClick={() => deleteCashMemo(memo.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors" title="Delete"><Trash2 size={16} /></button>
                 </div>
               </div>
             ))}

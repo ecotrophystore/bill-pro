@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, ShieldCheck, User } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, ShieldCheck, User, Download, FileText } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, functions } from '../lib/firebase';
 import { collection, getDocs, doc, getDoc, updateDoc, Timestamp, serverTimestamp } from 'firebase/firestore';
@@ -10,6 +10,7 @@ import { DiscountSelector } from '../components/Billing/DiscountSelector';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
 import { getNextProposedNumber } from '../utils/numberGenerator';
+import { downloadPDF } from '../utils/pdfGenerator';
 
 
 const exactRound = (num: number) => Math.round(num * 100) / 100;
@@ -169,7 +170,46 @@ export default function CreateCashMemo() {
 
   const totals = calculateTotals();
 
-  const handleGenerateMemo = async () => {
+  const buildCurrentMemoDoc = () => {
+    return {
+      id: id || 'preview',
+      number: documentNumber || 'DRAFT-MEMO',
+      custom_date: memoDate,
+      customer_id: isWalkIn ? 'walk_in' : (selectedCustomerId || null),
+      customer_name: isWalkIn ? (walkInName || 'Walk-in Customer') : (selectedCustomerName || 'Walk-in Customer'),
+      walk_in_customer: isWalkIn,
+      items: items.map(it => ({ ...it, tax_percentage: 0 })),
+      discount_percent: discountPercent,
+      advance_amount: advanceAmount,
+      advance_payment_method: advancePaymentMethod,
+      advance_payment_date: advancePaymentDate,
+      advance_reference_number: advanceReferenceNumber,
+      payment_method_to_show: advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details')),
+      balance_amount: Math.max(0, totals.grandTotal - advanceAmount),
+      payment_status: paymentStatus,
+      payment_date: paymentStatus === 'paid' ? advancePaymentDate : null,
+      subtotal: totals.subtotal,
+      discount_amount: totals.discountAmount,
+      charge_amount: totals.chargeAmount,
+      round_off: totals.roundOff,
+      grand_total: totals.grandTotal,
+      created_at: { toDate: () => new Date(memoDate) }
+    };
+  };
+
+  const getCustomerObjOrName = () => {
+    if (isWalkIn) return walkInName || 'Walk-in Customer';
+    const found = customers.find(c => c.id === selectedCustomerId);
+    return found || selectedCustomerName || 'Walk-in Customer';
+  };
+
+  const handleDownloadPdf = async (action: 'download' | 'view' = 'download') => {
+    const memoDoc = buildCurrentMemoDoc();
+    const customer = getCustomerObjOrName();
+    await downloadPDF(memoDoc as any, customer, 'Cash Memo', action, companySettings);
+  };
+
+  const handleGenerateMemo = async (andDownload = false) => {
     if (!isWalkIn && !selectedCustomerId && !selectedCustomerName) {
       alert("Please select a customer.");
       return;
@@ -210,6 +250,13 @@ export default function CreateCashMemo() {
           payment_status: paymentStatus,
           payment_date: paymentStatus === 'paid' ? advancePaymentDate : null,
         });
+
+        if (andDownload) {
+          const memoDoc = buildCurrentMemoDoc();
+          const customer = getCustomerObjOrName();
+          await downloadPDF(memoDoc as any, customer, 'Cash Memo', 'download', companySettings);
+        }
+
         navigate('/cash-memos');
       } catch (error) {
         console.error("Error updating cash memo:", error);
@@ -246,6 +293,13 @@ export default function CreateCashMemo() {
       };
 
       await createCashMemoFn({ memoData });
+
+      if (andDownload) {
+        const memoDoc = buildCurrentMemoDoc();
+        const customer = getCustomerObjOrName();
+        await downloadPDF(memoDoc as any, customer, 'Cash Memo', 'download', companySettings);
+      }
+
       navigate('/cash-memos');
     } catch (error) {
       console.warn("Cloud function failed, attempting client-side save fallback:", error);
@@ -271,6 +325,13 @@ export default function CreateCashMemo() {
         };
         const { clientCreateCashMemo } = await import('../utils/clientBillingCreator');
         await clientCreateCashMemo(memoData);
+
+        if (andDownload) {
+          const memoDoc = buildCurrentMemoDoc();
+          const customer = getCustomerObjOrName();
+          await downloadPDF(memoDoc as any, customer, 'Cash Memo', 'download', companySettings);
+        }
+
         navigate('/cash-memos');
       } catch (clientError) {
         console.error("Client-side fallback also failed:", clientError);
@@ -292,19 +353,40 @@ export default function CreateCashMemo() {
 
   return (
     <div className="space-y-4 animate-fade-in w-full max-w-[1440px] mx-auto px-2 sm:px-4">
-      <div className="flex items-center gap-3 mb-4">
-        <button onClick={() => navigate('/cash-memos')} className="p-2 neo-btn !px-3 !py-2">
-          <ArrowLeft size={18} className="text-secondary" />
-        </button>
-        <div>
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight text-primary-dark">
-              {id ? 'Edit Cash Memo' : 'New Cash Memo'}
-            </h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/cash-memos')} className="p-2 neo-btn !px-3 !py-2">
+            <ArrowLeft size={18} className="text-secondary" />
+          </button>
+          <div>
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-bold tracking-tight text-primary-dark">
+                {id ? 'Edit Cash Memo' : 'New Cash Memo'}
+              </h1>
+            </div>
+            <p className="text-xs text-secondary mt-0.5">
+              {id ? 'Update the details of the selected cash memo.' : 'Choice 1a: Generating memo with MEMO/ sequence. Choice 3b: GST set to 0%.'}
+            </p>
           </div>
-          <p className="text-xs text-secondary mt-0.5">
-            {id ? 'Update the details of the selected cash memo.' : 'Choice 1a: Generating memo with MEMO/ sequence. Choice 3b: GST set to 0%.'}
-          </p>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => handleDownloadPdf('view')}
+            className="neo-btn !py-2 !px-3 text-xs font-semibold text-secondary hover:text-primary-dark flex items-center gap-1.5"
+            title="Preview Cash Memo PDF"
+          >
+            <FileText size={15} /> Preview
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDownloadPdf('download')}
+            className="neo-btn !py-2 !px-3 text-xs font-semibold text-primary hover:text-primary-dark flex items-center gap-1.5"
+            title="Download Cash Memo PDF"
+          >
+            <Download size={15} /> Download PDF
+          </button>
         </div>
       </div>
 
@@ -702,18 +784,46 @@ export default function CreateCashMemo() {
           </div>
 
           <div className="neo-card p-3 space-y-2.5 shadow-neo-raised border border-primary/10">
-            <div className="bg-primary/5 text-primary-dark px-3 py-2 rounded-lg text-sm border border-primary/10 mb-4 flex gap-2 items-start">
+            <div className="bg-primary/5 text-primary-dark px-3 py-2 rounded-lg text-sm border border-primary/10 mb-2 flex gap-2 items-start">
               <ShieldCheck size={18} className="mt-0.5 shrink-0 text-primary" />
               <span>{id ? 'Editing existing document.' : 'Choice 1a enabled. This document will utilize the <strong>MEMO/</strong> sequence.'}</span>
             </div>
+            
             <button 
-                className="w-full neo-btn-primary flex justify-center items-center gap-2"
-                onClick={handleGenerateMemo}
-                disabled={isSaving}
+              className="w-full neo-btn-primary flex justify-center items-center gap-2"
+              onClick={() => handleGenerateMemo(false)}
+              disabled={isSaving}
+            >
+              {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
+              {isSaving ? (id ? 'Updating...' : 'Generating...') : (id ? 'Update Cash Memo' : 'Generate Cash Memo')}
+            </button>
+
+            <button 
+              type="button"
+              className="w-full neo-btn flex justify-center items-center gap-2 font-semibold text-xs py-2.5 border border-primary/30 text-primary-dark hover:bg-primary/10 transition-colors"
+              onClick={() => handleGenerateMemo(true)}
+              disabled={isSaving}
+            >
+              <Download size={16} className="text-primary" />
+              {isSaving ? 'Processing...' : (id ? 'Update & Download PDF' : 'Save & Download PDF')}
+            </button>
+
+            <div className="flex gap-2 pt-1 border-t border-shadow-darker/10">
+              <button
+                type="button"
+                onClick={() => handleDownloadPdf('view')}
+                className="flex-1 neo-btn !py-1.5 text-xs text-secondary hover:text-primary-dark flex items-center justify-center gap-1"
               >
-                {isSaving ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                {isSaving ? (id ? 'Updating...' : 'Generating...') : (id ? 'Update Cash Memo' : 'Generate Cash Memo')}
+                <FileText size={14} /> Preview
               </button>
+              <button
+                type="button"
+                onClick={() => handleDownloadPdf('download')}
+                className="flex-1 neo-btn !py-1.5 text-xs text-secondary hover:text-primary-dark flex items-center justify-center gap-1"
+              >
+                <Download size={14} /> Download PDF
+              </button>
+            </div>
           </div>
         </div>
       </div>

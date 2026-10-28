@@ -28,9 +28,11 @@ import {
   ChevronDown,
   Command,
   Plus,
+  Sparkles,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
+import { useAi } from '../../contexts/AiContext';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
 import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
@@ -122,6 +124,7 @@ export function AppLayout() {
   }, [navigate]);
 
   const { logout, dbUser } = useAuth();
+  const { toggleAi } = useAi();
 
   // Helper to identify category for path
   const getActiveCategoryForPath = (pathname: string): string | null => {
@@ -409,6 +412,16 @@ export function AppLayout() {
               />
             </div>
 
+            {/* Ask Bill Pro AI Assistant Trigger */}
+            <button
+              onClick={toggleAi}
+              className="p-2 neo-btn !rounded-full !px-3 flex items-center gap-1.5 text-primary-dark hover:text-primary transition-colors"
+              title="Ask Bill Pro AI Assistant"
+            >
+              <Sparkles size={18} className="text-primary" />
+              <span className="hidden xl:inline text-xs font-semibold">Ask Bill Pro</span>
+            </button>
+
             {/* User Avatar */}
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full neo-card !p-0 overflow-hidden flex items-center justify-center shrink-0">
               <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold text-xs" title={`Role: ${dbUser?.role || 'User'}`}>
@@ -423,7 +436,7 @@ export function AppLayout() {
           </div>
         </header>
 
-        <div className="p-3 sm:p-4 md:p-8 flex-1 w-full max-w-[1440px] mx-auto min-w-0 pb-24 md:pb-8">
+        <div className="p-3 sm:p-4 md:p-8 flex-1 w-full max-w-[1440px] mx-auto min-w-0 pb-28 sm:pb-32 md:pb-8">
           <Outlet />
         </div>
       </main>
