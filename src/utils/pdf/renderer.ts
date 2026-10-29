@@ -150,10 +150,11 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
     .join('');
 
   const companyParts: string[] = [];
-  if (settings?.companyAddress) {
-    companyParts.push(escapeHtml(settings.companyAddress).replace(/\n/g, '<br>'));
+  const fullAddress = settings?.companyAddress || [settings?.companyCity, settings?.companyState, settings?.companyPincode].filter(Boolean).join(', ');
+  if (fullAddress) {
+    companyParts.push(escapeHtml(fullAddress).replace(/\n/g, '<br>'));
   }
-  if (settings?.companyGstin) {
+  if (isGstBill && settings?.companyGstin) {
     companyParts.push(`<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}`);
   }
   if (settings?.companyPhone) {
@@ -223,13 +224,13 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
       <div id="quotation-paper">
           <div class="header">
               <div>
-                  ${docType === 'Cash Memo' ? '' : `
-                      ${settings?.companyLogo ? `<img src="${settings.companyLogo}" style="max-height: 50px; margin-bottom: 10px;" />` : ''}
-                      <h1 class="company-name">${escapeHtml(settings?.companyName || 'Company Name')}</h1>
-                      <div class="company-details">
-                          ${companyDetails}
-                      </div>
-                  `}
+                  ${settings?.companyLogo ? `<img src="${settings.companyLogo}" style="max-height: 50px; margin-bottom: 10px;" />` : ''}
+                  <h1 class="company-name">${escapeHtml(settings?.companyName || 'ECOTROPHY INNOVATIONS (OPC) PVT LTD')}</h1>
+                  ${companyDetails ? `
+                  <div class="company-details">
+                      ${companyDetails}
+                  </div>
+                  ` : ''}
               </div>
               <div class="quote-meta">
                   <h2 class="quote-label">${docType}</h2>
