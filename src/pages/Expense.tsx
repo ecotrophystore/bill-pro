@@ -138,6 +138,7 @@ export default function ExpensePage() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [originalCropFile, setOriginalCropFile] = useState<File | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
   const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
   const [expandedPurpose, setExpandedPurpose] = useState<string | null>(null);
@@ -317,6 +318,7 @@ export default function ExpensePage() {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const selectedFile = e.dataTransfer.files[0];
       if (selectedFile.type.startsWith('image/')) {
+        setOriginalCropFile(selectedFile);
         const reader = new FileReader();
         reader.onload = (event) => {
           setCropImageUrl(event.target?.result as string);
@@ -333,6 +335,7 @@ export default function ExpensePage() {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       if (selectedFile.type.startsWith('image/')) {
+        setOriginalCropFile(selectedFile);
         const reader = new FileReader();
         reader.onload = (event) => {
           setCropImageUrl(event.target?.result as string);
@@ -354,6 +357,7 @@ export default function ExpensePage() {
   const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
+      setOriginalCropFile(selectedFile);
       const reader = new FileReader();
       reader.onload = (event) => {
         setCropImageUrl(event.target?.result as string);
@@ -2661,9 +2665,22 @@ export default function ExpensePage() {
           onClose={() => {
             setIsCropModalOpen(false);
             setCropImageUrl(null);
+            setOriginalCropFile(null);
           }}
           imageUrl={cropImageUrl}
-          onCropComplete={handleCropComplete}
+          originalFile={originalCropFile}
+          onCropComplete={(cropped) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(cropped);
+          }}
+          onSkipCrop={(raw) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            processFile(raw);
+          }}
         />
       )}
 

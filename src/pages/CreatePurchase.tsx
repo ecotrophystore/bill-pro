@@ -48,6 +48,7 @@ export default function CreatePurchase() {
 
   const [confidenceInfo, setConfidenceInfo] = useState<any>({});
   const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [originalCropFile, setOriginalCropFile] = useState<File | null>(null);
   const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -71,6 +72,7 @@ export default function CreatePurchase() {
         return;
       }
       
+      setOriginalCropFile(selectedFile);
       const reader = new FileReader();
       reader.onload = (event) => {
         setCropImageUrl(event.target?.result as string);
@@ -779,9 +781,22 @@ export default function CreatePurchase() {
           onClose={() => {
             setIsCropModalOpen(false);
             setCropImageUrl(null);
+            setOriginalCropFile(null);
           }}
           imageUrl={cropImageUrl}
-          onCropComplete={handleCropComplete}
+          originalFile={originalCropFile}
+          onCropComplete={(cropped) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(cropped);
+          }}
+          onSkipCrop={(raw) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(raw);
+          }}
         />
       )}
     </div>
