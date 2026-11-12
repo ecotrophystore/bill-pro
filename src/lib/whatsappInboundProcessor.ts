@@ -1,6 +1,7 @@
 import { collection, query, where, getDocs, addDoc, doc, setDoc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { analyzeIncomingWhatsAppMessage, type WhatsAppAiAnalysisResult } from './whatsappAiAnalyzer';
+import { resolveLeadAssignment } from '../services/leadAssignmentService';
 
 export interface InboundMessagePayload {
   senderPhone: string;
@@ -88,11 +89,32 @@ export async function processInboundWhatsAppMessage(
   const leadName = aiAnalysis.extracted_details.name || senderName || existingLeadData?.name || `Lead +${formattedPhone}`;
   const initialStage = 'new_enquiry';
 
+  if (!leadId && aiAnalysis.is_business_lead !== true) {
+    return {
+      leadId: '',
+      isNewLead: false,
+      leadName,
+      pipelineStage: 'skipped',
+      qualificationStatus: aiAnalysis.qualification_status,
+      aiAnalysis,
+    };
+  }
+
   if (!leadId) {
     // 4A. CREATE NEW LEAD - Auto-assign pipeline based on quantity, start at initial stage
     isNewLead = true;
     const qty = Number(aiAnalysis.extracted_details.quantity) || 0;
     const initialPipelineId = qty >= 100 ? 'bulk_order' : qty >= 10 ? 'regular_order' : 'small_order';
+    const autoAssignment = await resolveLeadAssignment({
+      source: 'whatsapp_inbound',
+      platform: 'meta',
+      pipelineId: initialPipelineId,
+      requiredQuantity: aiAnalysis.extracted_details.quantity || '',
+      location: aiAnalysis.extracted_details.location || '',
+      name: leadName,
+      company: aiAnalysis.extracted_details.company || '',
+      requirement: aiAnalysis.extracted_details.requirement || messageText,
+    }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
 
     const leadRef = await addDoc(collection(db, 'leads'), {
       name: leadName,
@@ -108,6 +130,16 @@ export async function processInboundWhatsAppMessage(
       urgency: aiAnalysis.extracted_details.urgency || 'medium',
       pipeline_id: initialPipelineId,
       status: initialStage,
+      owner_id: autoAssignment.assigned ? autoAssignment.ownerId : '',
+      ownerId: autoAssignment.assigned ? autoAssignment.ownerId : '',
+      sales_person: autoAssignment.assigned ? autoAssignment.ownerName : '',
+      ...(autoAssignment.assigned
+        ? {
+            assigned_at: serverTimestamp(),
+            assigned_by: 'auto_assignment',
+            assignment_rule_name: autoAssignment.ruleName || autoAssignment.mode,
+          }
+        : {}),
       source: 'whatsapp_inbound',
       sourceType: 'whatsapp',
       platform: 'meta',

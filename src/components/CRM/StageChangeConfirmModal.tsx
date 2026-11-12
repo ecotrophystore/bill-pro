@@ -22,6 +22,7 @@ import {
   type StageMoveResult,
 } from '../../services/stageNotificationService';
 import { buildTemplateContext, renderTemplateText } from '../../utils/templateVariables';
+import { formatWhatsAppNumberDisplay } from '../../utils/whatsappNumberUtils';
 
 interface StageChangeConfirmModalProps {
   isOpen: boolean;
@@ -233,8 +234,13 @@ export function StageChangeConfirmModal({
                       <Phone size={12} /> WhatsApp Message
                     </span>
                     <div className="flex items-center gap-2 flex-wrap">
+                      {(lead.source_whatsapp_number || lead.source_whatsapp_label) && (
+                        <span className="text-[10px] font-mono bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded border border-emerald-300">
+                          From: {formatWhatsAppNumberDisplay(lead.source_whatsapp_number) || lead.source_whatsapp_label}
+                        </span>
+                      )}
                       <span className="text-[10px] text-emerald-600 font-normal">
-                        To: {lead.phone || 'No phone'}
+                        To: {lead.phone || `${lead.name} (WhatsApp contact match)`}
                       </span>
                       {lead.phone && (
                         <button

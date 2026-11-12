@@ -58,11 +58,19 @@ import {
   DEFAULT_QUANTITY_PIPELINES,
 } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
+import { useAuth } from '../contexts/AuthContext';
+import { isAdminUser, isLeadAssignedToUser } from '../utils/leadVisibility';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner';
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
-import { openWhatsAppWebDirect } from '../services/stageNotificationService';
+import {
+  getAutoSendOnStageMoveEnabled,
+  openWhatsAppWebDirect,
+  runAutoStageMoveWithToast,
+  stageRequiresReason,
+  subscribeAutoSendOnStageMoveChange,
+} from '../services/stageNotificationService';
 import { STAGE_PHASES, type StagePhase } from './PipelineBoard';
 import {
   createLeadNote,
@@ -134,6 +142,8 @@ export default function LeadDetail() {
   const [composerText, setComposerText] = useState('');
   const [dismissedReassign, setDismissedReassign] = useState(false);
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
+  const isAdmin = isAdminUser(dbUser);
 
   // Inline Note Form State
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -163,7 +173,14 @@ export default function LeadDetail() {
     }
   };
 
-  // Stage change modal state
+  // Stage change modal state & instant auto-send preference
+  const [autoSendOnMove, setAutoSendOnMove] = useState<boolean>(() => getAutoSendOnStageMoveEnabled());
+  useEffect(() => {
+    return subscribeAutoSendOnStageMoveChange((enabled) => {
+      setAutoSendOnMove(enabled);
+    });
+  }, []);
+
   const [stageModalState, setStageModalState] = useState<{
     isOpen: boolean;
     fromStage: PipelineStage;
@@ -388,7 +405,7 @@ export default function LeadDetail() {
     return null;
   }, [lead, form.required_quantity, form.value, pipelines, dismissedReassign]);
 
-  const handleStageSelectChange = (newStageId: string) => {
+  const handleStageSelectChange = async (newStageId: string) => {
     if (!lead || newStageId === lead.status) return;
 
     const fromStage = activeStages.find((s) => s.id === (lead.status || 'new_enquiry')) || {
@@ -400,11 +417,23 @@ export default function LeadDetail() {
       label: newStageId,
     };
 
-    setStageModalState({
-      isOpen: true,
+    if (!autoSendOnMove || stageRequiresReason(toStage)) {
+      setStageModalState({
+        isOpen: true,
+        fromStage,
+        toStage,
+      });
+      return;
+    }
+
+    const res = await runAutoStageMoveWithToast({
+      lead,
       fromStage,
       toStage,
+      pipelineId: activePipeline.id,
+      pipelineName: activePipeline.name,
     });
+    setFeedback(res.message);
   };
 
   const handleReassignPipeline = async (targetPipelineId: string) => {
@@ -440,12 +469,17 @@ export default function LeadDetail() {
         event_date: form.event_date.trim(),
         delivery_date: form.delivery_date.trim(),
         trophy_size: form.trophy_size.trim(),
-        sales_person: form.sales_person.trim(),
+        ...(isAdmin
+          ? {
+              sales_person: form.sales_person.trim(),
+              owner_id: form.owner_id.trim(),
+              ownerId: form.owner_id.trim(),
+            }
+          : {}),
         design_person: form.design_person.trim(),
         tracking_number: form.tracking_number.trim(),
         source: form.source.trim(),
         campaign: form.campaign.trim(),
-        owner_id: form.owner_id.trim(),
         reason: form.reason.trim(),
         updated_at: serverTimestamp(),
       };
@@ -563,6 +597,23 @@ export default function LeadDetail() {
           <ArrowLeft size={16} /> Back to pipeline
         </Link>
         <div className="neo-card text-center py-16 text-secondary">Customer record not found.</div>
+      </div>
+    );
+  }
+
+  if (dbUser && !isLeadAssignedToUser(lead, dbUser)) {
+    return (
+      <div className="space-y-4 max-w-xl mx-auto py-12">
+        <Link to="/pipeline" className="inline-flex items-center gap-2 text-primary-dark font-semibold text-xs">
+          <ArrowLeft size={16} /> Back to My Pipeline
+        </Link>
+        <div className="neo-card text-center py-12 space-y-2 border border-rose-200 bg-rose-50/40">
+          <ShieldCheck size={28} className="mx-auto text-rose-600" />
+          <h2 className="text-base font-extrabold text-primary-dark">Access Restricted</h2>
+          <p className="text-xs text-secondary max-w-md mx-auto leading-relaxed">
+            This lead is not assigned to you. Only the administrator or the assigned team member can view this lead record.
+          </p>
+        </div>
       </div>
     );
   }
@@ -1186,16 +1237,38 @@ export default function LeadDetail() {
               </div>
 
               <div className="space-y-3 text-xs">
-                <div>
-                  <label className="font-bold text-primary-dark block mb-1">Assigned Sales Person</label>
-                  <input
-                    type="text"
-                    className="neo-input w-full"
-                    placeholder="Sales rep name"
-                    value={form.sales_person}
-                    onChange={(e) => setForm({ ...form, sales_person: e.target.value })}
-                  />
-                </div>
+                {isAdmin && (
+                  <div>
+                    <label className="font-bold text-primary-dark block mb-1">
+                      Assigned Team Member (Admin Only)
+                    </label>
+                    <select
+                      className="neo-input w-full font-semibold"
+                      value={form.owner_id}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        const matchedUser = users.find((u) => u.id === nextId);
+                        setForm({
+                          ...form,
+                          owner_id: nextId,
+                          sales_person: matchedUser ? matchedUser.name || matchedUser.email : '',
+                        });
+                      }}
+                    >
+                      <option value="">Unassigned</option>
+                      {users
+                        .filter((u) => u.is_active !== false)
+                        .map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name || u.email} ({u.role.toUpperCase()})
+                          </option>
+                        ))}
+                    </select>
+                    {form.sales_person && !users.some((u) => u.id === form.owner_id) && (
+                      <p className="text-[10px] text-secondary mt-1">Current label: {form.sales_person}</p>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="font-bold text-primary-dark block mb-1">Assigned Design Person</label>

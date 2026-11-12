@@ -28,7 +28,7 @@ export default function Login() {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
-      navigate('/dashboard');
+      navigate('/');
     } catch (err: any) {
       console.error('Auth error:', err);
       setError(err.message || "Failed to authenticate");

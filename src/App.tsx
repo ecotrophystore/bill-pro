@@ -7,6 +7,7 @@ import { AiProvider } from './contexts/AiContext';
 import { AppLayout } from './components/Layout/AppLayout';
 import { VoiceAssistantButton } from './components/AI/VoiceAssistantButton';
 import { VoiceAssistantPanel } from './components/AI/VoiceAssistantPanel';
+import { getDefaultRouteForRole } from './config/roleAccess';
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 
@@ -46,10 +47,29 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (loading) return <div className="min-h-screen bg-transparent flex items-center justify-center font-semibold text-primary">Loading...</div>;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
-  
-  // Admin approval check removed
+
+  if (dbUser && dbUser.is_active === false) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="neo-card max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-bold text-primary-dark">Account Access Suspended</h2>
+          <p className="text-xs text-secondary leading-relaxed">
+            Your account ({dbUser.email}) is currently inactive. Please contact your Administrator or HR team to reactivate access.
+          </p>
+          <button onClick={logout} className="neo-btn-primary text-xs w-full">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return <>{children}</>;
+}
+
+function RoleHomeRedirect() {
+  const { dbUser } = useAuth();
+  return <Navigate to={getDefaultRouteForRole(dbUser?.role)} replace />;
 }
 
 function RouteFallback() {
@@ -82,8 +102,9 @@ export default function App() {
                   </RequireAuth>
                 }
               >
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route index element={<RoleHomeRedirect />} />
                 <Route path="dashboard" element={<Dashboard />} />
+                <Route path="hr" element={<Navigate to="/settings?tab=hr_team" replace />} />
                 <Route path="leads" element={<Leads />} />
                 <Route path="leads/new" element={<AddLead />} />
                 <Route path="leads/:id" element={<LeadDetail />} />
@@ -124,7 +145,7 @@ export default function App() {
                 <Route path="settings" element={<Settings />} />
               </Route>
 
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="*" element={<RoleHomeRedirect />} />
             </Routes>
           </Suspense>
           <VoiceAssistantButton />

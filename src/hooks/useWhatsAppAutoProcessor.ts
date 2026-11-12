@@ -1,15 +1,185 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, limit } from 'firebase/firestore';
+import toast from 'react-hot-toast';
 import { db } from '../lib/firebase';
 import { processInboundWhatsAppMessage } from '../lib/whatsappInboundProcessor';
+import {
+  fetchAllSessions,
+  subscribeToWhatsAppEvents,
+  type SessionInfo
+} from '../services/whatsappMultiSessionService';
+import {
+  getAutoCrmSyncEnabled,
+  subscribeAutoCrmSyncChange,
+  syncWhatsAppLeadToCrm
+} from '../services/whatsappCrmSyncService';
+
+const syncedSseKeys = new Set<string>();
+const syncedBulkBatches = new Set<string>();
 
 /**
  * Background auto-processor hook.
- * Listens for new inbound WhatsApp messages and automatically analyzes and syncs them into the CRM pipeline.
+ * Listens for new inbound WhatsApp messages (Firestore Meta webhooks + live Baileys WhatsApp Web)
+ * and automatically classifies & syncs leads into the right CRM pipeline and stage.
  */
 export function useWhatsAppAutoProcessor() {
   const processingRef = useRef<Set<string>>(new Set());
+  const sessionsByIdRef = useRef<Record<string, SessionInfo>>({});
+  const [autoCrmEnabled, setAutoCrmEnabled] = useState<boolean>(() => getAutoCrmSyncEnabled());
 
+  useEffect(() => {
+    return subscribeAutoCrmSyncChange((enabled) => {
+      setAutoCrmEnabled(enabled);
+    });
+  }, []);
+
+  // 1. Live Baileys Multi-WhatsApp Web -> Automatic CRM Pipeline Sync
+  useEffect(() => {
+    if (!db || !autoCrmEnabled) return;
+
+    const handleDetectedLead = async (payload: {
+      sessionId: string;
+      remoteJid: string;
+      phone?: string;
+      name?: string;
+      sessionLabel?: string;
+      messageText?: string;
+      insight: any;
+    }) => {
+      const { sessionId, remoteJid, insight } = payload;
+      if (!insight || insight.isBusinessLead !== true) return;
+
+      const dedupeKey = `${sessionId}:${remoteJid}:${insight.analyzedAt || ''}`;
+      if (syncedSseKeys.has(dedupeKey)) return;
+      syncedSseKeys.add(dedupeKey);
+
+      try {
+        let matchedSession = sessionsByIdRef.current[sessionId];
+        if (!matchedSession?.phoneNumber) {
+          const allSessions = await fetchAllSessions();
+          allSessions.forEach((s) => {
+            sessionsByIdRef.current[s.id] = s;
+          });
+          matchedSession = sessionsByIdRef.current[sessionId];
+        }
+
+        const outcome = await syncWhatsAppLeadToCrm({
+          sessionId,
+          sessionLabel: payload.sessionLabel || matchedSession?.label,
+          sourceWhatsappNumber: matchedSession?.phoneNumber || '',
+          remoteJid,
+          phone: payload.phone || insight.phone,
+          name: payload.name || insight.leadName,
+          messageText: payload.messageText || insight.requirement,
+          insight,
+          forceCreate: false,
+          triggeredBy: 'auto'
+        });
+
+        if (outcome.action === 'created') {
+          toast.success(
+            `New WhatsApp Lead added: ${outcome.leadName} → ${outcome.pipelineName} (${outcome.stageLabel})`,
+            { duration: 5000 }
+          );
+        } else if (outcome.action === 'updated') {
+          toast.success(
+            `WhatsApp Lead updated: ${outcome.leadName} (${outcome.pipelineName} • ${outcome.stageLabel})`,
+            { duration: 4000 }
+          );
+        }
+      } catch (err) {
+        console.warn('[AutoProcessor] Baileys CRM sync skipped:', err);
+      }
+    };
+
+    let disposed = false;
+    let unsubscribe: (() => void) | null = null;
+
+    fetch('/api/whatsapp/health')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((health) => {
+        if (disposed || !health) return;
+        unsubscribe = subscribeToWhatsAppEvents({
+          onInit: ({ sessions, conversations }) => {
+            (sessions || []).forEach((s) => {
+              sessionsByIdRef.current[s.id] = s;
+            });
+            // Only catch fresh live leads analyzed in the last 3 minutes before reload (never bulk-import old chats)
+            const recentCutoff = Date.now() - 3 * 60 * 1000;
+            (conversations || []).forEach((c) => {
+              if (c.insight?.isBusinessLead === true && (c.insight.analyzedAt || 0) >= recentCutoff) {
+                handleDetectedLead({
+                  sessionId: c.sessionId,
+                  remoteJid: c.remoteJid,
+                  phone: c.phone,
+                  name: c.name,
+                  sessionLabel: c.sessionLabel,
+                  messageText: c.lastMessage,
+                  insight: c.insight
+                });
+              }
+            });
+          },
+          onSessionUpdate: (session) => {
+            sessionsByIdRef.current[session.id] = session;
+          },
+          onLeadDetected: (data) => {
+            handleDetectedLead(data);
+          },
+          onBulkLeadsReady: async ({ sessionId, leads, totalScanned }) => {
+            const batchKey = `${sessionId}:${leads?.length || 0}:${leads?.[0]?.remoteJid || ''}`;
+            if (syncedBulkBatches.has(batchKey)) return;
+            syncedBulkBatches.add(batchKey);
+
+            if (!Array.isArray(leads) || leads.length === 0) return;
+
+            let created = 0;
+            let updated = 0;
+            for (const item of leads) {
+              try {
+                const outcome = await syncWhatsAppLeadToCrm({
+                  sessionId: item.sessionId || sessionId,
+                  sessionLabel: item.sessionLabel || sessionsByIdRef.current[sessionId]?.label,
+                  sourceWhatsappNumber:
+                    item.sourceWhatsappNumber || sessionsByIdRef.current[sessionId]?.phoneNumber || '',
+                  remoteJid: item.remoteJid,
+                  phone: item.phone || item.insight?.phone,
+                  name: item.name || item.insight?.leadName,
+                  messageText: item.messageText || item.insight?.requirement,
+                  insight: item.insight,
+                  forceCreate: false,
+                  triggeredBy: 'auto',
+                  messageTimestamp: item.timestamp
+                });
+                if (outcome.action === 'created') created += 1;
+                else if (outcome.action === 'updated') updated += 1;
+              } catch (err) {
+                console.warn('[AutoProcessor] Bulk QR lead sync skipped:', err);
+              }
+            }
+
+            if (created > 0 || updated > 0) {
+              toast.success(
+                `QR Scan Sync: Added ${created} existing lead(s), updated ${updated} in Pipeline.`,
+                { duration: 6000 }
+              );
+            } else if ((totalScanned || 0) > 0) {
+              toast(`QR Scan Sync: Scanned ${totalScanned} chat(s), existing leads are up to date.`);
+            }
+          }
+        });
+      })
+      .catch(() => {
+        // Backend service on port 5001 is optional in Desktop Browser mode
+      });
+
+    return () => {
+      disposed = true;
+      unsubscribe?.();
+    };
+  }, [autoCrmEnabled]);
+
+  // 2. Legacy Firestore inbound messages listener
   useEffect(() => {
     if (!db) return;
 

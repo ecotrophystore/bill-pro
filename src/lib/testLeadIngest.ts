@@ -2,6 +2,7 @@ import { httpsCallable } from 'firebase/functions';
 import { auth, functions, db } from './firebase';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { runAutomationForLead } from './whatsappAutomationRunner';
+import { resolveLeadAssignment } from '../services/leadAssignmentService';
 
 export async function testLeadIngestHttp(payload: Record<string, any>) {
   if (!functions || !db) {
@@ -13,9 +14,27 @@ export async function testLeadIngestHttp(payload: Record<string, any>) {
     throw new Error('You must be signed in to send a test lead.');
   }
 
+  const autoAssignment = await resolveLeadAssignment({
+    source: payload.source || payload.platform,
+    platform: payload.platform,
+    pipelineId: payload.pipeline_id,
+    name: payload.name,
+    requirement: payload.message,
+    campaign: payload.campaign,
+  }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', mode: 'unassigned' as const }));
+
+  const enrichedPayload = autoAssignment.assigned
+    ? {
+        ...payload,
+        owner_id: autoAssignment.ownerId,
+        ownerId: autoAssignment.ownerId,
+        sales_person: autoAssignment.ownerName,
+      }
+    : payload;
+
   try {
     const callable = httpsCallable(functions, 'testLeadIngest');
-    const result = await callable(payload);
+    const result = await callable(enrichedPayload);
     const data = result.data as {
       ok?: boolean;
       status?: string;
@@ -30,7 +49,7 @@ export async function testLeadIngestHttp(payload: Record<string, any>) {
     }
 
     if (data?.leadId) {
-      runAutomationForLead(data.leadId, payload).catch(e => console.error('[Automation error]:', e));
+      runAutomationForLead(data.leadId, enrichedPayload).catch(e => console.error('[Automation error]:', e));
     }
 
     return data;
@@ -38,7 +57,7 @@ export async function testLeadIngestHttp(payload: Record<string, any>) {
     console.warn("Cloud function testLeadIngest failed, attempting client-side save fallback:", error);
     try {
       const leadData = {
-        ...payload,
+        ...enrichedPayload,
         status: 'new',
         created_at: serverTimestamp(),
         updated_at: serverTimestamp(),

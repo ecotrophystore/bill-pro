@@ -7,6 +7,7 @@ import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import { DiscountSelector } from '../components/Billing/DiscountSelector';
+import { UnitSelector } from '../components/Billing/UnitSelector';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
 import { getNextProposedNumber } from '../utils/numberGenerator';
@@ -91,9 +92,12 @@ export default function CreateQuotation() {
 
           // Check if prefilled from lead URL query parameters
           const searchParams = new URLSearchParams(location.search);
-          const urlName = searchParams.get('name');
+          const urlName = searchParams.get('name') || searchParams.get('leadName');
           const urlPhone = searchParams.get('phone');
           const urlCompany = searchParams.get('company');
+          const urlRequirement = searchParams.get('requirement');
+          const urlQuantity = searchParams.get('quantity');
+          const urlBudget = searchParams.get('budget');
           
           const prefillData = location.state?.prefillData;
 
@@ -141,6 +145,22 @@ export default function CreateQuotation() {
             } else {
               setSelectedCustomerName(urlName);
               if (urlCompany) setCustomerAddress(urlCompany);
+            }
+
+            if (urlRequirement) {
+              const qty = Number(urlQuantity?.replace(/[^0-9]/g, '')) || 1;
+              const rate = urlBudget ? Math.round((Number(urlBudget.replace(/[^0-9]/g, '')) || 0) / (qty || 1)) : 0;
+              setItems([{
+                description: urlRequirement,
+                desc: urlRequirement,
+                hsn_code: '',
+                quantity: qty,
+                rate: rate,
+                discount: 0,
+                tax_percentage: 18,
+                priceTier: 'retail',
+                unit: 'Pcs'
+              }]);
             }
           }
         }
@@ -714,26 +734,14 @@ export default function CreateQuotation() {
                         </div>
                       </div>
                       <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          list="units-list"
-                          className="neo-input w-full text-xs py-1 px-2"
-                          placeholder="Unit"
+                        <UnitSelector
                           value={item.unit || 'Pcs'}
-                          onChange={(e) => {
+                          onChange={(unit) => {
                             const newItems = [...items];
-                            newItems[index].unit = e.target.value;
+                            newItems[index].unit = unit;
                             setItems(newItems);
                           }}
                         />
-                        <datalist id="units-list">
-                          <option value="Pcs" />
-                          <option value="Sq Ft" />
-                          <option value="Kg" />
-                          <option value="Ltr" />
-                          <option value="Mtr" />
-                          <option value="Nos" />
-                        </datalist>
                       </div>
                       <div className="sm:col-span-2">
                         <div className="flex items-center gap-1">

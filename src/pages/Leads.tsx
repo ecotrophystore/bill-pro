@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, doc, onSnapshot, query, where, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, deleteDoc } from 'firebase/firestore';
 import {
   ArrowRight,
   Filter,
@@ -10,20 +10,22 @@ import {
   Columns3,
   Building,
   Phone,
-  DollarSign,
   ExternalLink,
-  CheckCircle2,
-  Clock,
-  Layers,
-  Award,
-  AlertTriangle,
   X,
+  AlertTriangle,
+  GitBranch,
+  UserCheck,
 } from 'lucide-react';
 import { db } from '../lib/firebase';
-import type { Lead, Pipeline } from '../types';
+import type { Lead, Pipeline, User } from '../types';
 import { STANDARD_CRM_STAGES, DEFAULT_QUANTITY_PIPELINES } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { openWhatsAppWebDirect } from '../services/stageNotificationService';
+import { useAuth } from '../contexts/AuthContext';
+import { getLeadOwnerId, isAdminUser, subscribeScopedLeads } from '../utils/leadVisibility';
+import { fetchTeamUsersForAssignment, reassignLeadOwner } from '../services/leadAssignmentService';
+import { LeadAssignmentModal } from '../components/CRM/LeadAssignmentManager';
+import toast from 'react-hot-toast';
 
 function formatDate(value: any) {
   if (!value) return '-';
@@ -40,11 +42,16 @@ export default function Leads() {
   const [status, setStatus] = useState('all');
   const [platform, setPlatform] = useState('all');
   const [selectedPipelineId, setSelectedPipelineId] = useState('all');
+  const [assigneeFilter, setAssigneeFilter] = useState('all');
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
+  const [teamUsers, setTeamUsers] = useState<User[]>([]);
+  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [selectedLeads, setSelectedLeads] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
+  const isAdmin = isAdminUser(dbUser);
 
   const handleDelete = async (id: string) => {
     if (!hasPermission('edit_lead')) {
@@ -91,13 +98,13 @@ export default function Leads() {
   };
 
   useEffect(() => {
-    if (!db) return;
+    if (!db || !dbUser) return;
 
-    const q = query(collection(db, 'leads'));
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        setLeads(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as Lead)));
+    const unsub = subscribeScopedLeads(
+      db,
+      dbUser,
+      (scopedLeads) => {
+        setLeads(scopedLeads);
         setLoading(false);
       },
       (error) => {
@@ -116,7 +123,14 @@ export default function Leads() {
       unsub();
       unsubPipelines();
     };
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchTeamUsersForAssignment()
+      .then(setTeamUsers)
+      .catch(() => {});
+  }, [isAdmin]);
 
   // Filtered Leads
   const filtered = useMemo(() => {
@@ -129,12 +143,23 @@ export default function Leads() {
         if (!matchesPipe) return false;
       }
 
-      // Text search
+      // Admin-only assignee filter
+      if (isAdmin && assigneeFilter !== 'all') {
+        const ownerId = getLeadOwnerId(lead);
+        const repName = String(lead.sales_person || '').trim();
+        if (assigneeFilter === 'unassigned') {
+          if (ownerId || repName) return false;
+        } else if (ownerId !== assigneeFilter && repName !== assigneeFilter) {
+          return false;
+        }
+      }
+
+      // Text search (only include assignee field for Admin)
+      const searchFields = [lead.name, lead.phone, lead.email, lead.source, lead.campaign, lead.id, lead.company, lead.event_name];
+      if (isAdmin) searchFields.push(lead.sales_person);
       const matchesText =
         !text ||
-        [lead.name, lead.phone, lead.email, lead.source, lead.campaign, lead.id, lead.company, lead.event_name, lead.sales_person].some(
-          (value) => String(value || '').toLowerCase().includes(text)
-        );
+        searchFields.some((value) => String(value || '').toLowerCase().includes(text));
 
       // Status filter
       const matchesStatus = status === 'all' || lead.status === status;
@@ -144,7 +169,7 @@ export default function Leads() {
 
       return matchesText && matchesStatus && matchesPlatform;
     });
-  }, [leads, search, status, platform, selectedPipelineId]);
+  }, [leads, search, status, platform, selectedPipelineId, isAdmin, assigneeFilter]);
 
   // Overall KPIs
   const kpis = useMemo(() => {
@@ -181,13 +206,23 @@ export default function Leads() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
           {selectedLeads.length > 0 && hasPermission('edit_lead') && (
             <button
               onClick={() => setShowBulkDeleteConfirm(true)}
               className="neo-btn-primary bg-rose-600 hover:bg-rose-700 text-white flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5"
             >
               <Trash2 size={16} /> Delete Selected ({selectedLeads.length})
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowAssignmentModal(true)}
+              className="neo-btn flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-bold px-4 py-2.5 text-primary"
+              title="Configure automatic lead splitting & team routing rules"
+            >
+              <GitBranch size={16} /> Auto-Assign Rules
             </button>
           )}
           <Link to="/pipeline" className="neo-btn flex-1 sm:flex-none flex justify-center items-center gap-2 text-sm font-semibold px-4 py-2.5">
@@ -318,6 +353,27 @@ export default function Leads() {
                 <option value="google">Google</option>
               </select>
             </div>
+
+            {/* Admin-Only Assignee Filter */}
+            {isAdmin && (
+              <div className="neo-input flex items-center gap-2 flex-1 min-w-0 !px-3">
+                <UserCheck size={16} className="text-primary shrink-0" />
+                <select
+                  aria-label="Filter by assigned team member"
+                  className="bg-transparent border-none outline-none text-sm font-semibold w-full min-w-0 cursor-pointer"
+                  value={assigneeFilter}
+                  onChange={(e) => setAssigneeFilter(e.target.value)}
+                >
+                  <option value="all">All Assignees</option>
+                  <option value="unassigned">Unassigned Only</option>
+                  {teamUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name || u.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
 
@@ -350,6 +406,7 @@ export default function Leads() {
                   <th className="py-3 pr-4 font-semibold">Contact</th>
                   <th className="py-3 pr-4 font-semibold">Order Specs</th>
                   <th className="py-3 pr-4 font-semibold">Stage Status</th>
+                  {isAdmin && <th className="py-3 pr-4 font-semibold">Assigned To</th>}
                   <th className="py-3 pr-4 font-semibold">Created Date</th>
                   <th className="py-3 pr-4 font-semibold text-right">Actions</th>
                 </tr>
@@ -450,6 +507,41 @@ export default function Leads() {
                           {currentStageObj.label}
                         </span>
                       </td>
+
+                      {isAdmin && (
+                        <td className="py-3.5 pr-4">
+                          <select
+                            aria-label={`Assign ${lead.name}`}
+                            className="text-[11px] font-bold bg-surface rounded-lg px-2 py-1 border border-shadow-darker/15 text-primary-dark max-w-[150px]"
+                            value={getLeadOwnerId(lead)}
+                            onChange={async (e) => {
+                              const nextId = e.target.value;
+                              const nextUser = teamUsers.find((u) => u.id === nextId);
+                              try {
+                                await reassignLeadOwner({
+                                  leadId: lead.id,
+                                  ownerId: nextId,
+                                  ownerName: nextUser ? nextUser.name || nextUser.email : '',
+                                  actorId: dbUser?.id,
+                                  actorName: dbUser?.name,
+                                });
+                                toast.success(
+                                  nextUser ? `Assigned ${lead.name} to ${nextUser.name || nextUser.email}` : 'Lead unassigned'
+                                );
+                              } catch (err: any) {
+                                toast.error(err?.message || 'Reassign failed');
+                              }
+                            }}
+                          >
+                            <option value="">Unassigned</option>
+                            {teamUsers.map((u) => (
+                              <option key={u.id} value={u.id}>
+                                {u.name || u.email}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
 
                       <td className="py-3.5 pr-4 text-secondary whitespace-nowrap">{formatDate(lead.created_at)}</td>
 
@@ -602,6 +694,14 @@ export default function Leads() {
             </div>
           </div>
         </div>
+      )}
+
+      {isAdmin && (
+        <LeadAssignmentModal
+          isOpen={showAssignmentModal}
+          onClose={() => setShowAssignmentModal(false)}
+          leads={leads}
+        />
       )}
 
       {/* Bulk Delete Confirmation Modal */}

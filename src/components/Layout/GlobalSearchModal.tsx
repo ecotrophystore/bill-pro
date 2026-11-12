@@ -22,6 +22,8 @@ import {
 import clsx from 'clsx';
 import { db } from '../../lib/firebase';
 import { collection, getDocs, limit, query } from 'firebase/firestore';
+import { useAuth } from '../../contexts/AuthContext';
+import { fetchScopedLeads } from '../../utils/leadVisibility';
 
 interface SearchResultItem {
   id: string;
@@ -60,6 +62,7 @@ interface GlobalSearchModalProps {
 }
 
 export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
+  const { dbUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [remoteResults, setRemoteResults] = useState<SearchResultItem[]>([]);
@@ -180,22 +183,21 @@ export function GlobalSearchModal({ isOpen, onClose }: GlobalSearchModalProps) {
           }
         });
 
-        // 4. Search Leads
-        const leadSnap = await getDocs(query(collection(db, 'leads'), limit(25)));
-        leadSnap.forEach((d) => {
-          const data = d.data();
+        // 4. Search Leads (scoped by role/assignment)
+        const scopedLeads = await fetchScopedLeads(db, dbUser, [limit(25)]);
+        scopedLeads.forEach((data) => {
           const name = (data.name || '').toLowerCase();
           const phone = (data.phone || '').toLowerCase();
           const email = (data.email || '').toLowerCase();
           if (name.includes(queryTerm) || phone.includes(queryTerm) || email.includes(queryTerm)) {
             results.push({
-              id: `lead-${d.id}`,
+              id: `lead-${data.id}`,
               title: data.name || 'Lead',
               subtitle: `${data.phone || data.email || 'No contact'} • Stage: ${data.status || 'New'}`,
               badge: 'Lead',
               badgeColor: 'bg-indigo-50 text-indigo-700 border-indigo-200',
               icon: Users,
-              path: `/leads/${d.id}`,
+              path: `/leads/${data.id}`,
               category: 'Leads',
             });
           }

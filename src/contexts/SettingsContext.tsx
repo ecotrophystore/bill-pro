@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Settings } from '../types';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { useAuth } from './AuthContext';
 
 interface SettingsContextType {
   settings: Settings;
@@ -78,6 +79,7 @@ const SettingsContext = createContext<SettingsContextType>({
 export const useSettings = () => useContext(SettingsContext);
 
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [settings, setSettings] = useState<Settings>(defaultSettings);
 
   useEffect(() => {
@@ -90,8 +92,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.error('Failed to parse settings from localStorage', err);
       }
     }
+  }, []);
 
-    if (db) {
+  useEffect(() => {
+    if (db && user) {
       try {
         const docRef = doc(db, 'system', 'config');
         const unsub = onSnapshot(docRef, (docSnap) => {
@@ -115,7 +119,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.warn('Could not establish settings listener:', err);
       }
     }
-  }, []);
+  }, [user]);
 
   const updateSettings = (newSettings: Partial<Settings>) => {
     const updated = { ...settings, ...newSettings };

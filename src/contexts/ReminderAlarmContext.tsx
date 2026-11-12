@@ -59,7 +59,7 @@ export function ReminderAlarmProvider({ children }: { children: React.ReactNode 
 
   // Listen to active reminders from Firestore
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user) return;
 
     const q = query(
       collection(db, 'lead_notes'),

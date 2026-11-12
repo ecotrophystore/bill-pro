@@ -24,9 +24,10 @@ import {
   ExternalLink,
   ShieldAlert,
   Users,
-  MessageSquare
+  MessageSquare,
+  GitBranch
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import clsx from 'clsx';
 import { useSettings } from '../contexts/SettingsContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -37,11 +38,14 @@ import { getDocumentPreview, getFinancialYearInfo, syncExistingDocumentNumbers }
 
 const MetaIntegrationPanel = lazy(() => import('../components/settings/MetaIntegrationPanel'));
 const PipelineSettingsTab = lazy(() => import('../components/settings/PipelineSettingsTab'));
+const HRManagement = lazy(() => import('./HRManagement'));
+import { LeadAssignmentManager } from '../components/CRM/LeadAssignmentManager';
 
 export default function Settings() {
   const { settings, updateSettings } = useSettings();
   const { dbUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [localSettings, setLocalSettings] = useState(settings);
   const [config, setConfig] = useState({
     invoice_prefix: 'ECO',
@@ -56,7 +60,21 @@ export default function Settings() {
   const [purgingCache, setPurgingCache] = useState(false);
   const [exportingBackup, setExportingBackup] = useState(false);
   const [maintenanceMessage, setMaintenanceMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState('company');
+  const isAdminUser = dbUser?.role === 'admin';
+  const [activeTab, setActiveTab] = useState(() => {
+    const urlTab = new URLSearchParams(location.search).get('tab');
+    if (urlTab) return urlTab;
+    return isAdminUser ? 'company' : 'hr_team';
+  });
+
+  useEffect(() => {
+    const urlTab = new URLSearchParams(location.search).get('tab');
+    if (urlTab) {
+      setActiveTab(urlTab);
+    } else if (dbUser?.role && dbUser.role !== 'admin' && activeTab !== 'hr_team' && activeTab !== 'security') {
+      setActiveTab('hr_team');
+    }
+  }, [location.search, dbUser?.role]);
 
   useEffect(() => {
     async function loadConfig() {
@@ -255,63 +273,81 @@ export default function Settings() {
           <h1 className="text-3xl font-semibold tracking-tight text-primary-dark uppercase">System Configuration</h1>
           <p className="text-secondary mt-1">Manage your company profile, document sequences, payment details, and preferences.</p>
         </div>
-        <button 
-          onClick={handleSave}
-          disabled={saving}
-          className="neo-btn-primary flex items-center gap-2"
-        >
-          {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-          Save Changes
-        </button>
+        {isAdminUser && activeTab !== 'hr_team' && activeTab !== 'lead_assignment' && (
+          <button 
+            onClick={handleSave}
+            disabled={saving}
+            className="neo-btn-primary flex items-center gap-2"
+          >
+            {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+            Save Changes
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
         {/* Left Column: Sidebar-like settings groups */}
         <div className="space-y-4">
-          <button onClick={() => setActiveTab('company')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'company' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <Building size={18} className={activeTab === 'company' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'company' ? "text-primary-dark" : "text-secondary")}>Company Details</span>
-          </button>
-          <button onClick={() => setActiveTab('sequences')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'sequences' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <Hash size={18} className={activeTab === 'sequences' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'sequences' ? "text-primary-dark" : "text-secondary")}>Document Numbering</span>
-          </button>
-          <button onClick={() => setActiveTab('bank')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'bank' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <Building2 size={18} className={activeTab === 'bank' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'bank' ? "text-primary-dark" : "text-secondary")}>Bank Details</span>
-          </button>
-          <button onClick={() => setActiveTab('upi')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'upi' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <QrCode size={18} className={activeTab === 'upi' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'upi' ? "text-primary-dark" : "text-secondary")}>UPI Details</span>
-          </button>
-          <button onClick={() => setActiveTab('gpay')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'gpay' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <Smartphone size={18} className={activeTab === 'gpay' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'gpay' ? "text-primary-dark" : "text-secondary")}>GPay Details</span>
-          </button>
-          <button onClick={() => setActiveTab('other')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'other' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <FileSignature size={18} className={activeTab === 'other' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'other' ? "text-primary-dark" : "text-secondary")}>Other Details</span>
-          </button>
-          <button onClick={() => setActiveTab('system_config')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'system_config' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <SettingsIcon size={18} className={activeTab === 'system_config' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'system_config' ? "text-primary-dark" : "text-secondary")}>System Config</span>
-          </button>
-          <button onClick={() => setActiveTab('financial')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'financial' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <FileText size={18} className={activeTab === 'financial' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'financial' ? "text-primary-dark" : "text-secondary")}>Financial Modules</span>
+          {isAdminUser && (
+            <>
+              <button onClick={() => setActiveTab('company')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'company' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <Building size={18} className={activeTab === 'company' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'company' ? "text-primary-dark" : "text-secondary")}>Company Details</span>
+              </button>
+              <button onClick={() => setActiveTab('sequences')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'sequences' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <Hash size={18} className={activeTab === 'sequences' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'sequences' ? "text-primary-dark" : "text-secondary")}>Document Numbering</span>
+              </button>
+              <button onClick={() => setActiveTab('bank')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'bank' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <Building2 size={18} className={activeTab === 'bank' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'bank' ? "text-primary-dark" : "text-secondary")}>Bank Details</span>
+              </button>
+              <button onClick={() => setActiveTab('upi')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'upi' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <QrCode size={18} className={activeTab === 'upi' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'upi' ? "text-primary-dark" : "text-secondary")}>UPI Details</span>
+              </button>
+              <button onClick={() => setActiveTab('gpay')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'gpay' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <Smartphone size={18} className={activeTab === 'gpay' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'gpay' ? "text-primary-dark" : "text-secondary")}>GPay Details</span>
+              </button>
+              <button onClick={() => setActiveTab('other')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'other' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <FileSignature size={18} className={activeTab === 'other' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'other' ? "text-primary-dark" : "text-secondary")}>Other Details</span>
+              </button>
+              <button onClick={() => setActiveTab('system_config')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'system_config' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <SettingsIcon size={18} className={activeTab === 'system_config' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'system_config' ? "text-primary-dark" : "text-secondary")}>System Config</span>
+              </button>
+              <button onClick={() => setActiveTab('financial')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'financial' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <FileText size={18} className={activeTab === 'financial' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'financial' ? "text-primary-dark" : "text-secondary")}>Financial Modules</span>
+              </button>
+            </>
+          )}
+          <button onClick={() => setActiveTab('hr_team')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'hr_team' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+             <Users size={18} className={activeTab === 'hr_team' ? "text-primary" : "text-secondary"} />
+             <span className={clsx("font-bold", activeTab === 'hr_team' ? "text-primary-dark" : "text-secondary")}>HR & Team</span>
           </button>
           <button onClick={() => setActiveTab('security')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'security' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
              <ShieldIcon size={18} className={activeTab === 'security' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'security' ? "text-primary-dark" : "text-secondary")}>Security & Audits</span>
+             <span className={clsx("font-bold", activeTab === 'security' ? "text-primary-dark" : "text-secondary")}>Security, Roles & Audits</span>
           </button>
-          <button onClick={() => setActiveTab('pipeline_automation')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'pipeline_automation' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <MessageSquare size={18} className={activeTab === 'pipeline_automation' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'pipeline_automation' ? "text-primary-dark" : "text-secondary")}>Pipeline Automation / Stage Messages</span>
-          </button>
-          <button onClick={() => setActiveTab('integrations')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'integrations' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
-             <Database size={18} className={activeTab === 'integrations' ? "text-primary" : "text-secondary"} />
-             <span className={clsx("font-bold", activeTab === 'integrations' ? "text-primary-dark" : "text-secondary")}>Integrations</span>
-          </button>
+          {isAdminUser && (
+            <>
+              <button onClick={() => setActiveTab('pipeline_automation')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'pipeline_automation' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <MessageSquare size={18} className={activeTab === 'pipeline_automation' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'pipeline_automation' ? "text-primary-dark" : "text-secondary")}>Pipeline Automation / Stage Messages</span>
+              </button>
+              <button onClick={() => setActiveTab('lead_assignment')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'lead_assignment' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <GitBranch size={18} className={activeTab === 'lead_assignment' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'lead_assignment' ? "text-primary-dark" : "text-secondary")}>Lead Assignment &amp; Team Split</span>
+              </button>
+              <button onClick={() => setActiveTab('integrations')} className={clsx("w-full text-left p-4 neo-card flex items-center gap-3 transition-all", activeTab === 'integrations' ? "bg-primary/5 border-l-4 border-primary shadow-neo-pressed" : "hover:bg-shadow-darker/5")}>
+                 <Database size={18} className={activeTab === 'integrations' ? "text-primary" : "text-secondary"} />
+                 <span className={clsx("font-bold", activeTab === 'integrations' ? "text-primary-dark" : "text-secondary")}>Integrations</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Right Column: Main settings fields */}
@@ -1049,58 +1085,103 @@ export default function Settings() {
 
               {/* Role Permission Matrix */}
               <div className="neo-card space-y-4">
-                <h4 className="font-bold text-sm text-primary-dark flex items-center gap-2">
-                  <Users size={18} className="text-primary" />
-                  Role-Based Access Control Matrix
-                </h4>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-bold text-sm text-primary-dark flex items-center gap-2">
+                    <Users size={18} className="text-primary" />
+                    Separate Department Access Control Matrix
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('hr_team')}
+                    className="neo-btn-primary !py-1.5 !px-3.5 text-xs flex items-center gap-1.5"
+                  >
+                    <Users size={14} /> Manage Team & Assign Roles
+                  </button>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-shadow-darker/10 text-left text-secondary uppercase tracking-wider bg-transparent">
-                        <th className="py-2.5 px-3 font-semibold">Capability / Area</th>
+                        <th className="py-2.5 px-3 font-semibold">Capability / Module</th>
                         <th className="py-2.5 px-3 font-semibold text-center">Admin</th>
-                        <th className="py-2.5 px-3 font-semibold text-center">Accounts</th>
+                        <th className="py-2.5 px-3 font-semibold text-center">HR</th>
                         <th className="py-2.5 px-3 font-semibold text-center">Sales</th>
+                        <th className="py-2.5 px-3 font-semibold text-center">User</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-shadow-darker/5">
                       <tr>
-                        <td className="py-2 px-3 font-medium text-primary-dark">System Configuration & Integrations</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-secondary">Read Only</td>
-                        <td className="py-2 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">HR Directory & Role Assignment</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Non-Admin</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
                       </tr>
                       <tr>
-                        <td className="py-2 px-3 font-medium text-primary-dark">Invoicing, Quotes & Cash Memos</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-amber-600 font-bold">Create / Edit</td>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">CRM Leads, Pipeline & WhatsApp Agent</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
                       </tr>
                       <tr>
-                        <td className="py-2 px-3 font-medium text-primary-dark">Financial Deletions & Voiding</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-rose-600 font-semibold">Protected</td>
-                        <td className="py-2 px-3 text-center text-rose-600 font-semibold">Protected</td>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">Quotations & Cash Memos</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Create / Edit</td>
                       </tr>
                       <tr>
-                        <td className="py-2 px-3 font-medium text-primary-dark">CRM Leads & WhatsApp Workflows</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-amber-600 font-bold">Move Stages</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">Invoices, Proformas & Customer Library</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Create / Edit</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
                       </tr>
                       <tr>
-                        <td className="py-2 px-3 font-medium text-primary-dark">Audit Logs & Discrepancy Trail</td>
-                        <td className="py-2 px-3 text-center text-emerald-600 font-bold">✓ Full</td>
-                        <td className="py-2 px-3 text-center text-secondary">View Only</td>
-                        <td className="py-2 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">Staff Expenses</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Submit</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">Purchases, Reconciliation & System Config</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2.5 px-3 font-medium text-primary-dark">Reports & Audit Logs</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ Full</td>
+                        <td className="py-2.5 px-3 text-center text-primary font-bold">✓ View / Export</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
+                        <td className="py-2.5 px-3 text-center text-secondary">Restricted</td>
                       </tr>
                     </tbody>
                   </table>
                 </div>
               </div>
 
-              {/* Quick Links to Audit Log and Auditor */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Quick Links to HR Directory, Audit Log and Auditor */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div 
+                  onClick={() => setActiveTab('hr_team')}
+                  className="neo-card p-4 flex items-center justify-between cursor-pointer hover:bg-shadow-darker/5 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-surface transition-colors">
+                      <Users size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm text-primary-dark">HR & Team Roles</p>
+                      <p className="text-xs text-secondary">Assign HR, Sales, User & Admin access</p>
+                    </div>
+                  </div>
+                  <ExternalLink size={16} className="text-secondary group-hover:text-primary transition-colors" />
+                </div>
+
                 <div 
                   onClick={() => navigate('/audit-logs')}
                   className="neo-card p-4 flex items-center justify-between cursor-pointer hover:bg-shadow-darker/5 transition-colors group"
@@ -1111,29 +1192,42 @@ export default function Settings() {
                     </div>
                     <div>
                       <p className="font-bold text-sm text-primary-dark">System Audit Logs</p>
-                      <p className="text-xs text-secondary">View append-only database transaction history</p>
+                      <p className="text-xs text-secondary">View database transaction & role trail</p>
                     </div>
                   </div>
                   <ExternalLink size={16} className="text-secondary group-hover:text-primary transition-colors" />
                 </div>
 
-                <div 
-                  onClick={() => navigate('/auditor')}
-                  className="neo-card p-4 flex items-center justify-between cursor-pointer hover:bg-shadow-darker/5 transition-colors group"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-700 group-hover:bg-indigo-600 group-hover:text-surface transition-colors">
-                      <ShieldCheck size={20} />
+                {isAdminUser && (
+                  <div 
+                    onClick={() => navigate('/auditor')}
+                    className="neo-card p-4 flex items-center justify-between cursor-pointer hover:bg-shadow-darker/5 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-surface transition-colors">
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-primary-dark">AI Audit Trail</p>
+                        <p className="text-xs text-secondary">Run financial reconciliation checks</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-bold text-sm text-primary-dark">AI Audit Trail</p>
-                      <p className="text-xs text-secondary">Run financial reconciliation and anomaly checks</p>
-                    </div>
+                    <ExternalLink size={16} className="text-secondary group-hover:text-primary transition-colors" />
                   </div>
-                  <ExternalLink size={16} className="text-secondary group-hover:text-indigo-600 transition-colors" />
-                </div>
+                )}
               </div>
             </section>
+          )}
+
+          {activeTab === 'hr_team' && (
+            <Suspense fallback={
+              <div className="flex items-center justify-center p-12 text-secondary">
+                <Loader2 className="animate-spin mr-2" size={24} />
+                <span>Loading HR & Team Access...</span>
+              </div>
+            }>
+              <HRManagement />
+            </Suspense>
           )}
 
           {activeTab === 'pipeline_automation' && (
@@ -1145,6 +1239,10 @@ export default function Settings() {
             }>
               <PipelineSettingsTab />
             </Suspense>
+          )}
+
+          {activeTab === 'lead_assignment' && isAdminUser && (
+            <LeadAssignmentManager />
           )}
 
           {activeTab === 'integrations' && (

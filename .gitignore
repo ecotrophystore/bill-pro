@@ -45,3 +45,6 @@ users.json
 .firebase/
 lighthouse-*.json
 scratch_read_events.js
+
+# WhatsApp Multi-Session Storage
+.whatsapp_sessions/

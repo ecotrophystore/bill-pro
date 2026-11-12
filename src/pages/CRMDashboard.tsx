@@ -29,6 +29,8 @@ import type { Lead, LeadActivity, Pipeline } from "../types";
 import { STANDARD_CRM_STAGES, DEFAULT_QUANTITY_PIPELINES } from "../types";
 import { useCRMPermission } from "../hooks/useCRMPermission";
 import { STAGE_PHASES } from "./PipelineBoard";
+import { useAuth } from "../contexts/AuthContext";
+import { subscribeScopedLeads } from "../utils/leadVisibility";
 
 function formatDate(value: any) {
   if (!value) return "-";
@@ -50,6 +52,7 @@ function isOverdue(value: any): boolean {
 export default function CRMDashboard() {
   const navigate = useNavigate();
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
@@ -58,12 +61,13 @@ export default function CRMDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!db) return;
+    if (!db || !dbUser) return;
 
-    const leadsUnsub = onSnapshot(
-      collection(db, "leads"),
-      (snap) => {
-        setLeads(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead)));
+    const leadsUnsub = subscribeScopedLeads(
+      db,
+      dbUser,
+      (scopedLeads) => {
+        setLeads(scopedLeads);
         setLoading(false);
       },
       () => setLoading(false)
@@ -89,7 +93,7 @@ export default function CRMDashboard() {
       pipelinesUnsub();
       activityUnsub();
     };
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
 
   // Filter leads by selected pipeline
   const filteredLeads = useMemo(() => {

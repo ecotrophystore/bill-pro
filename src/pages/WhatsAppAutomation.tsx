@@ -1,297 +1,140 @@
-// @ts-nocheck
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
+import { Bot, Maximize2, Minus, Monitor, RefreshCw, X } from 'lucide-react';
+import { WhatsAppAiAgentHub } from '../components/WhatsAppAutomation/WhatsAppAiAgentHub';
 import {
-  collection, query, orderBy, onSnapshot, addDoc, doc, setDoc, updateDoc, serverTimestamp
-} from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { Bot, Plus, Loader2, Play, Pause, Edit2, Check, AlertCircle, X, Sparkles, Workflow, MessageSquare } from 'lucide-react';
-import { db, functions, auth } from '../lib/firebase';
-import { useCRMPermission } from '../hooks/useCRMPermission';
-import type { WhatsAppAutomation, Pipeline } from '../types';
-import { WorkflowBuilder } from '../components/WhatsAppAutomation/WorkflowBuilder';
-import { WhatsAppAiInbox } from '../components/WhatsAppAutomation/WhatsAppAiInbox';
-import { WhatsAppLiveChat } from '../components/WhatsAppAutomation/WhatsAppLiveChat';
+  getDesktopAppStatus,
+  triggerDesktopAction,
+  type DesktopAppStatus
+} from '../services/desktopControlService';
 
 export default function WhatsAppAutomation() {
-  const { hasPermission } = useCRMPermission();
-  const [activeTab, setActiveTab] = useState<'chat' | 'inbox' | 'workflows'>('chat');
-  const [view, setView] = useState<'list' | 'form' | 'detail'>('list');
-  const [automations, setAutomations] = useState<WhatsAppAutomation[]>([]);
-  const [pipelines, setPipelines] = useState<Pipeline[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  const [draft, setDraft] = useState<Partial<WhatsAppAutomation> | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isError, setIsError] = useState(false);
-  const [activating, setActivating] = useState(false);
+  const isElectronDesktop = Boolean(typeof window !== 'undefined' && window.electronAPI?.isElectron);
+  const [desktopStatus, setDesktopStatus] = useState<DesktopAppStatus | null>(null);
+  const [desktopBusy, setDesktopBusy] = useState(false);
+
+  const refreshStatus = async () => {
+    const st = await getDesktopAppStatus();
+    setDesktopStatus(st);
+  };
 
   useEffect(() => {
-    if (!db) return;
-    const unsub = onSnapshot(
-      collection(db, 'whatsapp_automations'),
-      (snap) => {
-        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as WhatsAppAutomation));
-        data.sort((a, b) => {
-          const aTime = (a as any).createdAt?.toMillis?.() || 0;
-          const bTime = (b as any).createdAt?.toMillis?.() || 0;
-          return bTime - aTime;
-        });
-        setAutomations(data);
-        setLoading(false);
-      },
-      (err) => {
-        console.error('Error fetching automations:', err);
-        setLoading(false);
-      }
-    );
-    const unsubP = onSnapshot(collection(db, 'pipelines'), (snap) => {
-      setPipelines(snap.docs.map(d => ({ id: d.id, ...d.data() } as Pipeline)));
-    });
-    return () => { unsub(); unsubP(); };
-  }, []);
+    if (isElectronDesktop) return;
+    refreshStatus();
+    const timer = setInterval(refreshStatus, 5000);
+    return () => clearInterval(timer);
+  }, [isElectronDesktop]);
 
-  const allPipelines = useMemo(() => {
-    const defaultStub: Pipeline = {
-      id: 'default', name: 'Default Pipeline', scenario: 'General', is_default: true,
-      stages: [
-        { id: 'new', label: 'New' }, { id: 'contacted', label: 'Contacted' },
-        { id: 'qualified', label: 'Qualified' }, { id: 'lost', label: 'Lost' }
-      ],
-      created_at: new Date() as any,
-    };
-    return pipelines.some(p => p.id === 'default') ? pipelines : [defaultStub, ...pipelines];
-  }, [pipelines]);
-
-  const openCreate = () => {
-    setDraft({});
-    setMessage(''); setIsError(false);
-    setView('form');
-  };
-
-  const openEdit = (a: WhatsAppAutomation) => {
-    setDraft(a);
-    setMessage(''); setIsError(false);
-    setView('form');
-  };
-
-  const handleSaveCompiled = async (compiledData: Partial<WhatsAppAutomation>) => {
-    if (!db) {
-      throw new Error('Database is not initialized.');
-    }
-    const uid = auth?.currentUser?.uid ?? 'system';
-    setSaving(true); setIsError(false); setMessage('');
-    try {
-      // Clean and sanitize nodes/edges to remove undefined or non-serializable fields for Firestore
-      const cleanNodes = JSON.parse(JSON.stringify(compiledData.workflowNodes || []));
-      const cleanEdges = JSON.parse(JSON.stringify(compiledData.workflowEdges || []));
-
-      const payload = {
-        ...compiledData,
-        workflowNodes: cleanNodes,
-        workflowEdges: cleanEdges,
-        updatedAt: serverTimestamp(),
-      };
-
-      if (draft?.id) {
-        await setDoc(doc(db, 'whatsapp_automations', draft.id), payload, { merge: true });
-        setMessage(`✓ Updated automation "${payload.name}".`);
-      } else {
-        await addDoc(collection(db, 'whatsapp_automations'), { ...payload, createdBy: uid, createdAt: serverTimestamp() });
-        setMessage(`✓ Created automation "${payload.name}".`);
-      }
-      setView('list');
-    } catch (err: any) {
-      console.error('Error saving automation:', err);
-      setIsError(true);
-      setMessage(err?.message ?? 'Failed to save.');
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const togglePause = async (a: WhatsAppAutomation) => {
-    if (!db) return;
-    const newStatus = a.status === 'active' ? 'paused' : 'active';
-    try {
-      await updateDoc(doc(db, 'whatsapp_automations', a.id), { status: newStatus, updatedAt: serverTimestamp() });
-      setMessage(`Automation ${newStatus}.`);
-    } catch (err: any) { setIsError(true); setMessage(err?.message ?? 'Failed to update status.'); }
-  };
-
-  const doActivate = async (a: WhatsAppAutomation) => {
-    if (!db) return;
-    setActivating(true); setIsError(false); setMessage('');
-    try {
-      if (functions) {
-        try {
-          const fn = httpsCallable(functions, 'activateAutomation');
-          const result: any = await fn({ automationId: a.id });
-          setMessage(`✓ Activated! Enrolled ${result.data?.enrolled ?? 0} leads. Skipped: ${result.data?.skipped ?? 0}.`);
-          return;
-        } catch (fnErr: any) {
-          console.warn('Callable activateAutomation fallback to direct Firestore:', fnErr);
-        }
-      }
-      await updateDoc(doc(db, 'whatsapp_automations', a.id), { 
-        status: 'active', 
-        updatedAt: serverTimestamp() 
-      });
-      setMessage(`✓ Automation "${a.name || 'Automation'}" is now active!`);
-    } catch (err: any) {
-      console.error('Error activating automation:', err);
-      setIsError(true); 
-      setMessage(err?.message ?? 'Activation failed.');
-    } finally { 
-      setActivating(false); 
-    }
-  };
-
-  if (view === 'form' && draft) {
-    return (
-      <WorkflowBuilder 
-        initialData={draft}
-        allPipelines={allPipelines}
-        onSave={handleSaveCompiled}
-        onCancel={() => setView('list')}
-        saving={saving}
-      />
-    );
+  // In EcoBill Desktop, AppLayout keeps WhatsAppWebBrowserView persistently mounted in background & reveals it full-page here
+  if (isElectronDesktop) {
+    return null;
   }
 
+  const isRunning = Boolean(desktopStatus?.running);
+
+  const handleDesktopAction = async (action: 'open' | 'minimize' | 'close') => {
+    setDesktopBusy(true);
+    await triggerDesktopAction(action);
+    // After open, wait a moment then refresh status
+    if (action === 'open') {
+      setTimeout(refreshStatus, 2000);
+    } else {
+      await refreshStatus();
+    }
+    setDesktopBusy(false);
+  };
+
   return (
-    <div className={activeTab === 'chat' ? 'w-full h-[calc(100vh-7rem)] flex flex-col min-h-0' : 'space-y-6 animate-fade-in max-w-6xl mx-auto'}>
-      {/* Header & Tabs */}
+    <div className="space-y-4 animate-fade-in w-full">
+      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap pb-1 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shrink-0">
-            <Bot size={18} className="text-white" />
+          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center shadow-neo-surface shrink-0">
+            <Bot size={18} className="text-surface" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold tracking-tight text-primary-dark">WhatsApp Command Center</h1>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-700 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                Meta Cloud API Active
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-surface shadow-neo-surface text-primary">
+                <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
+                WhatsApp Active
               </span>
             </div>
-            <p className="text-secondary text-xs hidden sm:block">Automated AI lead qualification, 2-way live chat & sequence workflows.</p>
+            <p className="text-secondary text-xs hidden sm:block">
+              Multi-account WhatsApp Web workspace with automated AI lead qualification & CRM actions.
+            </p>
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex items-center p-1 bg-transparent rounded-xl border border-shadow-darker/20 shadow-xs">
+        <div className="flex items-center p-1 bg-surface rounded-card shadow-neo-surface">
+          <span className="flex items-center gap-2 px-4 py-2 rounded-btn text-xs font-bold shadow-neo-pressed text-primary bg-surface">
+            <Monitor size={14} className="text-primary" /> Multi-Account Agent Hub
+          </span>
+        </div>
+      </div>
+
+      {/* Mobile-First EcoBill Desktop Launcher & Window Controls */}
+      <div className="p-3.5 sm:p-4 rounded-card bg-surface shadow-neo-surface border border-shadow-dark flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 text-xs">
+        <div className="space-y-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-extrabold text-primary-dark">
+              Official <span className="text-primary">web.whatsapp.com</span> Internal Chrome Desktop App
+            </p>
+            <span
+              className={`px-2 py-0.5 rounded-full bg-surface shadow-neo-inset text-[10px] font-bold ${
+                isRunning ? 'text-primary' : 'text-secondary'
+              }`}
+            >
+              {isRunning ? '● Running' : 'Ready to Launch'}
+            </span>
+          </div>
+          {isRunning ? (
+            <p className="text-[11px] text-secondary leading-relaxed">
+              EcoBill Desktop is open. Use <strong>Focus</strong>, <strong>Minimize</strong>, or{' '}
+              <strong>Close</strong> to control the window.
+            </p>
+          ) : (
+            <p className="text-[11px] text-secondary leading-relaxed">
+              Click <strong>Open Desktop</strong> — launches instantly via the{' '}
+              <code className="px-1 py-0.5 rounded bg-surface shadow-neo-inset text-primary-dark font-mono">ecobill://</code>{' '}
+              protocol. No terminal, no commands needed.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0 w-full lg:w-auto">
           <button
-            onClick={() => setActiveTab('chat')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'chat'
-                ? 'bg-transparent text-emerald-700 shadow-sm'
-                : 'text-secondary hover:text-primary-dark'
-            }`}
+            onClick={() => handleDesktopAction('open')}
+            disabled={desktopBusy}
+            className="flex-1 sm:flex-none neo-btn-primary !px-3.5 !py-2.5 text-xs font-bold flex items-center justify-center gap-1.5 min-h-[40px] disabled:opacity-60"
           >
-            <MessageSquare size={14} className="text-emerald-500" /> WhatsApp Live Chat
+            <Maximize2 size={14} /> <span>{isRunning ? 'Focus Desktop' : 'Open Desktop'}</span>
           </button>
           <button
-            onClick={() => setActiveTab('inbox')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'inbox'
-                ? 'bg-transparent text-primary shadow-sm'
-                : 'text-secondary hover:text-primary-dark'
-            }`}
+            onClick={refreshStatus}
+            title="Refresh Desktop status"
+            className="neo-btn !px-3 !py-2.5 text-xs font-bold text-primary-dark flex items-center justify-center gap-1.5 min-h-[40px]"
           >
-            <Sparkles size={14} className="text-amber-500" /> AI Qualification Hub
+            <RefreshCw size={14} />
+          </button>
+
+          <button
+            onClick={() => handleDesktopAction('minimize')}
+            disabled={desktopBusy || !isRunning}
+            className="neo-btn !px-3.5 !py-2.5 text-xs font-bold text-primary-dark flex items-center justify-center gap-1.5 min-h-[40px] disabled:opacity-45 disabled:cursor-not-allowed"
+          >
+            <Minus size={14} /> <span>Minimize</span>
           </button>
           <button
-            onClick={() => setActiveTab('workflows')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'workflows'
-                ? 'bg-transparent text-primary shadow-sm'
-                : 'text-secondary hover:text-primary-dark'
-            }`}
+            onClick={() => handleDesktopAction('close')}
+            disabled={desktopBusy || !isRunning}
+            className="neo-btn !px-3.5 !py-2.5 text-xs font-bold text-error flex items-center justify-center gap-1.5 min-h-[40px] disabled:opacity-45 disabled:cursor-not-allowed"
           >
-            <Workflow size={14} className="text-teal-500" /> Workflow Sequences ({automations.length})
+            <X size={14} /> <span>Close</span>
           </button>
         </div>
       </div>
 
-      {activeTab === 'chat' ? (
-        <div className="flex-1 min-h-0 w-full pt-1">
-          <WhatsAppLiveChat />
-        </div>
-      ) : activeTab === 'inbox' ? (
-        <WhatsAppAiInbox />
-      ) : (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-bold text-primary-dark">Automated Sequences</h2>
-            {hasPermission('manage_automation') && (
-              <button onClick={openCreate} className="neo-btn-primary inline-flex items-center gap-2 text-sm">
-                <Plus size={16} /> New Automation
-              </button>
-            )}
-          </div>
-
-          {message && (
-            <div className={`neo-card !p-3 text-sm flex items-start gap-2 border ${isError ? 'bg-rose-500/5 border-rose-500/20 text-rose-400' : 'bg-emerald-500/5 border-emerald-500/20 text-emerald-400'}`}>
-              {isError ? <AlertCircle size={16} className="mt-0.5 shrink-0" /> : <Check size={16} className="mt-0.5 shrink-0" />}
-              <span>{message}</span>
-              <button onClick={() => setMessage('')} className="ml-auto opacity-60 hover:opacity-100"><X size={14} /></button>
-            </div>
-          )}
-
-          {loading ? (
-            <div className="neo-card py-20 flex items-center justify-center text-secondary">
-              <Loader2 className="animate-spin mr-2" size={20} /> Loading automations...
-            </div>
-          ) : automations.length === 0 ? (
-            <div className="neo-card py-20 text-center space-y-4">
-              <Bot size={32} className="text-emerald-400 mx-auto opacity-50" />
-              <p className="text-lg font-semibold text-primary-dark">No automations yet</p>
-              <button onClick={openCreate} className="neo-btn-primary mx-auto inline-flex items-center gap-2"><Plus size={16}/> Create First Automation</button>
-            </div>
-          ) : (
-            <div className="grid gap-4">
-          {automations.map(a => {
-            const pipelineName = allPipelines.find(p => p && p.id === a.pipelineId)?.name || a.pipelineId || 'Unknown Pipeline';
-            const stageName = allPipelines.find(p => p && p.id === a.pipelineId)?.stages?.find(s => s && s.id === a.stageId)?.label || a.stageId || 'Unknown Stage';
-            return (
-              <div key={a.id} className="neo-card hover:shadow-neo-raised transition-all p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-bold text-primary-dark">{a.name || 'Unnamed Automation'}</h3>
-                      <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full border ${a.status === 'active' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-transparent text-slate-500'}`}>{a.status || 'draft'}</span>
-                    </div>
-                    <div className="text-sm text-secondary mt-1">
-                      {pipelineName} &rarr; {stageName} &bull; {(a.scheduleType || 'immediate').replace(/_/g, ' ')}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {a.status !== 'draft' && (
-                      <button onClick={() => togglePause(a)} className="neo-btn !px-3 !py-1.5 text-sm">
-                        {a.status === 'active' ? <><Pause size={14} className="mr-1 inline" /> Pause</> : <><Play size={14} className="mr-1 inline" /> Resume</>}
-                      </button>
-                    )}
-                    {a.status === 'draft' && (
-                      <button onClick={() => doActivate(a)} disabled={activating} className="neo-btn-primary !px-3 !py-1.5 text-sm">
-                        {activating ? <Loader2 size={14} className="animate-spin mr-1 inline" /> : <Play size={14} className="mr-1 inline" />} Activate
-                      </button>
-                    )}
-                    <button onClick={() => openEdit(a)} className="neo-btn !px-3 !py-1.5 text-sm">
-                      <Edit2 size={14} className="mr-1 inline" /> Edit Builder
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-        </div>
-      )}
+      <WhatsAppAiAgentHub />
     </div>
   );
 }
-
-

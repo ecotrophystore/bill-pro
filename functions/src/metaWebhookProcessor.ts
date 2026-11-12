@@ -6,6 +6,7 @@ import { db } from "./config.js";
 import { extractMetaRequirements } from "./utils/metaRequirementExtractor.js";
 import { classifyLeadPipeline } from "./utils/pipelineClassifier.js";
 import type { PipelineRule } from "./utils/types.js";
+import { resolveServerLeadAssignment } from "./utils/leadAssignment.js";
 const fbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
 
 export async function processWebhookPayload(eventId: string, data: any) {
@@ -427,6 +428,17 @@ export async function processWebhookPayload(eventId: string, data: any) {
             const newLeadRef = db.collection("leads").doc();
             const leadId = newLeadRef.id;
 
+            const autoAssign = await resolveServerLeadAssignment({
+                source: "facebook_lead_ads",
+                platform: "meta",
+                pipelineId: config.defaultPipelineId || "",
+                requiredQuantity: required_quantity,
+                location,
+                name,
+                company,
+            });
+            const effectiveOwnerId = autoAssign.assigned ? autoAssign.ownerId : (config.defaultLeadOwnerId || "");
+
             const newLeadData: Record<string, any> = {
                 id: leadId,
                 name,
@@ -437,7 +449,14 @@ export async function processWebhookPayload(eventId: string, data: any) {
                 status: "new",
                 pipelineId: config.defaultPipelineId || "",
                 stageId: config.defaultStageId || "",
-                ownerId: config.defaultLeadOwnerId || "",
+                ownerId: effectiveOwnerId,
+                owner_id: effectiveOwnerId,
+                ...(autoAssign.assigned ? {
+                    sales_person: autoAssign.ownerName,
+                    assigned_at: FieldValue.serverTimestamp(),
+                    assigned_by: "auto_assignment",
+                    assignment_rule_name: autoAssign.ruleName || "auto"
+                } : {}),
                 leadgenId,
                 pageId,
                 formId,

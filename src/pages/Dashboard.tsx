@@ -37,9 +37,12 @@ import {
   getDocAmount,
   getItemDate
 } from '../utils/dashboardMetrics';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchScopedLeads, subscribeScopedLeads } from '../utils/leadVisibility';
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { dbUser } = useAuth();
 
   // Firestore real-time data states
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -131,11 +134,12 @@ export default function Dashboard() {
       }
     );
 
-    // E. Sync Leads & Production Orders
-    const leadUnsub = onSnapshot(
-      collection(db, 'leads'),
-      (snap) => {
-        setLeads(snap.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
+    // E. Sync Leads & Production Orders (Admin sees all; team members only see leads assigned to them)
+    const leadUnsub = subscribeScopedLeads(
+      db,
+      dbUser,
+      (scopedLeads) => {
+        setLeads(scopedLeads);
         checkAllLoaded();
       },
       (err) => {
@@ -209,12 +213,12 @@ export default function Dashboard() {
     if (!db) return;
     setIsRefreshing(true);
     try {
-      const [invSnap, memoSnap, piSnap, qtnSnap, leadSnap, purchSnap, expSnap] = await Promise.all([
+      const [invSnap, memoSnap, piSnap, qtnSnap, scopedLeads, purchSnap, expSnap] = await Promise.all([
         getDocs(collection(db, 'invoices')).catch(() => null),
         getDocs(collection(db, 'cash_memos')).catch(() => null),
         getDocs(collection(db, 'proforma_invoices')).catch(() => null),
         getDocs(collection(db, 'quotations')).catch(() => null),
-        getDocs(collection(db, 'leads')).catch(() => null),
+        fetchScopedLeads(db, dbUser).catch(() => null),
         getDocs(collection(db, 'purchases')).catch(() => null),
         getDocs(collection(db, 'expenses')).catch(() => null)
       ]);
@@ -223,7 +227,7 @@ export default function Dashboard() {
       if (memoSnap) setCashMemos(memoSnap.docs.map(d => ({ id: d.id, ...d.data() } as CashMemo)));
       if (piSnap) setProformaInvoices(piSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProformaInvoice)));
       if (qtnSnap) setQuotations(qtnSnap.docs.map(d => ({ id: d.id, ...d.data() } as Quotation)));
-      if (leadSnap) setLeads(leadSnap.docs.map(d => ({ id: d.id, ...d.data() } as Lead)));
+      if (scopedLeads) setLeads(scopedLeads);
       if (purchSnap) setPurchases(purchSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       if (expSnap && expSnap.docs.length > 0) {
         setExpenses(expSnap.docs.map(d => ({ id: d.id, ...d.data() })));

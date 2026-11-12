@@ -51,8 +51,12 @@ import {
   Layers,
   CheckCircle2,
   Award,
+  GitBranch,
 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { isAdminUser, subscribeScopedLeads } from '../utils/leadVisibility';
+import { LeadAssignmentModal } from '../components/CRM/LeadAssignmentManager';
 import * as XLSX from 'xlsx';
 import {
   type Lead,
@@ -64,8 +68,35 @@ import {
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
-import { openWhatsAppWebDirect } from '../services/stageNotificationService';
+import {
+  getAutoSendOnStageMoveEnabled,
+  openWhatsAppWebDirect,
+  runAutoStageMoveWithToast,
+  setAutoSendOnStageMoveEnabled,
+  stageRequiresReason,
+  subscribeAutoSendOnStageMoveChange,
+} from '../services/stageNotificationService';
 import { PipelineQuickChatModal } from '../components/Pipeline/PipelineQuickChatModal';
+import { formatWhatsAppNumberDisplay } from '../utils/whatsappNumberUtils';
+
+function SourceWhatsappBadge({ lead, compact = false }: { lead: Lead; compact?: boolean }) {
+  const displayValue =
+    formatWhatsAppNumberDisplay(lead.source_whatsapp_number) ||
+    (lead.source === 'WhatsApp' ? lead.source_whatsapp_label : '');
+  if (!displayValue) return null;
+
+  return (
+    <span
+      className={`inline-flex items-center font-bold rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[9px] ${
+        compact ? 'gap-0.5 px-1.5 py-0.2' : 'gap-1 px-1.5 py-0.5'
+      }`}
+      title="Originating Business WhatsApp Number"
+    >
+      <Phone size={compact ? 8 : 9} className="shrink-0" />
+      {displayValue}
+    </span>
+  );
+}
 type StageDraft = {
   id: string;
   label: string;
@@ -243,7 +274,11 @@ export default function PipelineBoard() {
 
   const [dragId, setDragId] = useState('');
   const [message, setMessage] = useState('');
+  const [autoSendOnMove, setAutoSendOnMove] = useState<boolean>(() => getAutoSendOnStageMoveEnabled());
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
+  const isAdmin = isAdminUser(dbUser);
+  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
 
   // Stage Change Confirmation Modal State
   const [confirmModalState, setConfirmModalState] = useState<{
@@ -326,6 +361,12 @@ export default function PipelineBoard() {
   };
 
   useEffect(() => {
+    return subscribeAutoSendOnStageMoveChange((enabled) => {
+      setAutoSendOnMove(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
     if (!db) return;
 
     // Load pipelines
@@ -354,11 +395,11 @@ export default function PipelineBoard() {
       }
     );
 
-    // Load leads
-    const unsubLeads = onSnapshot(
-      collection(db, 'leads'),
-      (snap) => {
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead));
+    // Load leads (Admin sees all; team members only see leads assigned to them)
+    const unsubLeads = subscribeScopedLeads(
+      db,
+      dbUser,
+      (list) => {
         setLeads(list);
         setLoadingLeads(false);
       },
@@ -372,7 +413,7 @@ export default function PipelineBoard() {
       unsubPipelines();
       unsubLeads();
     };
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
 
   const activePipeline = useMemo(() => {
     const found = pipelines.find((p) => p.id === selectedPipelineId);
@@ -383,8 +424,9 @@ export default function PipelineBoard() {
     return activePipeline?.stages?.length ? activePipeline.stages : STANDARD_CRM_STAGES;
   }, [activePipeline]);
 
-  // Extract unique sales persons from leads
+  // Extract unique sales persons from leads (Admin only)
   const salesPersons = useMemo(() => {
+    if (!isAdmin) return [];
     const reps = new Set<string>();
     leads.forEach((l) => {
       if (l.sales_person && l.sales_person.trim()) {
@@ -392,7 +434,7 @@ export default function PipelineBoard() {
       }
     });
     return Array.from(reps).sort();
-  }, [leads]);
+  }, [leads, isAdmin]);
 
   // Filter and Group leads
   const { filteredLeadsList, groupedLeads } = useMemo(() => {
@@ -421,7 +463,7 @@ export default function PipelineBoard() {
           (lead.phone || '').includes(q) ||
           (lead.company || '').toLowerCase().includes(q) ||
           (lead.event_name || '').toLowerCase().includes(q) ||
-          (lead.sales_person || '').toLowerCase().includes(q);
+          (isAdmin && (lead.sales_person || '').toLowerCase().includes(q));
         if (!match) return;
       }
 
@@ -435,8 +477,8 @@ export default function PipelineBoard() {
         return;
       }
 
-      // Filter by Sales Person
-      if (salesPersonFilter !== 'all' && lead.sales_person !== salesPersonFilter) {
+      // Filter by Sales Person (Admin only)
+      if (isAdmin && salesPersonFilter !== 'all' && lead.sales_person !== salesPersonFilter) {
         return;
       }
 
@@ -504,38 +546,7 @@ export default function PipelineBoard() {
     localStorage.setItem(STORAGE_KEY, id);
   };
 
-  // Intercept Drop Action to open confirmation modal
-  const handleCardDrop = (targetStageId: string) => {
-    if (!dragId) return;
-
-    const targetLead = leads.find((l) => l.id === dragId);
-    if (!targetLead) return;
-
-    const currentStageId = targetLead.status || activeStages[0]?.id || 'new_enquiry';
-    if (currentStageId === targetStageId) {
-      setDragId('');
-      return;
-    }
-
-    const fromStage = activeStages.find((s) => s.id === currentStageId) || {
-      id: currentStageId,
-      label: currentStageId,
-    };
-    const toStage = activeStages.find((s) => s.id === targetStageId) || {
-      id: targetStageId,
-      label: targetStageId,
-    };
-
-    setDragId('');
-    setConfirmModalState({
-      isOpen: true,
-      lead: targetLead,
-      fromStage,
-      toStage,
-    });
-  };
-
-  const handleQuickMove = (lead: Lead, targetStageId: string) => {
+  const initiateStageMove = (lead: Lead, targetStageId: string) => {
     const currentStageId = lead.status || activeStages[0]?.id || 'new_enquiry';
     if (currentStageId === targetStageId) return;
 
@@ -548,12 +559,36 @@ export default function PipelineBoard() {
       label: targetStageId,
     };
 
+    if (autoSendOnMove && !stageRequiresReason(toStage)) {
+      void runAutoStageMoveWithToast({
+        lead,
+        fromStage,
+        toStage,
+        pipelineId: activePipeline.id,
+        pipelineName: activePipeline.name,
+      });
+      return;
+    }
+
     setConfirmModalState({
       isOpen: true,
       lead,
       fromStage,
       toStage,
     });
+  };
+
+  // Intercept Drop Action to either auto-send immediately or open confirmation modal
+  const handleCardDrop = (targetStageId: string) => {
+    if (!dragId) return;
+    const targetLead = leads.find((l) => l.id === dragId);
+    setDragId('');
+    if (!targetLead) return;
+    initiateStageMove(targetLead, targetStageId);
+  };
+
+  const handleQuickMove = (lead: Lead, targetStageId: string) => {
+    initiateStageMove(lead, targetStageId);
   };
 
   const handleExportExcel = () => {
@@ -572,7 +607,7 @@ export default function PipelineBoard() {
             'Event Name': lead.event_name || '',
             'Event Date': lead.event_date || '',
             'Delivery Date': lead.delivery_date || '',
-            'Sales Person': lead.sales_person || '',
+            ...(isAdmin ? { 'Assigned To': lead.sales_person || '' } : {}),
             Stage: stage.label,
             Pipeline: activePipeline.name,
             Urgency: lead.urgency || '',
@@ -656,6 +691,30 @@ export default function PipelineBoard() {
             </button>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setAutoSendOnStageMoveEnabled(!autoSendOnMove)}
+            className={`text-xs px-3 py-2 rounded-xl border font-bold inline-flex items-center gap-1.5 transition-all ${
+              autoSendOnMove
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-sm'
+                : 'bg-surface text-secondary border-shadow-darker/15'
+            }`}
+            title="When ON, moving a lead immediately sends its WhatsApp stage update from the originating number without an extra confirmation dialog."
+          >
+            <Send size={13} className={autoSendOnMove ? 'text-emerald-600' : ''} />
+            Auto-Send on Move: {autoSendOnMove ? 'ON' : 'OFF'}
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setShowAssignmentModal(true)}
+              className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold text-primary"
+              title="Configure automatic lead splitting & team routing rules"
+            >
+              <GitBranch size={14} /> Auto-Assign Rules
+            </button>
+          )}
           <button
             onClick={handleExportExcel}
             className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold"
@@ -812,23 +871,25 @@ export default function PipelineBoard() {
         </div>
 
         <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-3 min-w-0 w-full lg:w-auto">
-          {/* Sales Rep Filter */}
-          <div className="flex items-center gap-1.5 text-xs shrink-0">
-            <span className="text-secondary font-bold">Rep:</span>
-            <select
-              aria-label="Filter by assigned sales representative"
-              className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
-              value={salesPersonFilter}
-              onChange={(e) => setSalesPersonFilter(e.target.value)}
-            >
-              <option value="all">All Sales Reps</option>
-              {salesPersons.map((rep) => (
-                <option key={rep} value={rep}>
-                  {rep}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Sales Rep Filter (Admin Only) */}
+          {isAdmin && (
+            <div className="flex items-center gap-1.5 text-xs shrink-0">
+              <span className="text-secondary font-bold">Assigned To:</span>
+              <select
+                aria-label="Filter by assigned team member"
+                className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
+                value={salesPersonFilter}
+                onChange={(e) => setSalesPersonFilter(e.target.value)}
+              >
+                <option value="all">All Team Members</option>
+                {salesPersons.map((rep) => (
+                  <option key={rep} value={rep}>
+                    {rep}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Urgency Filter */}
           <div className="flex items-center gap-1.5 text-xs shrink-0">
@@ -925,7 +986,7 @@ export default function PipelineBoard() {
                     <th className="py-3 px-3 font-bold">Contact</th>
                     <th className="py-3 px-3 font-bold">Order Specs</th>
                     <th className="py-3 px-3 font-bold">Event & Delivery</th>
-                    <th className="py-3 px-3 font-bold">Sales Rep</th>
+                    {isAdmin && <th className="py-3 px-3 font-bold">Assigned To</th>}
                     <th className="py-3 px-3 font-bold">Pipeline Stage</th>
                     <th className="py-3 px-3 font-bold text-right">Actions</th>
                   </tr>
@@ -961,6 +1022,7 @@ export default function PipelineBoard() {
                                   New
                                 </span>
                               )}
+                              <SourceWhatsappBadge lead={lead} compact />
                             </div>
                             {lead.company && (
                               <div className="text-secondary text-[11px] flex items-center gap-1">
@@ -1021,9 +1083,11 @@ export default function PipelineBoard() {
                           </div>
                         </td>
 
-                        <td className="py-3 px-3 text-secondary text-[11px]">
-                          {lead.sales_person || 'EcoTrophy Rep'}
-                        </td>
+                        {isAdmin && (
+                          <td className="py-3 px-3 text-secondary text-[11px]">
+                            {lead.sales_person || 'Unassigned'}
+                          </td>
+                        )}
 
                         <td className="py-3 px-3">
                           <select
@@ -1097,6 +1161,7 @@ export default function PipelineBoard() {
                             ) : (
                               <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">New</span>
                             )}
+                            <SourceWhatsappBadge lead={lead} compact />
                           </div>
                           {lead.company && <div className="text-[11px] text-secondary flex items-center gap-1 mt-0.5"><Building size={11} /> {lead.company}</div>}
                         </div>
@@ -1114,7 +1179,11 @@ export default function PipelineBoard() {
                               <button onClick={() => setQuickChatLead(lead)} className="text-emerald-600 hover:text-emerald-700 ml-1"><MessageSquare size={12} /></button>
                             </div>
                           ) : null}
-                          <div className="text-secondary text-[10px]">Rep: {lead.sales_person || 'EcoTrophy Rep'}</div>
+                          {isAdmin && (
+                            <div className="text-secondary text-[10px]">
+                              Assigned: {lead.sales_person || 'Unassigned'}
+                            </div>
+                          )}
                         </div>
                         
                         <div className="text-right flex flex-col items-end gap-1">
@@ -1355,6 +1424,8 @@ export default function PipelineBoard() {
                                     {lead.source}
                                   </span>
                                 )}
+
+                                <SourceWhatsappBadge lead={lead} />
                               </div>
 
                               <Link
@@ -1437,14 +1508,18 @@ export default function PipelineBoard() {
                             ) : null}
                           </div>
 
-                          {/* Assigned Rep & Urgency */}
+                          {/* Assigned Rep (Admin Only) & Urgency */}
                           <div className="flex items-center justify-between gap-1 text-[10px] text-secondary pt-1 flex-wrap">
-                            {lead.sales_person ? (
-                              <span className="flex items-center gap-1 font-semibold text-slate-700">
-                                <User size={10} /> {lead.sales_person}
-                              </span>
+                            {isAdmin ? (
+                              lead.sales_person ? (
+                                <span className="flex items-center gap-1 font-semibold text-slate-700">
+                                  <User size={10} /> {lead.sales_person}
+                                </span>
+                              ) : (
+                                <span>Unassigned</span>
+                              )
                             ) : (
-                              <span>EcoTrophy Rep</span>
+                              <span />
                             )}
 
                             {lead.urgency === 'high' && (
@@ -1569,6 +1644,14 @@ export default function PipelineBoard() {
         <PipelineQuickChatModal
           lead={quickChatLead}
           onClose={() => setQuickChatLead(null)}
+        />
+      )}
+
+      {isAdmin && (
+        <LeadAssignmentModal
+          isOpen={showAssignmentModal}
+          onClose={() => setShowAssignmentModal(false)}
+          leads={leads}
         />
       )}
     </div>

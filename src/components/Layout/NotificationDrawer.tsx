@@ -18,6 +18,8 @@ import {
 import clsx from 'clsx';
 import { db } from '../../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, updateDoc, doc, writeBatch, getDocs } from 'firebase/firestore';
+import { useAuth } from '../../contexts/AuthContext';
+import { fetchScopedLeads } from '../../utils/leadVisibility';
 
 export interface AppNotification {
   id: string;
@@ -36,6 +38,7 @@ interface NotificationDrawerProps {
 }
 
 export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: NotificationDrawerProps) {
+  const { dbUser } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -125,17 +128,16 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
               }
             });
 
-            // Check recent leads
-            const leadsSnap = await getDocs(query(collection(db, 'leads'), limit(5)));
-            leadsSnap.forEach((d) => {
-              const data = d.data();
+            // Check recent leads (scoped by role/assignment)
+            const scopedLeads = await fetchScopedLeads(db, dbUser, [limit(5)]);
+            scopedLeads.forEach((data) => {
               if (data.status === 'New' || data.status === 'Intake' || !data.status) {
                 defaultNotifs.push({
-                  id: `lead-${d.id}`,
+                  id: `lead-${data.id}`,
                   title: `New Lead: ${data.name || 'Inbound Lead'}`,
                   message: `Source: ${data.source || data.platform || 'Direct'} • Phone: ${data.phone || 'N/A'}`,
                   type: 'lead',
-                  link: `/leads/${d.id}`,
+                  link: `/leads/${data.id}`,
                   is_read: false,
                   timestamp: data.created_at || new Date(),
                 });

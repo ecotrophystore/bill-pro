@@ -909,13 +909,14 @@ export const matchTransaction = onCall(async (request) => {
        throw new HttpsError("permission-denied", "Unauthorized action");
     }
 
-    const { transactionId, documentId, documentType } = request.data;
+    const { transactionId, documentId, documentType, matchAmount } = request.data;
     if (!transactionId || !documentId || !documentType) {
         throw new HttpsError("invalid-argument", "Missing required fields");
     }
 
+    const colName = documentType === 'invoice' ? 'invoices' : documentType === 'expense' ? 'expenses' : 'purchases';
     const txnRef = db.collection("transactions").doc(transactionId);
-    const docRef = db.collection(documentType === 'invoice' ? 'invoices' : 'purchases').doc(documentId);
+    const docRef = db.collection(colName).doc(documentId);
 
     return await db.runTransaction(async (transaction) => {
         const tSnap = await transaction.get(txnRef);
@@ -928,21 +929,58 @@ export const matchTransaction = onCall(async (request) => {
 
         if (tData.match_status === 'matched') throw new HttpsError("already-exists", "Transaction already matched");
 
+        const txnAmount = exactRound(Number(matchAmount ?? tData.amount ?? 0));
+        const totalBill = exactRound(
+          documentType === 'invoice'
+            ? Number(dData.grand_total || 0)
+            : documentType === 'expense'
+            ? Number(dData.requested || dData.paid || dData.amount || 0)
+            : Number(dData.grandTotal ?? dData.amount ?? 0)
+        );
+        const existingBankPaid = exactRound(Number(dData.reconciled_bank_amount || 0));
+        const baseManualPaid = exactRound(
+          dData.manual_paid_amount !== undefined
+            ? Number(dData.manual_paid_amount)
+            : documentType === 'invoice'
+            ? (dData.balance_amount !== undefined ? Math.max(0, totalBill - Number(dData.balance_amount) - existingBankPaid) : Number(dData.advance_amount || 0))
+            : documentType === 'expense'
+            ? Math.max(0, Number(dData.paid || 0) - existingBankPaid)
+            : Number(dData.paid_amount || 0)
+        );
+
+        const newBankPaid = exactRound(existingBankPaid + txnAmount);
+        const newTotalPaid = exactRound(baseManualPaid + newBankPaid);
+        const newBalance = exactRound(Math.max(0, totalBill - newTotalPaid));
+        const paymentStatus = newBalance <= 0.01 && totalBill > 0 ? 'paid' : newTotalPaid > 0.01 ? 'partial' : 'unpaid';
+
         // 1. Update Transaction
         transaction.update(txnRef, {
             match_status: 'matched',
+            matched_id: documentId,
+            matched_entity_type: documentType,
+            matched_amount: txnAmount,
             linked_document_id: documentId,
             linked_document_type: documentType,
             matched_at: FieldValue.serverTimestamp(),
             matched_by: uid
         });
 
-        // 2. Update Document Payment Status
-        // Even if the document is 'locked' from basic editing, payment status transitions are allowed via functions.
-        transaction.update(docRef, {
-            payment_status: 'paid', // Simple matching for now
-            status: documentType === 'invoice' ? 'finalized' : 'cleared'
-        });
+        // 2. Update Document Payment Status & Balance accurately (partial stays partial!)
+        const billPatch: Record<string, any> = {
+            manual_paid_amount: baseManualPaid,
+            reconciled_bank_amount: newBankPaid,
+            paid_amount: newTotalPaid,
+            balance_amount: newBalance,
+            payment_status: paymentStatus,
+        };
+        if (documentType === 'invoice' && paymentStatus === 'paid') {
+            billPatch.status = 'finalized';
+        } else if (documentType === 'purchase' && paymentStatus === 'paid') {
+            billPatch.status = 'cleared';
+        } else if (documentType === 'expense') {
+            billPatch.paid = newTotalPaid;
+        }
+        transaction.update(docRef, billPatch);
 
         // 3. Register Audit Log
         const auditLogRef = db.collection("audit_logs").doc();
@@ -952,10 +990,10 @@ export const matchTransaction = onCall(async (request) => {
             action: "reconciliation",
             user_id: uid,
             timestamp: FieldValue.serverTimestamp(),
-            notes: `Matched with Bank Txn ID: ${tData.bank_transaction_id}`
+            notes: `Matched ₹${txnAmount} with Bank Txn ID: ${tData.bank_transaction_id} (${paymentStatus}, Balance: ₹${newBalance})`
         });
 
-        return { success: true };
+        return { success: true, paymentStatus, newBalance };
     });
 });
 

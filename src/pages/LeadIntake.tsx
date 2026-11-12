@@ -4,6 +4,8 @@ import { AlertCircle, ArrowRight, Loader2, RefreshCw, Send } from 'lucide-react'
 import { db } from '../lib/firebase';
 import { testLeadIngestHttp } from '../lib/testLeadIngest';
 import type { Lead, LeadIntakeEvent, LeadPlatform, Pipeline } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { subscribeScopedLeads } from '../utils/leadVisibility';
 
 function formatTs(value: any) {
   if (!value) return '-';
@@ -21,6 +23,7 @@ function sourceLabel(platform: LeadPlatform) {
 }
 
 export default function LeadIntake() {
+  const { dbUser } = useAuth();
   const [platform, setPlatform] = useState<LeadPlatform>('meta');
   const [pipelineId, setPipelineId] = useState('default');
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -58,16 +61,21 @@ export default function LeadIntake() {
       console.error('Pipeline query failed', error);
     });
 
-    const leadsQuery = query(collection(db, 'leads'), orderBy('created_at', 'desc'));
     const eventsQuery = query(collection(db, 'lead_intake_events'), orderBy('created_at', 'desc'));
 
-    const unsubLeads = onSnapshot(leadsQuery, (snapshot) => {
-      setLeads(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Lead)));
-      setLoading(false);
-    }, (error) => {
-      console.error('Lead query failed', error);
-      setLoading(false);
-    });
+    const unsubLeads = subscribeScopedLeads(
+      db,
+      dbUser,
+      (scopedLeads) => {
+        setLeads(scopedLeads);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Lead query failed', error);
+        setLoading(false);
+      },
+      [orderBy('created_at', 'desc')]
+    );
 
     const unsubEvents = onSnapshot(eventsQuery, (snapshot) => {
       setEventsError('');
@@ -82,7 +90,7 @@ export default function LeadIntake() {
       unsubLeads();
       unsubEvents();
     };
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
 
   useEffect(() => {
     if (!pipelines.length) return;

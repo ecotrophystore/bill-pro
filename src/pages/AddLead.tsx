@@ -3,9 +3,12 @@ import { useLocation } from 'react-router-dom';
 import { collection, onSnapshot, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ArrowRight, Loader2, Save, Sparkles, UserPlus, Building, Phone, Mail, MapPin, Calendar, Clock, DollarSign } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
-import { type LeadPlatform, type Pipeline, DEFAULT_QUANTITY_PIPELINES, STANDARD_CRM_STAGES } from '../types';
+import { type LeadPlatform, type Pipeline, type User, DEFAULT_QUANTITY_PIPELINES, STANDARD_CRM_STAGES } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchTeamUsersForAssignment, resolveLeadAssignment } from '../services/leadAssignmentService';
+import { isAdminUser } from '../utils/leadVisibility';
 
 export default function AddLead() {
   const locationState = useLocation();
@@ -21,6 +24,8 @@ export default function AddLead() {
   const [deliveryDate, setDeliveryDate] = useState('');
   const [trophySize, setTrophySize] = useState('');
   const [salesPerson, setSalesPerson] = useState('');
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>('auto');
+  const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [designPerson, setDesignPerson] = useState('');
   const [campaign, setCampaign] = useState('');
   const [source, setSource] = useState('Manual');
@@ -32,6 +37,15 @@ export default function AddLead() {
   const [feedback, setFeedback] = useState('');
   const [manualPipelineOverridden, setManualPipelineOverridden] = useState(false);
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
+  const isAdmin = isAdminUser(dbUser);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    fetchTeamUsersForAssignment()
+      .then(setTeamUsers)
+      .catch(() => {});
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!db) return;
@@ -108,6 +122,41 @@ export default function AddLead() {
 
       const initialStage = STANDARD_CRM_STAGES[0]?.id || 'new_enquiry';
 
+      let resolvedOwnerId = '';
+      let resolvedOwnerName = salesPerson.trim();
+      let assignmentRuleUsed = '';
+
+      if (isAdmin && selectedOwnerId && selectedOwnerId !== 'auto') {
+        const pickedUser = teamUsers.find((u) => u.id === selectedOwnerId);
+        resolvedOwnerId = pickedUser?.id || '';
+        resolvedOwnerName = pickedUser?.name || pickedUser?.email || resolvedOwnerName;
+        assignmentRuleUsed = 'manual_admin';
+      } else {
+        const autoRes = await resolveLeadAssignment({
+          source: source.trim() || 'Manual',
+          platform,
+          pipelineId,
+          requiredQuantity: requiredQuantity ? Number(requiredQuantity) || requiredQuantity : '',
+          value: orderValue ? Number(orderValue) || 0 : 0,
+          location: location.trim(),
+          name: name.trim(),
+          company: company.trim(),
+          requirement: message.trim(),
+          campaign: campaign.trim(),
+          eventName: eventName.trim(),
+        }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
+
+        if (autoRes.assigned) {
+          resolvedOwnerId = autoRes.ownerId;
+          resolvedOwnerName = autoRes.ownerName;
+          assignmentRuleUsed = autoRes.ruleName || autoRes.mode;
+        } else if (!isAdmin && dbUser?.id) {
+          resolvedOwnerId = dbUser.id;
+          resolvedOwnerName = dbUser.name || dbUser.email || currentUserName;
+          assignmentRuleUsed = 'self_created';
+        }
+      }
+
       const newLeadData = {
         name: name.trim() || 'New Customer',
         company: company.trim(),
@@ -120,7 +169,10 @@ export default function AddLead() {
         event_date: eventDate.trim(),
         delivery_date: deliveryDate.trim(),
         trophy_size: trophySize.trim(),
-        sales_person: salesPerson.trim(),
+        owner_id: resolvedOwnerId,
+        ownerId: resolvedOwnerId,
+        sales_person: resolvedOwnerName,
+        ...(resolvedOwnerId ? { assigned_at: serverTimestamp(), assignment_rule_name: assignmentRuleUsed } : {}),
         design_person: designPerson.trim(),
         source: source.trim() || 'Manual',
         platform: platform || 'manual',
@@ -181,6 +233,7 @@ export default function AddLead() {
       setDeliveryDate('');
       setTrophySize('');
       setSalesPerson('');
+      setSelectedOwnerId('auto');
       setDesignPerson('');
       setCampaign('');
       setMessage('');
@@ -350,15 +403,28 @@ export default function AddLead() {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="block font-bold text-primary-dark">Assigned Sales Person</label>
-            <input
-              className="neo-input w-full"
-              value={salesPerson}
-              onChange={(e) => setSalesPerson(e.target.value)}
-              placeholder="e.g. Monisha"
-            />
-          </div>
+          {isAdmin && (
+            <div className="space-y-1.5">
+              <label className="block font-bold text-primary-dark">Assign Lead To (Admin Control)</label>
+              <select
+                className="neo-input w-full font-semibold"
+                value={selectedOwnerId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedOwnerId(val);
+                  const picked = teamUsers.find((u) => u.id === val);
+                  setSalesPerson(picked ? picked.name || picked.email : '');
+                }}
+              >
+                <option value="auto">Auto-Assign (Use Team Split &amp; Routing Rules)</option>
+                {teamUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.email} ({u.role.toUpperCase()})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="block font-bold text-primary-dark">Assigned Design Person</label>

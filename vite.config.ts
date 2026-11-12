@@ -5,6 +5,24 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(() => ({
   plugins: [react()],
   base: '/',
+  server: {
+    host: true,
+    port: 5173,
+    proxy: {
+      '/api/whatsapp': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      },
+      '/api/reconciliation': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      },
+      '/api/desktop': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      }
+    }
+  },
   build: {
     rollupOptions: {
       output: {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -29,6 +29,10 @@ import {
   Command,
   Plus,
   Sparkles,
+  Minus,
+  Monitor,
+  Square,
+  Maximize2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
@@ -36,9 +40,17 @@ import { useAi } from '../../contexts/AiContext';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
 import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
+import { WhatsAppWebBrowserView } from '../WhatsAppAutomation/WhatsAppWebBrowserView';
 import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
+import {
+  copyDesktopWinRCommand,
+  getDesktopAppStatus,
+  triggerDesktopAction,
+  type DesktopAppStatus
+} from '../../services/desktopControlService';
 import { Toaster } from 'react-hot-toast';
 import { preloadRoute } from '../../utils/routePreloader';
+import { canAccessRoute, ROLE_META, normalizeRole } from '../../config/roleAccess';
 
 interface SubMenuItem {
   path: string;
@@ -103,8 +115,12 @@ const navCategories: NavCategory[] = [
   },
 ];
 
-export function AppLayout() {
+function WhatsAppProcessorGuard() {
   useWhatsAppAutoProcessor();
+  return null;
+}
+
+export function AppLayout() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -125,10 +141,22 @@ export function AppLayout() {
 
   const { logout, dbUser } = useAuth();
   const { toggleAi } = useAi();
+  const currentRole = normalizeRole(dbUser?.role);
+  const roleInfo = ROLE_META[currentRole];
+  const canUseWhatsApp = canAccessRoute(currentRole, '/whatsapp-automation');
+
+  const visibleNavCategories = useMemo(() => {
+    return navCategories
+      .map((cat) => ({
+        ...cat,
+        items: cat.items.filter((item) => canAccessRoute(currentRole, item.path)),
+      }))
+      .filter((cat) => cat.items.length > 0);
+  }, [currentRole]);
 
   // Helper to identify category for path
   const getActiveCategoryForPath = (pathname: string): string | null => {
-    for (const category of navCategories) {
+    for (const category of visibleNavCategories) {
       if (category.items.some((item) => pathname === item.path || pathname.startsWith(item.path + '/'))) {
         return category.id;
       }
@@ -175,9 +203,30 @@ export function AppLayout() {
   };
 
   const isExpanded = mobileMenuOpen || isHovered;
+  const isFullBleedWorkspace = location.pathname.startsWith('/whatsapp-automation');
+  const isElectronDesktop = Boolean(typeof window !== 'undefined' && window.electronAPI?.isElectron);
+  const [browserMinimized, setBrowserMinimized] = useState(false);
+  const [waSummary, setWaSummary] = useState<{ totalUnread: number; isAnyConnected: boolean }>({
+    totalUnread: 0,
+    isAnyConnected: false
+  });
+  const [showDesktopPopover, setShowDesktopPopover] = useState(false);
+  const [desktopStatus, setDesktopStatus] = useState<DesktopAppStatus | null>(null);
+
+  useEffect(() => {
+    if (isFullBleedWorkspace) {
+      setBrowserMinimized(false);
+    }
+  }, [isFullBleedWorkspace]);
+
+  const refreshDesktopStatus = async () => {
+    const st = await getDesktopAppStatus();
+    setDesktopStatus(st);
+  };
 
   return (
     <div className="min-h-screen flex bg-transparent text-secondary">
+      {canUseWhatsApp && <WhatsAppProcessorGuard />}
       {/* Global Omnichannel Search Modal */}
       <GlobalSearchModal isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
 
@@ -259,8 +308,8 @@ export function AppLayout() {
 
           <div className="my-2 border-t border-shadow-darker/20" />
 
-          {/* 3 Collapsible Category Accordions */}
-          {navCategories.map((category) => {
+          {/* Role-filtered Category Accordions */}
+          {visibleNavCategories.map((category) => {
             const isOpen = openCategory === category.id;
             const hasActiveChild = category.items.some(
               (item) => location.pathname === item.path || location.pathname.startsWith(item.path + '/')
@@ -358,8 +407,19 @@ export function AppLayout() {
       </aside>
 
       {/* Main App Content Area */}
-      <main className={clsx('flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden', 'md:ml-[104px]')}>
-        <header className="h-16 flex items-center justify-between px-4 sm:px-6 bg-transparent border-b border-shadow-darker/20 sticky top-0 z-40 shrink-0">
+      <main
+        className={clsx(
+          'flex-1 flex flex-col transition-all duration-300 w-full min-w-0 overflow-x-hidden',
+          isFullBleedWorkspace ? 'h-screen overflow-hidden' : 'min-h-screen',
+          'md:ml-[104px]'
+        )}
+      >
+        <header
+          className={clsx(
+            'flex items-center justify-between px-4 sm:px-6 bg-transparent border-b border-shadow-darker/20 sticky top-0 z-40 shrink-0',
+            isFullBleedWorkspace ? 'h-12' : 'h-16'
+          )}
+        >
           <div className="flex items-center gap-4">
             <button onClick={() => setMobileMenuOpen(true)} className="p-2 text-primary-dark block md:hidden">
               <Menu size={24} />
@@ -422,27 +482,258 @@ export function AppLayout() {
               <span className="hidden xl:inline text-xs font-semibold">Ask Bill Pro</span>
             </button>
 
-            {/* User Avatar */}
+            {/* Active Role Badge & User Avatar */}
+            <div className="hidden md:flex items-center px-3 py-1 rounded-btn bg-surface shadow-neo-surface text-[11px] font-extrabold text-primary tracking-wider uppercase" title={roleInfo.description}>
+              {roleInfo.shortLabel}
+            </div>
             <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-full neo-card !p-0 overflow-hidden flex items-center justify-center shrink-0">
-              <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold text-xs" title={`Role: ${dbUser?.role || 'User'}`}>
-                {dbUser?.name ? dbUser.name.substring(0, 2).toUpperCase() : 'AD'}
+              <div className="w-full h-full bg-secondary/20 flex items-center justify-center text-primary-dark font-semibold text-xs" title={`${dbUser?.name || 'User'} (${roleInfo.label})`}>
+                {dbUser?.name ? dbUser.name.substring(0, 2).toUpperCase() : 'US'}
               </div>
             </div>
+
+            {/* Desktop App / WhatsApp Quick Open-Minimize-Close Controls */}
+            {canUseWhatsApp && isElectronDesktop && (
+              <button
+                onClick={() => {
+                  setBrowserMinimized(false);
+                  navigate('/whatsapp-automation');
+                }}
+                className={clsx(
+                  'p-2 neo-btn !rounded-full !px-3 flex items-center gap-1.5 text-xs font-bold transition-all',
+                  isFullBleedWorkspace ? 'text-primary' : 'text-primary-dark hover:text-primary'
+                )}
+                title="Open Internal Chrome & WhatsApp Web"
+              >
+                <span
+                  className={clsx(
+                    'w-2 h-2 rounded-full',
+                    waSummary.isAnyConnected ? 'bg-primary animate-pulse' : 'bg-secondary opacity-50'
+                  )}
+                />
+                <span className="hidden sm:inline">WhatsApp</span>
+                {waSummary.totalUnread > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-primary text-surface text-[10px] font-extrabold leading-none">
+                    {waSummary.totalUnread}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {canUseWhatsApp && !isElectronDesktop && (
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    const next = !showDesktopPopover;
+                    setShowDesktopPopover(next);
+                    if (next) refreshDesktopStatus();
+                  }}
+                  className="p-2 neo-btn !rounded-full !px-3 flex items-center gap-1.5 text-primary-dark hover:text-primary text-xs font-bold"
+                  title="Open / Minimize / Close EcoBill Desktop App"
+                >
+                  <Monitor size={16} className="text-primary" />
+                  <span className="hidden sm:inline">Desktop</span>
+                </button>
+
+                {showDesktopPopover && (
+                  <div className="fixed left-3 right-3 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-64 z-50 p-3 rounded-card bg-surface shadow-neo-raised border border-shadow-dark space-y-2 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-primary-dark">EcoBill Desktop App</span>
+                      <button
+                        onClick={() => setShowDesktopPopover(false)}
+                        className="p-1 rounded-full text-secondary hover:text-primary-dark"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-secondary">
+                      Status:{' '}
+                      <strong className={desktopStatus?.running ? 'text-primary' : 'text-secondary'}>
+                        {desktopStatus?.running ? 'Running' : 'Not Open'}
+                      </strong>
+                    </p>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {!desktopStatus?.running && desktopStatus?.sandboxed ? (
+                        <button
+                          onClick={async () => {
+                            await copyDesktopWinRCommand(desktopStatus?.winRCommand);
+                            setShowDesktopPopover(false);
+                          }}
+                          className="neo-btn-primary !px-2 !py-2 text-[11px] font-bold flex items-center justify-center gap-1"
+                        >
+                          <Maximize2 size={12} /> Copy
+                        </button>
+                      ) : (
+                        <button
+                          onClick={async () => {
+                            const res = await triggerDesktopAction('open');
+                            if (res.ok) refreshDesktopStatus();
+                            setShowDesktopPopover(false);
+                          }}
+                          className="neo-btn-primary !px-2 !py-2 text-[11px] font-bold flex items-center justify-center gap-1"
+                        >
+                          <Maximize2 size={12} /> Open
+                        </button>
+                      )}
+                      <button
+                        disabled={!desktopStatus?.running}
+                        onClick={async () => {
+                          await triggerDesktopAction('minimize');
+                        }}
+                        className="neo-btn !px-2 !py-2 text-[11px] font-bold text-primary-dark flex items-center justify-center gap-1 disabled:opacity-45 disabled:cursor-not-allowed"
+                      >
+                        <Minus size={12} /> Min
+                      </button>
+                      <button
+                        disabled={!desktopStatus?.running}
+                        onClick={async () => {
+                          const res = await triggerDesktopAction('close');
+                          if (res.ok) refreshDesktopStatus();
+                          setShowDesktopPopover(false);
+                        }}
+                        className="neo-btn !px-2 !py-2 text-[11px] font-bold text-error flex items-center justify-center gap-1 disabled:opacity-45 disabled:cursor-not-allowed"
+                      >
+                        <X size={12} /> Close
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Logout */}
             <button onClick={logout} className="p-2 text-error hover:bg-error/10 rounded-full transition-colors hidden sm:block" title="Logout">
               <LogOut size={20} />
             </button>
+
+            {/* Electron OS Window Minimize / Maximize / Close Buttons */}
+            {isElectronDesktop && (
+              <div className="flex items-center gap-1 pl-2 border-l border-shadow-darker/30">
+                <button
+                  onClick={() => window.electronAPI?.minimizeWindow?.()}
+                  title="Minimize EcoBill Desktop Window"
+                  className="w-8 h-8 rounded-btn bg-surface shadow-neo-surface text-secondary hover:text-primary-dark flex items-center justify-center"
+                >
+                  <Minus size={14} />
+                </button>
+                <button
+                  onClick={() => window.electronAPI?.toggleMaximizeWindow?.()}
+                  title="Maximize / Restore Window"
+                  className="hidden sm:flex w-8 h-8 rounded-btn bg-surface shadow-neo-surface text-secondary hover:text-primary-dark items-center justify-center"
+                >
+                  <Square size={12} />
+                </button>
+                <button
+                  onClick={() => window.electronAPI?.closeWindow?.()}
+                  title="Close EcoBill Desktop"
+                  className="w-8 h-8 rounded-btn bg-surface shadow-neo-surface text-secondary hover:text-error flex items-center justify-center"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
-        <div className="p-3 sm:p-4 md:p-8 flex-1 w-full max-w-[1440px] mx-auto min-w-0 pb-28 sm:pb-32 md:pb-8">
-          <Outlet />
+        <div
+          className={clsx(
+            'flex-1 w-full min-w-0',
+            isFullBleedWorkspace
+              ? 'p-1.5 sm:p-2 md:p-2.5 min-h-0 flex flex-col pb-24 md:pb-2.5'
+              : 'p-3 sm:p-4 md:p-8 max-w-[1440px] mx-auto pb-28 sm:pb-32 md:pb-8'
+          )}
+        >
+          {canAccessRoute(currentRole, location.pathname) ? (
+            <Outlet />
+          ) : (
+            <div className="min-h-[60vh] flex items-center justify-center p-4 animate-fade-in">
+              <div className="neo-card max-w-md w-full text-center space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-card bg-surface shadow-neo-surface text-error flex items-center justify-center">
+                  <ShieldAlert size={32} />
+                </div>
+                <div className="space-y-1">
+                  <span className="inline-block px-3 py-1 rounded-btn bg-surface shadow-neo-surface text-[11px] font-bold text-primary uppercase tracking-wider mb-1">
+                    Active Role: {roleInfo.label}
+                  </span>
+                  <h2 className="text-xl font-bold text-primary-dark">Access Restricted</h2>
+                  <p className="text-xs text-secondary leading-relaxed">
+                    Your department role ({roleInfo.label}) does not have permission to open <code className="text-primary-dark font-semibold">{location.pathname}</code>. Contact your Administrator or HR if you require access.
+                  </p>
+                </div>
+                <button
+                  onClick={() => navigate(roleInfo.homePath)}
+                  className="neo-btn-primary text-xs w-full"
+                >
+                  Return to {roleInfo.label} Home
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isElectronDesktop && canUseWhatsApp && (
+            <WhatsAppWebBrowserView
+              visible={isFullBleedWorkspace && !browserMinimized && canAccessRoute(currentRole, location.pathname)}
+              onSummaryChange={setWaSummary}
+              onMinimize={() => {
+                setBrowserMinimized(true);
+                navigate(canAccessRoute(currentRole, '/pipeline') ? '/pipeline' : '/dashboard');
+              }}
+              onClose={() => {
+                setBrowserMinimized(false);
+                navigate(canAccessRoute(currentRole, '/pipeline') ? '/pipeline' : '/dashboard');
+              }}
+            />
+          )}
         </div>
       </main>
 
+      {/* Mobile-First Minimized Floating WhatsApp Dock Pill */}
+      {isElectronDesktop && canUseWhatsApp && browserMinimized && !isFullBleedWorkspace && (
+        <div className="fixed bottom-24 left-3 right-3 sm:left-auto sm:right-5 md:bottom-5 z-40 px-3.5 py-2.5 rounded-card bg-surface shadow-neo-raised border border-shadow-dark flex items-center justify-between gap-3 animate-fade-in">
+          <button
+            onClick={() => {
+              setBrowserMinimized(false);
+              navigate('/whatsapp-automation');
+            }}
+            className="flex items-center gap-2 text-left min-w-0 flex-1"
+          >
+            <span
+              className={clsx(
+                'w-2.5 h-2.5 rounded-full shrink-0',
+                waSummary.isAnyConnected ? 'bg-primary animate-pulse' : 'bg-secondary opacity-50'
+              )}
+            />
+            <span className="text-xs font-extrabold text-primary-dark truncate">WhatsApp Chrome Live</span>
+            {waSummary.totalUnread > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-primary text-surface text-[10px] font-extrabold shrink-0">
+                {waSummary.totalUnread}
+              </span>
+            )}
+          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={() => {
+                setBrowserMinimized(false);
+                navigate('/whatsapp-automation');
+              }}
+              className="neo-btn-primary !px-3 !py-1.5 text-[11px] font-bold flex items-center gap-1"
+            >
+              <Maximize2 size={12} /> Open
+            </button>
+            <button
+              onClick={() => setBrowserMinimized(false)}
+              title="Dismiss Floating Bar (WhatsApp stays logged in)"
+              className="p-1.5 rounded-full bg-surface shadow-neo-surface text-secondary hover:text-error"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Mobile Floating Bottom Navigation */}
-      <nav className="md:hidden fixed bottom-4 left-4 right-4 z-50 bg-white/80 dark:bg-black/80 backdrop-blur-xl border border-white/40 dark:border-white/10 shadow-[0_8px_32px_rgba(0,0,0,0.12)] rounded-[2rem] p-2 flex items-center justify-between px-6">
+      <nav className="md:hidden fixed bottom-4 left-4 right-4 z-50 bg-surface/95 backdrop-blur-xl border border-shadow-light shadow-neo-raised rounded-[2rem] p-2 flex items-center justify-between px-6">
         <NavLink
           to="/dashboard"
           className={({ isActive }) =>
@@ -456,41 +747,84 @@ export function AppLayout() {
           <span className="text-[9px] font-bold mt-1 tracking-wide">Home</span>
         </NavLink>
 
-        <NavLink
-          to="/pipeline"
-          className={({ isActive }) =>
-            clsx(
-              'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 mr-4',
-              isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
-            )
-          }
-        >
-          <Columns3 size={22} strokeWidth={2.5} />
-          <span className="text-[9px] font-bold mt-1 tracking-wide">Pipeline</span>
-        </NavLink>
+        {canAccessRoute(currentRole, '/pipeline') ? (
+          <NavLink
+            to="/pipeline"
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 mr-4',
+                isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+              )
+            }
+          >
+            <Columns3 size={22} strokeWidth={2.5} />
+            <span className="text-[9px] font-bold mt-1 tracking-wide">Pipeline</span>
+          </NavLink>
+        ) : canAccessRoute(currentRole, '/settings') ? (
+          <NavLink
+            to="/settings?tab=hr_team"
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 mr-4',
+                isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+              )
+            }
+          >
+            <Users size={22} strokeWidth={2.5} />
+            <span className="text-[9px] font-bold mt-1 tracking-wide">HR Team</span>
+          </NavLink>
+        ) : (
+          <NavLink
+            to="/library/products"
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 mr-4',
+                isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+              )
+            }
+          >
+            <Receipt size={22} strokeWidth={2.5} />
+            <span className="text-[9px] font-bold mt-1 tracking-wide">Catalog</span>
+          </NavLink>
+        )}
 
-        {/* Center Floating Action Button (New Quotation/Action) */}
+        {/* Center Floating Action Button */}
         <div className="absolute left-1/2 -translate-x-1/2 -top-6">
           <NavLink
-            to="/quotations/new"
+            to={canAccessRoute(currentRole, '/quotations/new') ? '/quotations/new' : '/expense'}
             className="flex items-center justify-center w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-dark text-white shadow-lg shadow-primary/40 transform transition-transform duration-300 hover:scale-110 active:scale-95 border-4 border-surface"
           >
             <Plus size={28} strokeWidth={3} />
           </NavLink>
         </div>
 
-        <NavLink
-          to="/whatsapp-automation"
-          className={({ isActive }) =>
-            clsx(
-              'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 ml-4',
-              isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
-            )
-          }
-        >
-          <Bot size={22} strokeWidth={2.5} />
-          <span className="text-[9px] font-bold mt-1 tracking-wide">Chat</span>
-        </NavLink>
+        {canAccessRoute(currentRole, '/whatsapp-automation') ? (
+          <NavLink
+            to="/whatsapp-automation"
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 ml-4',
+                isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+              )
+            }
+          >
+            <Bot size={22} strokeWidth={2.5} />
+            <span className="text-[9px] font-bold mt-1 tracking-wide">Chat</span>
+          </NavLink>
+        ) : (
+          <NavLink
+            to="/expense"
+            className={({ isActive }) =>
+              clsx(
+                'flex flex-col items-center justify-center p-2 rounded-2xl transition-all duration-300 w-14 ml-4',
+                isActive ? 'text-primary scale-110 drop-shadow-md' : 'text-secondary/60 hover:text-primary hover:-translate-y-1'
+              )
+            }
+          >
+            <Wallet size={22} strokeWidth={2.5} />
+            <span className="text-[9px] font-bold mt-1 tracking-wide">Expense</span>
+          </NavLink>
+        )}
 
         <button
           onClick={() => setMobileMenuOpen(true)}

@@ -14,7 +14,7 @@ export interface PaymentRecord {
   created_by: string;
 }
 
-export type UserRole = 'admin' | 'accounts' | 'sales';
+export type UserRole = 'admin' | 'hr' | 'sales' | 'user' | 'accounts';
 
 export interface User {
   id: string;
@@ -22,6 +22,11 @@ export interface User {
   email: string;
   role: UserRole;
   is_active: boolean;
+  department?: string;
+  designation?: string;
+  phone?: string;
+  joined_date?: string;
+  invited?: boolean;
   created_at: Timestamp;
 }
 
@@ -192,7 +197,7 @@ export interface Purchase {
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
   // Fallback for Purchases.tsx display logic temporarily
-  amount: number; 
+  amount: number;
   reference?: string;
   date?: Timestamp;
 }
@@ -440,6 +445,9 @@ export interface Lead {
   notification_history?: NotificationHistoryEntry[];
   notifications_sent?: Record<string, boolean>;
   // WhatsApp automation fields
+  source_whatsapp_number?: string;
+  source_whatsapp_label?: string;
+  source_session_id?: string;
   stageEnteredAt?: Timestamp;
   lastCustomerReplyAt?: Timestamp;
   whatsappOptedOut?: boolean;
@@ -516,10 +524,10 @@ export interface LeadNote {
   category: NoteCategory;
   priority: NotePriority;
   is_pinned?: boolean;
-  
+
   // Tagged Team Members
   tagged_users: TaggedUser[];
-  
+
   // Reminder & Alarm Specs
   has_reminder: boolean;
   reminder_datetime?: any; // Firestore Timestamp, Date, or ISO string
@@ -529,7 +537,7 @@ export interface LeadNote {
   snoozed_until?: any;
   completed_at?: any;
   completed_by?: string;
-  
+
   // Checklist Action Items
   checklist?: NoteChecklistItem[];
 
@@ -752,7 +760,9 @@ export type CRMPermissionAction =
   | 'send_message'
   | 'manage_automation'
   | 'export_data'
-  | 'view_audit_logs';
+  | 'view_audit_logs'
+  | 'manage_users'
+  | 'view_hr';
 
 export const CRM_ROLE_PERMISSIONS: Record<UserRole, CRMPermissionAction[]> = {
   admin: [
@@ -765,11 +775,20 @@ export const CRM_ROLE_PERMISSIONS: Record<UserRole, CRMPermissionAction[]> = {
     'manage_automation',
     'export_data',
     'view_audit_logs',
+    'manage_users',
+    'view_hr',
+  ],
+  hr: [
+    'export_data',
+    'view_audit_logs',
+    'manage_users',
+    'view_hr',
   ],
   accounts: [
     'view_lead',
     'move_stage',
     'send_message',
+    'view_audit_logs',
   ],
   sales: [
     'view_lead',
@@ -779,6 +798,7 @@ export const CRM_ROLE_PERMISSIONS: Record<UserRole, CRMPermissionAction[]> = {
     'move_stage',
     'send_message',
   ],
+  user: [],
 };
 
 // ─── WhatsApp Automation Types ────────────────────────────────────────────

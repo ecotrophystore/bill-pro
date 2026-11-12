@@ -7,6 +7,7 @@ import { httpsCallable } from 'firebase/functions';
 import type { Customer, Product, LineItem } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import { DiscountSelector } from '../components/Billing/DiscountSelector';
+import { UnitSelector } from '../components/Billing/UnitSelector';
 import SpeechInput from '../components/Shared/SpeechInput';
 import { useSettings } from '../contexts/SettingsContext';
 import { getNextProposedNumber } from '../utils/numberGenerator';
@@ -580,26 +581,14 @@ export default function CreateInvoice() {
                         </div>
                       </div>
                       <div className="sm:col-span-2">
-                        <input
-                          type="text"
-                          list="units-list"
-                          className="neo-input w-full text-xs py-1 px-2"
-                          placeholder="Unit"
+                        <UnitSelector
                           value={item.unit || 'Pcs'}
-                          onChange={(e) => {
+                          onChange={(unit) => {
                             const newItems = [...items];
-                            newItems[index].unit = e.target.value;
+                            newItems[index].unit = unit;
                             setItems(newItems);
                           }}
                         />
-                        <datalist id="units-list">
-                          <option value="Pcs" />
-                          <option value="Sq Ft" />
-                          <option value="Kg" />
-                          <option value="Ltr" />
-                          <option value="Mtr" />
-                          <option value="Nos" />
-                        </datalist>
                       </div>
                       <div className="sm:col-span-2">
                         <div className="flex items-center gap-1">

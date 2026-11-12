@@ -5,8 +5,11 @@ import { db } from '../lib/firebase';
 import { Link, useNavigate } from 'react-router-dom';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
+import { useAuth } from '../contexts/AuthContext';
+import { subscribeScopedLeads } from '../utils/leadVisibility';
 
 export default function CompanyIntelligence() {
+  const { dbUser } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<any | null>(null);
@@ -16,16 +19,13 @@ export default function CompanyIntelligence() {
   
   const navigate = useNavigate();
 
-  // Load enriched leads
+  // Load enriched leads (scoped by role/assignment)
   useEffect(() => {
-    if (!db) return;
-    const q = query(collection(db, 'leads'), orderBy('created_at', 'desc'));
-    
-    const unsub = onSnapshot(
-      q,
-      (snapshot) => {
-        // Filter leads that have company_intelligence locally
-        const leads = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    if (!db || !dbUser) return;
+    const unsub = subscribeScopedLeads(
+      db,
+      dbUser,
+      (leads) => {
         const enriched = leads.filter(l => (l as any).company_intelligence);
         setEnrichedLeads(enriched);
         setLoading(false);
@@ -33,11 +33,12 @@ export default function CompanyIntelligence() {
       (error) => {
         console.error('Failed to load enriched leads', error);
         setLoading(false);
-      }
+      },
+      [orderBy('created_at', 'desc')]
     );
 
     return () => unsub();
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
 
   const handleManualSearch = async (e: React.FormEvent) => {
     e.preventDefault();

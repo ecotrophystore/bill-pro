@@ -57,6 +57,8 @@ import { BusinessProfileSettings } from './BusinessProfileSettings';
 import { NewChatModal } from './NewChatModal';
 import { ManageLabelsModal } from './ManageLabelsModal';
 import { useChatLabels } from '../../hooks/useChatLabels';
+import { useAuth } from '../../contexts/AuthContext';
+import { fetchScopedLeads, isLeadAssignedToUser } from '../../utils/leadVisibility';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface MessageItem {
@@ -130,6 +132,7 @@ const DEFAULT_STAGES = [
 export function WhatsAppLiveChat() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { dbUser } = useAuth();
 
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [selectedConv, setSelectedConv] = useState<ConversationItem | null>(null);
@@ -367,7 +370,8 @@ export function WhatsAppLiveChat() {
       getDoc(doc(db, 'leads', selectedConv.leadId))
         .then((snap) => {
           if (snap.exists()) {
-            setLeadDetails({ id: snap.id, ...snap.data() });
+            const candidate = { id: snap.id, ...snap.data() };
+            setLeadDetails(isLeadAssignedToUser(candidate, dbUser) ? candidate : null);
           } else {
             setLeadDetails(null);
           }
@@ -375,22 +379,17 @@ export function WhatsAppLiveChat() {
         .catch((e) => console.warn('Could not fetch lead details:', e));
     } else if (selectedConv.participantPhone) {
       const cleanPhone = String(selectedConv.participantPhone).replace(/\D/g, '').slice(-10);
-      getDocs(query(collection(db, 'leads'), limit(25)))
-        .then((snap) => {
-          const match = snap.docs.find((d) => {
-            const data = d.data();
-            const p = String(data.phone || data.normalized_phone || '').replace(/\D/g, '');
+      fetchScopedLeads(db, dbUser, [limit(25)])
+        .then((scopedLeads) => {
+          const match = scopedLeads.find((data) => {
+            const p = String(data.phone || (data as any).normalized_phone || '').replace(/\D/g, '');
             return p.endsWith(cleanPhone);
           });
-          if (match) {
-            setLeadDetails({ id: match.id, ...match.data() });
-          } else {
-            setLeadDetails(null);
-          }
+          setLeadDetails(match || null);
         })
         .catch((e) => console.warn('Could not search lead by phone:', e));
     }
-  }, [selectedConv?.leadId, selectedConv?.participantPhone]);
+  }, [selectedConv?.leadId, selectedConv?.participantPhone, dbUser?.id, dbUser?.role]);
 
   // Auto scroll on message update
   useEffect(() => {

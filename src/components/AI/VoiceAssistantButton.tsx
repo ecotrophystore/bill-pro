@@ -21,6 +21,7 @@ export const VoiceAssistantButton: React.FC = () => {
         '/cash-memos/edit',
         '/purchases/new',
         '/purchases/edit',
+        '/whatsapp-automation',
     ].some((path) => location.pathname.startsWith(path));
 
     if (isDocFormPage) return null;

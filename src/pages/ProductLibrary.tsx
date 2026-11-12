@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import SpeechInput from '../components/Shared/SpeechInput';
+import { UnitSelector } from '../components/Billing/UnitSelector';
 
 export default function ProductLibrary() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -28,6 +29,7 @@ export default function ProductLibrary() {
   const [retailPrice, setRetailPrice] = useState('');
   const [wholesalePrice, setWholesalePrice] = useState('');
   const [taxPercentage, setTaxPercentage] = useState('18');
+  const [unit, setUnit] = useState('Pcs');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export default function ProductLibrary() {
     setRetailPrice('');
     setWholesalePrice('');
     setTaxPercentage('18');
+    setUnit('Pcs');
     setIsModalOpen(true);
   };
 
@@ -73,6 +76,7 @@ export default function ProductLibrary() {
     setRetailPrice(product.retail_price?.toString() || '0');
     setWholesalePrice(product.wholesale_price?.toString() || '0');
     setTaxPercentage(product.tax_percentage?.toString() || '18');
+    setUnit(product.unit || 'Pcs');
     setIsModalOpen(true);
   };
 
@@ -112,6 +116,7 @@ export default function ProductLibrary() {
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs',
           created_at: new Date(),
           source: 'manual'
         });
@@ -125,6 +130,7 @@ export default function ProductLibrary() {
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs',
           created_at: new Date() as any,
           source: 'manual'
         };
@@ -139,7 +145,8 @@ export default function ProductLibrary() {
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
-          hsn_code: hsnCode.trim() || '0000'
+          hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs'
         });
 
         setProducts(products.map(p => p.id === editingProductId ? {
@@ -150,7 +157,8 @@ export default function ProductLibrary() {
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
-          hsn_code: hsnCode.trim() || '0000'
+          hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs'
         } : p));
       }
       setIsModalOpen(false);
@@ -519,19 +527,29 @@ export default function ProductLibrary() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">Tax Percentage (%) *</label>
-                <select
-                  value={taxPercentage}
-                  onChange={(e) => setTaxPercentage(e.target.value)}
-                  className="neo-input w-full bg-transparent"
-                >
-                  <option value="0">0%</option>
-                  <option value="5">5%</option>
-                  <option value="12">12%</option>
-                  <option value="18">18%</option>
-                  <option value="28">28%</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Tax Percentage (%) *</label>
+                  <select
+                    value={taxPercentage}
+                    onChange={(e) => setTaxPercentage(e.target.value)}
+                    className="neo-input w-full bg-transparent"
+                  >
+                    <option value="0">0%</option>
+                    <option value="5">5%</option>
+                    <option value="12">12%</option>
+                    <option value="18">18%</option>
+                    <option value="28">28%</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Unit Metric *</label>
+                  <UnitSelector
+                    value={unit}
+                    onChange={setUnit}
+                    className="h-[46px]"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-secondary/10">

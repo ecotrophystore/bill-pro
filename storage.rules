@@ -13,5 +13,8 @@ service firebase.storage {
     match /shared_documents/{allPaths=**} {
       allow read, write: if request.auth != null;
     }
+    match /whatsapp_welcome_kit/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
