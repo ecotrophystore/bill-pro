@@ -23,6 +23,7 @@ import type { Lead, User } from '../../types';
 import {
   DEFAULT_LEAD_ASSIGNMENT_CONFIG,
   DEFAULT_LEAD_ASSIGNMENT_STATE,
+  distributeLeadsToTeam,
   distributeUnassignedLeads,
   fetchTeamUsersForAssignment,
   loadLeadAssignmentConfig,
@@ -248,8 +249,13 @@ export function LeadAssignmentManager({ leads = [], onClose }: LeadAssignmentMan
   };
 
   const handleSave = async () => {
+    // If selected members exist but are paused, prompt or auto-activate so admin isn't blocked
     if (draft.enabled && draft.splitMode !== 'rules_only' && activePoolMembers.length === 0 && draft.rules.every((r) => !r.enabled)) {
-      toast.error('Select at least 1 active team member or add an active routing rule before enabling.');
+      if (draft.selectedMembers.length > 0) {
+        toast.error('All selected team members are currently set to "Paused". Click the yellow "Paused" button on each member to set them to "Active", then click Save.');
+      } else {
+        toast.error('Check at least 1 team member above or add an active routing rule before enabling Auto-Assign.');
+      }
       return;
     }
 
@@ -287,6 +293,36 @@ export function LeadAssignmentManager({ leads = [], onClose }: LeadAssignmentMan
       toast.success(`Assigned ${res.assignedCount} unassigned lead(s) across your team!`);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to distribute unassigned leads');
+    } finally {
+      setDistributing(false);
+    }
+  };
+
+  const handleSplitAllExistingLeads = async () => {
+    if (leads.length === 0) {
+      toast('No leads found to split.');
+      return;
+    }
+    if (activePoolMembers.length === 0 && draft.rules.every((r) => !r.enabled || r.assigneeIds.length === 0)) {
+      toast.error('Select at least 2 team members or configure a routing rule first.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Re-split ALL ${leads.length} existing leads across your active team members now?\n\nThis will reassign every existing lead according to your split mode (${draft.splitMode}) and routing rules.`
+    );
+    if (!confirmed) return;
+
+    setDistributing(true);
+    try {
+      await saveLeadAssignmentConfig(draft, dbUser?.name || 'Admin');
+      const res = await distributeLeadsToTeam(draft, leads, {
+        actorId: dbUser?.id || 'admin',
+        scope: 'all_existing',
+      });
+      toast.success(`Split and updated ${res.assignedCount} of ${res.totalCandidates} existing lead(s) across your team!`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to split existing leads');
     } finally {
       setDistributing(false);
     }
@@ -492,15 +528,15 @@ export function LeadAssignmentManager({ leads = [], onClose }: LeadAssignmentMan
                       <button
                         type="button"
                         onClick={() => updateMember(user.id, { active: !member.active })}
-                        className={`p-1.5 rounded-lg border text-[10px] font-bold flex items-center gap-1 ${
+                        className={`p-1.5 px-2 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition-all ${
                           member.active
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            : 'border-amber-200 bg-amber-100 text-amber-800'
+                            ? 'border-emerald-300 bg-emerald-100 text-emerald-800 shadow-xs'
+                            : 'border-amber-300 bg-amber-200/80 text-amber-900 font-extrabold hover:bg-emerald-100 hover:text-emerald-800 hover:border-emerald-300'
                         }`}
-                        title={member.active ? 'Receiving leads (click to pause)' : 'Paused (click to resume)'}
+                        title={member.active ? 'Currently Active & receiving leads (click to pause)' : 'Currently PAUSED (click to activate & receive leads)'}
                       >
-                        {member.active ? <Play size={11} /> : <Pause size={11} />}
-                        {member.active ? 'Active' : 'Paused'}
+                        {member.active ? <Play size={11} className="fill-emerald-700 text-emerald-700" /> : <Pause size={11} className="text-amber-900" />}
+                        {member.active ? 'Active' : 'Paused (Click to Activate)'}
                       </button>
                     </div>
                   )}
@@ -776,19 +812,32 @@ export function LeadAssignmentManager({ leads = [], onClose }: LeadAssignmentMan
 
       {/* Footer actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-shadow-darker/10">
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           {leads.length > 0 && (
-            <button
-              type="button"
-              disabled={distributing || unassignedCount === 0}
-              onClick={handleDistributeUnassigned}
-              className="neo-btn text-xs px-3.5 py-2 font-bold inline-flex items-center gap-1.5 text-indigo-700 disabled:opacity-50"
-            >
-              {distributing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-              {unassignedCount > 0
-                ? `Auto-Split ${unassignedCount} Unassigned Lead${unassignedCount === 1 ? '' : 's'} Now`
-                : 'No Unassigned Leads'}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={distributing || unassignedCount === 0}
+                onClick={handleDistributeUnassigned}
+                className="neo-btn text-xs px-3.5 py-2 font-bold inline-flex items-center gap-1.5 text-indigo-700 disabled:opacity-50"
+                title="Only assign leads that currently have no sales owner"
+              >
+                {distributing ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+                {unassignedCount > 0
+                  ? `Split ${unassignedCount} Unassigned Lead${unassignedCount === 1 ? '' : 's'}`
+                  : 'No Unassigned Leads'}
+              </button>
+              <button
+                type="button"
+                disabled={distributing || leads.length === 0}
+                onClick={handleSplitAllExistingLeads}
+                className="neo-btn text-xs px-3.5 py-2 font-bold inline-flex items-center gap-1.5 text-primary hover:bg-primary/10 disabled:opacity-50"
+                title="Re-split and divide all existing leads among your team members"
+              >
+                {distributing ? <Loader2 size={13} className="animate-spin" /> : <Users size={13} />}
+                Re-Split All {leads.length} Existing Leads
+              </button>
+            </>
           )}
         </div>
 

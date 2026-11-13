@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { collection, query, where, onSnapshot, updateDoc, doc, getDoc, limit } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { db } from '../lib/firebase';
+import { resolveApiUrl } from '../lib/apiBase';
 import { processInboundWhatsAppMessage } from '../lib/whatsappInboundProcessor';
 import {
   fetchAllSessions,
@@ -95,7 +96,7 @@ export function useWhatsAppAutoProcessor() {
     let disposed = false;
     let unsubscribe: (() => void) | null = null;
 
-    fetch('/api/whatsapp/health')
+    fetch(resolveApiUrl('/api/whatsapp/health'))
       .then((r) => (r.ok ? r.json() : null))
       .then((health) => {
         if (disposed || !health) return;

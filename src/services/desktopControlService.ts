@@ -1,4 +1,5 @@
 import toast from 'react-hot-toast';
+import { resolveApiUrl } from '../lib/apiBase';
 
 export interface DesktopAppStatus {
   running: boolean;
@@ -14,8 +15,11 @@ const TOAST_ID = 'ecobill-desktop-action';
 // ─── Status Polling ───────────────────────────────────────────────────────────
 
 export async function getDesktopAppStatus(): Promise<DesktopAppStatus | null> {
+  if (typeof window !== 'undefined' && window.electronAPI?.isElectron) {
+    return { running: true, minimized: false, visible: true };
+  }
   try {
-    const res = await fetch('/api/desktop/status');
+    const res = await fetch(resolveApiUrl('/api/desktop/status'));
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -37,8 +41,7 @@ export function openViaProtocol(): void {
 
 // ─── Fallback: Win+R clipboard copy ──────────────────────────────────────────
 
-const DEFAULT_WIN_R_CMD =
-  'wscript "c:\\Users\\ASUS\\.gemini\\antigravity\\scratch\\bill-pro\\Open-EcoBill-Browser.vbs"';
+const DEFAULT_WIN_R_CMD = 'ecobill://open';
 
 export async function copyDesktopWinRCommand(customCommand?: string): Promise<boolean> {
   const cmd = customCommand || DEFAULT_WIN_R_CMD;
@@ -70,9 +73,22 @@ export async function triggerDesktopAction(action: 'open' | 'minimize' | 'close'
     return { ok: true };
   }
 
-  // minimize / close — use backend proxy to Electron's control server on port 45921
+  // minimize / close — use Electron IPC directly when inside desktop app, else local control port
+  if (typeof window !== 'undefined' && window.electronAPI?.isElectron) {
+    if (action === 'minimize' && window.electronAPI.minimizeWindow) {
+      await window.electronAPI.minimizeWindow();
+      toast.success('EcoBill Desktop minimized', { id: TOAST_ID });
+      return { ok: true };
+    }
+    if (action === 'close' && window.electronAPI.closeWindow) {
+      await window.electronAPI.closeWindow();
+      toast.success('EcoBill Desktop closed', { id: TOAST_ID });
+      return { ok: true };
+    }
+  }
+
   try {
-    const res = await fetch(`/api/desktop/${action}`, { method: 'POST' });
+    const res = await fetch(resolveApiUrl(`/api/desktop/${action}`), { method: 'POST' });
     const data = await res.json().catch(() => ({}));
 
     if (data.notRunning) {

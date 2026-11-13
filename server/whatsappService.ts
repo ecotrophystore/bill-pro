@@ -22,8 +22,10 @@ import { registerReconciliationMailerRoutes } from './reconciliationMailer';
 
 dotenv.config();
 
-const PORT = process.env.WHATSAPP_SERVER_PORT || 5001;
-const SESSIONS_DIR = path.resolve(process.cwd(), '.whatsapp_sessions');
+const PORT = Number(process.env.WHATSAPP_SERVER_PORT || 5001);
+const SESSIONS_DIR = process.env.WHATSAPP_SESSIONS_DIR
+  ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
+  : path.resolve(process.cwd(), '.whatsapp_sessions');
 const MEDIA_DIR = path.join(SESSIONS_DIR, 'media');
 const REGISTRY_FILE = path.join(SESSIONS_DIR, 'sessions_registry.json');
 const LID_CACHE_FILE = path.join(SESSIONS_DIR, 'lid_cache.json');
@@ -2436,7 +2438,7 @@ const handleProcessShutdown = () => {
 process.on('SIGINT', handleProcessShutdown);
 process.on('SIGTERM', handleProcessShutdown);
 
-app.listen(PORT, async () => {
+const server = app.listen(PORT, '127.0.0.1', async () => {
   console.log(`=======================================================`);
   console.log(`⚡ EcoBill Multi-WhatsApp Baileys Service running on port ${PORT}`);
   console.log(`=======================================================`);
@@ -2451,4 +2453,13 @@ app.listen(PORT, async () => {
   } else {
     console.log(`[Startup] No paired sessions found. Ready to add new accounts via UI.`);
   }
+});
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[Startup] Port ${PORT} already in use; assuming WhatsApp service is already running.`);
+    process.exit(0);
+  }
+  console.error('[Startup] Server error:', err);
+  process.exit(1);
 });

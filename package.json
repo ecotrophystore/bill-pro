@@ -1,13 +1,17 @@
 {
   "name": "bill-pro",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "EcoBill Desktop CRM & WhatsApp Automation",
+  "author": "Ecotrophy Store <ecotrophystore@gmail.com>",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "desktop": "node electron/dev-launcher.mjs",
     "desktop:prod": "npm run build && node electron/dev-launcher.mjs --prod",
+    "build:server": "node electron/build-server.mjs",
+    "dist:win": "npm run build:server && electron-builder --win",
     "whatsapp:service": "tsx server/whatsappService.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -56,6 +60,7 @@
     "autoprefixer": "^10.4.27",
     "clsx": "^2.1.1",
     "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -69,5 +74,49 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
     "vite": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.ecotrophy.ecobill",
+    "productName": "EcoBill Desktop",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/main.cjs",
+      "electron/preload.cjs",
+      "electron/whatsappPreload.cjs",
+      "electron/dist-server/whatsappService.cjs",
+      "!node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "electron/dist-server/**"
+    ],
+    "protocols": [
+      {
+        "name": "EcoBill Protocol",
+        "schemes": [
+          "ecobill"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "EcoBill-Setup.exe",
+      "shortcutName": "EcoBill Desktop"
+    }
   }
 }

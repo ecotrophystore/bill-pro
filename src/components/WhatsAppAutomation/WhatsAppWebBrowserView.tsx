@@ -8,6 +8,7 @@ import {
   Columns3,
   ExternalLink,
   Gift,
+  GitBranch,
   Globe,
   Lock,
   Maximize2,
@@ -42,6 +43,10 @@ import {
   type WhatsAppImportSummary
 } from './WhatsAppDateImportModal';
 import { WhatsAppWelcomeKitModal } from './WhatsAppWelcomeKitModal';
+import { LeadAssignmentModal } from '../CRM/LeadAssignmentManager';
+import { subscribeScopedLeads } from '../../utils/leadVisibility';
+import { db } from '../../lib/firebase';
+import type { Lead } from '../../types';
 import {
   findDueNoReplyLeadsForTestimonial,
   getCachedWelcomeKitConfig,
@@ -329,6 +334,8 @@ export function WhatsAppWebBrowserView({
   const [qrBulkSyncBanner, setQrBulkSyncBanner] = useState<string | null>(null);
   const [welcomeKitConfig, setWelcomeKitConfig] = useState<WelcomeKitConfig>(getCachedWelcomeKitConfig);
   const [showWelcomeKitModal, setShowWelcomeKitModal] = useState(false);
+  const [showAssignmentModal, setShowAssignmentModal] = useState(false);
+  const [allLeads, setAllLeads] = useState<Lead[]>([]);
   const [sendingWelcomeKit, setSendingWelcomeKit] = useState(false);
   const [runningNoReplyCheck, setRunningNoReplyCheck] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -410,6 +417,18 @@ export function WhatsAppWebBrowserView({
   useEffect(() => {
     return subscribeAutoCrmSyncChange((enabled) => setAutoCrmEnabled(enabled));
   }, []);
+
+  // Subscribe to scoped leads when admin is viewing, so LeadAssignmentModal can display counts and split existing leads
+  useEffect(() => {
+    if (!db || !dbUser || !isAdmin) return;
+    const unsub = subscribeScopedLeads(
+      db,
+      dbUser,
+      (leads) => setAllLeads(leads),
+      (err) => console.warn('[WhatsAppBrowser] Scoped leads load failed:', err)
+    );
+    return () => unsub();
+  }, [dbUser?.id, isAdmin]);
 
   // Listen for stage-move or CRM automated message requests routed to a specific logged-in WhatsApp number
   const dispatchPayloadViaWebviewTab = (
@@ -1864,6 +1883,17 @@ export function WhatsAppWebBrowserView({
               )}
             </button>
 
+            {isAdmin && (
+              <button
+                onClick={() => setShowAssignmentModal(true)}
+                className="min-h-[34px] px-2.5 py-1 rounded-btn bg-surface shadow-neo-surface text-primary-dark hover:text-primary text-[11px] font-bold flex items-center gap-1"
+                title="Divide and split incoming & existing leads among team members"
+              >
+                <GitBranch size={12} className="text-primary" />
+                <span className="hidden sm:inline">Split Leads</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setShowSyncFeed((s) => {
@@ -2239,6 +2269,16 @@ export function WhatsAppWebBrowserView({
               >
                 <CalendarRange size={13} /> Import by Date Range
               </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowAssignmentModal(true)}
+                  className="neo-btn w-full text-xs font-bold text-primary-dark hover:text-primary flex items-center justify-center gap-1.5"
+                  title="Divide and split incoming & existing leads among team members"
+                >
+                  <GitBranch size={13} className="text-primary" /> Auto-Split &amp; Assign Leads
+                </button>
+              )}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2350,6 +2390,14 @@ export function WhatsAppWebBrowserView({
           }
         }}
       />
+
+      {isAdmin && (
+        <LeadAssignmentModal
+          isOpen={showAssignmentModal}
+          onClose={() => setShowAssignmentModal(false)}
+          leads={allLeads}
+        />
+      )}
     </div>
   );
 }

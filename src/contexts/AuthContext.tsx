@@ -89,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                       name: invData.name || firebaseUser.displayName || cleanEmail.split('@')[0],
                       department: invData.department || '',
                       designation: invData.designation || '',
-                      phone: invData.phone || '',
+                      phone: invData.phone || firebaseUser.phoneNumber || '',
                       is_active: invData.is_active !== false,
                     };
                     inviteRefToDelete = inviteRef;
@@ -99,10 +99,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
               }
 
+              // Also check if an invite exists under their phone number
+              if (firebaseUser.phoneNumber && preAssignedRole === 'user') {
+                try {
+                  const cleanPhone = firebaseUser.phoneNumber.replace(/[^\d+]/g, '');
+                  const inviteRef = doc(db, 'user_invites', cleanPhone);
+                  const inviteSnap = await getDoc(inviteRef);
+                  if (inviteSnap.exists()) {
+                    const invData = inviteSnap.data();
+                    preAssignedRole = normalizeRole(invData.role);
+                    extraMeta = {
+                      name: invData.name || firebaseUser.displayName || cleanPhone,
+                      department: invData.department || '',
+                      designation: invData.designation || '',
+                      phone: cleanPhone,
+                      is_active: invData.is_active !== false,
+                    };
+                    inviteRefToDelete = inviteRef;
+                  }
+                } catch {
+                  // Ignore if lookup fails
+                }
+              }
+
+              const fallbackName =
+                firebaseUser.displayName ||
+                (firebaseUser.email ? firebaseUser.email.split('@')[0] : '') ||
+                firebaseUser.phoneNumber ||
+                'User';
+
               const defaultUser = {
                 id: firebaseUser.uid,
-                name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+                name: fallbackName,
                 email: (firebaseUser.email || '').toLowerCase(),
+                phone: firebaseUser.phoneNumber || '',
                 role: preAssignedRole,
                 is_active: true,
                 ...extraMeta,

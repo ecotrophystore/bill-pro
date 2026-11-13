@@ -9,6 +9,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { resolveApiUrl } from '../lib/apiBase';
 import {
   type BillKind,
   type NormalizedTransaction,
@@ -344,7 +345,7 @@ export async function dispatchMonthlyReportEmail(params: {
   const { subject, html, text } = renderMonthlyReportEmailHtml(report, companyName);
 
   try {
-    const res = await fetch('/api/reconciliation/send-monthly-report', {
+    const res = await fetch(resolveApiUrl('/api/reconciliation/send-monthly-report'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

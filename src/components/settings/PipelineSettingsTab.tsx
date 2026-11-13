@@ -543,6 +543,106 @@ export default function PipelineSettingsTab() {
               </div>
             </div>
 
+            {/* Stages Editor for Pipeline */}
+            <div className="space-y-3 pt-3 border-t border-shadow-darker/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-primary-dark">Pipeline Stages ({(pipelineDraft.stages || []).length})</h4>
+                  <p className="text-[11px] text-secondary">Customize, reorder, add, or remove stages for this pipeline.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const stageNum = (pipelineDraft.stages || []).length + 1;
+                    const newStage: PipelineStage = {
+                      id: `custom_stage_${Date.now()}`,
+                      label: `New Stage ${stageNum}`,
+                    };
+                    setPipelineDraft({
+                      ...pipelineDraft,
+                      stages: [...(pipelineDraft.stages || []), newStage],
+                    });
+                  }}
+                  className="neo-btn text-xs px-3 py-1 font-bold text-primary flex items-center gap-1"
+                >
+                  <Plus size={13} /> Add Stage
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto custom-sidebar-scrollbar pr-1">
+                {(pipelineDraft.stages || []).map((stg, idx) => (
+                  <div
+                    key={stg.id || idx}
+                    className="p-2.5 rounded-xl border border-shadow-darker/10 bg-surface flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+                        #{idx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={stg.label}
+                        onChange={(e) => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          updated[idx] = { ...updated[idx], label: e.target.value };
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="neo-input !py-1 !px-2 text-xs font-semibold flex-1"
+                        placeholder="Stage name (e.g. Payment Pending)"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          const [item] = updated.splice(idx, 1);
+                          updated.splice(idx - 1, 0, item);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-shadow-darker/10 disabled:opacity-30 hover:text-primary"
+                        title="Move Up"
+                      >
+                        <MoveUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === (pipelineDraft.stages || []).length - 1}
+                        onClick={() => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          const [item] = updated.splice(idx, 1);
+                          updated.splice(idx + 1, 0, item);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-shadow-darker/10 disabled:opacity-30 hover:text-primary"
+                        title="Move Down"
+                      >
+                        <MoveDown size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={(pipelineDraft.stages || []).length <= 2}
+                        onClick={() => {
+                          if ((pipelineDraft.stages || []).length <= 2) {
+                            alert('A pipeline must have at least 2 stages.');
+                            return;
+                          }
+                          const updated = (pipelineDraft.stages || []).filter((_, i) => i !== idx);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-30"
+                        title="Remove Stage"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2 pt-2">
               {editingPipelineId && (
                 <button

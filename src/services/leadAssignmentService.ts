@@ -678,22 +678,32 @@ export async function reassignLeadOwner(params: {
 }
 
 /**
- * Splits currently unassigned leads across active team members & rules in order.
+ * Splits leads across active team members & rules in order.
+ * - scope 'unassigned_only': only leads with no owner
+ * - scope 'all_existing': re-splits every existing lead in the list
  */
-export async function distributeUnassignedLeads(
+export async function distributeLeadsToTeam(
   config: LeadAssignmentConfig,
   leads: Lead[],
-  actorId?: string
-): Promise<{ assignedCount: number; skippedCount: number }> {
-  if (!db) return { assignedCount: 0, skippedCount: 0 };
+  options?: {
+    actorId?: string;
+    scope?: 'unassigned_only' | 'all_existing';
+  }
+): Promise<{ assignedCount: number; skippedCount: number; totalCandidates: number }> {
+  if (!db) return { assignedCount: 0, skippedCount: 0, totalCandidates: 0 };
 
-  const unassigned = leads.filter((l) => !getLeadOwnerId(l) && !String(l.sales_person || '').trim());
+  const scope = options?.scope || 'unassigned_only';
+  const candidates =
+    scope === 'all_existing'
+      ? leads
+      : leads.filter((l) => !getLeadOwnerId(l) && !String(l.sales_person || '').trim());
+
   let assignedCount = 0;
   let skippedCount = 0;
 
   const workingConfig: LeadAssignmentConfig = { ...config, enabled: true };
 
-  for (const lead of unassigned) {
+  for (const lead of candidates) {
     const decision = await resolveLeadAssignment(
       {
         source: lead.source,
@@ -723,13 +733,29 @@ export async function distributeUnassignedLeads(
       ownerId: decision.ownerId,
       sales_person: decision.ownerName,
       assigned_at: serverTimestamp(),
-      assigned_by: actorId || 'admin_bulk_split',
+      assigned_by: options?.actorId || 'admin_split',
       assignment_rule_name: decision.ruleName || decision.mode,
       updated_at: serverTimestamp(),
     });
     assignedCount++;
   }
 
-  return { assignedCount, skippedCount };
+  return { assignedCount, skippedCount, totalCandidates: candidates.length };
+}
+
+/**
+ * Splits currently unassigned leads across active team members & rules in order.
+ * (Backward-compatible helper)
+ */
+export async function distributeUnassignedLeads(
+  config: LeadAssignmentConfig,
+  leads: Lead[],
+  actorId?: string
+): Promise<{ assignedCount: number; skippedCount: number }> {
+  const res = await distributeLeadsToTeam(config, leads, {
+    actorId,
+    scope: 'unassigned_only',
+  });
+  return { assignedCount: res.assignedCount, skippedCount: res.skippedCount };
 }
 

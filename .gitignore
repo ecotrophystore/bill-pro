@@ -48,3 +48,7 @@ scratch_read_events.js
 
 # WhatsApp Multi-Session Storage
 .whatsapp_sessions/
+
+# Electron packaged installers & bundled server
+release/
+electron/dist-server/

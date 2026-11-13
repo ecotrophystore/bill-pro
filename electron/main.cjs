@@ -2,6 +2,9 @@ const { app, BrowserWindow, dialog, ipcMain, session, shell } = require('electro
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { spawn } = require('child_process');
+
+const HOSTED_APP_URL = 'https://ecotrophy-inventory.web.app';
 
 const chromeMajor = (process.versions.chrome || '134.0.0.0').split('.')[0];
 const CLEAN_CHROME_UA = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36`;
@@ -11,6 +14,70 @@ const preparedPartitions = new Set();
 let mainWindow = null;
 let staticServer = null;
 let controlServer = null;
+let backendProcess = null;
+
+function startBundledBackendServer() {
+  if (backendProcess) return;
+  const bundledServerPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'electron', 'dist-server', 'whatsappService.cjs')
+    : path.join(__dirname, 'dist-server', 'whatsappService.cjs');
+
+  const logPath = path.join(app.getPath('userData'), 'whatsapp-backend.log');
+  if (!fs.existsSync(bundledServerPath)) {
+    try {
+      fs.writeFileSync(logPath, `[${new Date().toISOString()}] Missing server bundle: ${bundledServerPath}\n`);
+    } catch {}
+    return;
+  }
+
+  const sessionsDir = path.join(app.getPath('userData'), 'whatsapp_sessions');
+  try {
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  } catch {
+    // ignore mkdir errors; backend will create if needed
+  }
+
+  let logFd = 'ignore';
+  try {
+    logFd = fs.openSync(logPath, 'a');
+  } catch {
+    logFd = 'ignore';
+  }
+
+  backendProcess = spawn(process.execPath, [bundledServerPath], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
+      WHATSAPP_SERVER_PORT: '5001',
+      WHATSAPP_SESSIONS_DIR: sessionsDir
+    },
+    stdio: ['ignore', logFd, logFd],
+    windowsHide: true
+  });
+
+  backendProcess.on('error', (err) => {
+    try {
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] Spawn error: ${err.message}\n`);
+    } catch {}
+  });
+
+  backendProcess.on('exit', (code) => {
+    try {
+      fs.appendFileSync(logPath, `[${new Date().toISOString()}] Backend exited with code ${code}\n`);
+    } catch {}
+    backendProcess = null;
+  });
+}
+
+function stopBundledBackendServer() {
+  if (!backendProcess) return;
+  try {
+    backendProcess.kill();
+  } catch {
+    // ignore kill errors
+  }
+  backendProcess = null;
+}
 
 function restoreAndFocusMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -23,7 +90,16 @@ function startWindowControlServer() {
   if (controlServer) return;
   controlServer = http.createServer((req, res) => {
     const reqPath = (req.url || '/').split('?')[0];
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Content-Type', 'application/json');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     if (req.method === 'GET' && reqPath === '/status') {
       res.writeHead(200);
@@ -265,18 +341,22 @@ async function createMainWindow() {
   let targetUrl = explicitUrl;
 
   if (!targetUrl) {
-    const devAlive = await new Promise((resolve) => {
-      const req = http.get('http://localhost:5173', (res) => {
-        res.resume();
-        resolve(res.statusCode >= 200 && res.statusCode < 500);
+    if (app.isPackaged) {
+      targetUrl = HOSTED_APP_URL;
+    } else {
+      const devAlive = await new Promise((resolve) => {
+        const req = http.get('http://localhost:5173', (res) => {
+          res.resume();
+          resolve(res.statusCode >= 200 && res.statusCode < 500);
+        });
+        req.on('error', () => resolve(false));
+        req.setTimeout(500, () => {
+          req.destroy();
+          resolve(false);
+        });
       });
-      req.on('error', () => resolve(false));
-      req.setTimeout(500, () => {
-        req.destroy();
-        resolve(false);
-      });
-    });
-    targetUrl = devAlive ? 'http://localhost:5173' : await startProductionServer();
+      targetUrl = devAlive ? 'http://localhost:5173' : await startProductionServer();
+    }
   }
 
   console.log('[Electron] Loading EcoBill URL:', targetUrl);
@@ -513,6 +593,7 @@ if (!gotSingleLock) {
 
   app.whenReady().then(() => {
     startWindowControlServer();
+    startBundledBackendServer();
     // Check if launched via ecobill:// protocol (argv contains the URL)
     const protocolUrl = process.argv.find(a => a.startsWith('ecobill://'));
     if (protocolUrl) {
@@ -522,7 +603,10 @@ if (!gotSingleLock) {
   });
 }
 
+app.on('before-quit', stopBundledBackendServer);
+
 app.on('window-all-closed', () => {
+  stopBundledBackendServer();
   if (controlServer) {
     controlServer.close();
     controlServer = null;

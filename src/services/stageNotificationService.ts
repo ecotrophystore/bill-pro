@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../lib/firebase';
+import { resolveApiUrl } from '../lib/apiBase';
 import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage } from '../types';
 import { buildTemplateContext, renderTemplateText, DEFAULT_STAGE_MESSAGES } from '../utils/templateVariables';
 import { fetchAllSessions } from './whatsappMultiSessionService';
@@ -36,7 +37,7 @@ async function sendViaElectronWhatsAppWeb(params: {
   // When invoked from Chrome/external browser, bridge through running EcoBill Desktop on localhost control port
   if (!window.electronAPI?.isElectron) {
     try {
-      const res = await fetch('/api/desktop/send-whatsapp', {
+      const res = await fetch(resolveApiUrl('/api/desktop/send-whatsapp'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params)
@@ -113,7 +114,7 @@ async function sendViaBaileysSession(params: {
         connected[0];
     }
 
-    const res = await fetch('/api/whatsapp/send', {
+    const res = await fetch(resolveApiUrl('/api/whatsapp/send'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

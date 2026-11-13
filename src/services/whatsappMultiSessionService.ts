@@ -1,4 +1,5 @@
 // Frontend service to interact with the Baileys Multi-WhatsApp Backend
+import { resolveApiUrl } from '../lib/apiBase';
 
 export interface SessionInfo {
   id: string;
@@ -92,7 +93,7 @@ export interface ConversationSummary {
   insight?: AiLeadInsight;
 }
 
-const BASE_URL = '/api/whatsapp';
+const BASE_URL = resolveApiUrl('/api/whatsapp');
 
 export async function checkServerHealth(): Promise<boolean> {
   try {
