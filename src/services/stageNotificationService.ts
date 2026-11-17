@@ -13,7 +13,8 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { db, auth, functions } from '../lib/firebase';
 import { resolveApiUrl } from '../lib/apiBase';
-import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage } from '../types';
+import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage, StageMovePromptMode } from '../types';
+export type { StageMovePromptMode };
 import { buildTemplateContext, renderTemplateText, DEFAULT_STAGE_MESSAGES } from '../utils/templateVariables';
 import { fetchAllSessions } from './whatsappMultiSessionService';
 import {
@@ -148,23 +149,49 @@ export interface StageMoveResult {
   error?: string;
 }
 
-const AUTO_SEND_STAGE_WA_KEY = 'ecobill.autoSendStageWhatsApp';
-const AUTO_SEND_STAGE_WA_EVENT = 'ecobill:auto-send-stage-wa-changed';
+export const STAGE_MOVE_MODE_KEY = 'ecobill.stageMoveMode';
+export const STAGE_MOVE_MODE_EVENT = 'ecobill:stage-move-mode-changed';
+export const AUTO_SEND_STAGE_WA_KEY = 'ecobill.autoSendStageWhatsApp';
+export const AUTO_SEND_STAGE_WA_EVENT = 'ecobill:auto-send-stage-wa-changed';
+
+export function getStageMoveMode(): StageMovePromptMode {
+  if (typeof window === 'undefined') return 'ask';
+  const val = window.localStorage.getItem(STAGE_MOVE_MODE_KEY) as StageMovePromptMode | null;
+  if (val === 'ask' || val === 'auto_send' || val === 'without_message') {
+    return val;
+  }
+  // Default to 'ask' so the user is always prompted "with message" or "without message"
+  return 'ask';
+}
+
+export function setStageMoveMode(mode: StageMovePromptMode): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(STAGE_MOVE_MODE_KEY, mode);
+  window.localStorage.setItem(AUTO_SEND_STAGE_WA_KEY, String(mode === 'auto_send'));
+  window.dispatchEvent(new CustomEvent(STAGE_MOVE_MODE_EVENT, { detail: mode }));
+  window.dispatchEvent(new CustomEvent(AUTO_SEND_STAGE_WA_EVENT, { detail: mode === 'auto_send' }));
+}
+
+export function subscribeStageMoveModeChange(callback: (mode: StageMovePromptMode) => void): () => void {
+  if (typeof window === 'undefined') return () => { };
+  const handler = (ev: Event) => {
+    const custom = ev as CustomEvent<StageMovePromptMode>;
+    callback(custom.detail || getStageMoveMode());
+  };
+  window.addEventListener(STAGE_MOVE_MODE_EVENT, handler);
+  return () => window.removeEventListener(STAGE_MOVE_MODE_EVENT, handler);
+}
 
 export function getAutoSendOnStageMoveEnabled(): boolean {
-  if (typeof window === 'undefined') return true;
-  const raw = window.localStorage.getItem(AUTO_SEND_STAGE_WA_KEY);
-  return raw === null ? true : raw === 'true';
+  return getStageMoveMode() === 'auto_send';
 }
 
 export function setAutoSendOnStageMoveEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(AUTO_SEND_STAGE_WA_KEY, String(enabled));
-  window.dispatchEvent(new CustomEvent(AUTO_SEND_STAGE_WA_EVENT, { detail: enabled }));
+  setStageMoveMode(enabled ? 'auto_send' : 'ask');
 }
 
 export function subscribeAutoSendOnStageMoveChange(callback: (enabled: boolean) => void): () => void {
-  if (typeof window === 'undefined') return () => {};
+  if (typeof window === 'undefined') return () => { };
   const handler = (ev: Event) => {
     const custom = ev as CustomEvent<boolean>;
     callback(typeof custom.detail === 'boolean' ? custom.detail : getAutoSendOnStageMoveEnabled());
@@ -412,7 +439,7 @@ export async function executeManualStageMove(params: {
             platform: 'whatsapp',
             triggeredBy: 'stage_change',
             created_at: serverTimestamp(),
-          }).catch(() => {});
+          }).catch(() => { });
         }
 
         // 3. Only fall back to Cloud Function / Meta Cloud API if phone exists and no specific WhatsApp Web source number recorded
@@ -522,7 +549,7 @@ export async function executeManualStageMove(params: {
             leadBackfill.whatsapp_number = resolvedRecipientPhone;
           }
           if (Object.keys(leadBackfill).length > 0 && db) {
-            updateDoc(doc(db, 'leads', lead.id), leadBackfill).catch(() => {});
+            updateDoc(doc(db, 'leads', lead.id), leadBackfill).catch(() => { });
           }
         } else {
           // Failed (e.g. missing originating tab, offline session, or 24h Meta Cloud window closed)
@@ -619,8 +646,8 @@ export async function executeManualStageMove(params: {
   const activityMsg = effectiveSendMessage
     ? `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName}. Customer notification (${notificationStatus.whatsapp === 'sent' ? 'WhatsApp Sent' : 'Message Logged'}) triggered.`
     : skippedDueToDuplicate
-    ? `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Duplicate stage notification skipped).`
-    : `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Notification skipped).`;
+      ? `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Duplicate stage notification skipped).`
+      : `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Notification skipped).`;
 
   await addDoc(collection(db, 'activities'), {
     lead_id: lead.id,

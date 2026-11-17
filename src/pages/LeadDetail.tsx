@@ -39,7 +39,12 @@ import {
   Tag,
   CircleAlert,
   ChevronRight,
+  Flame,
+  BookOpen,
 } from 'lucide-react';
+import { ContextualSalesGuide } from '../components/CRM/ContextualSalesGuide';
+import { SalesQualityAuditModal } from '../components/CRM/SalesQualityAuditModal';
+import { LostLeadIntelligenceModal } from '../components/CRM/LostLeadIntelligenceModal';
 import { db, auth, functions } from '../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import {
@@ -65,11 +70,14 @@ import { PipelineReassignBanner } from '../components/CRM/PipelineReassignBanner
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 import {
-  getAutoSendOnStageMoveEnabled,
+  executeManualStageMove,
+  getStageMessageConfig,
+  getStageMoveMode,
   openWhatsAppWebDirect,
   runAutoStageMoveWithToast,
   stageRequiresReason,
-  subscribeAutoSendOnStageMoveChange,
+  subscribeStageMoveModeChange,
+  type StageMovePromptMode,
 } from '../services/stageNotificationService';
 import { STAGE_PHASES, type StagePhase } from './PipelineBoard';
 import {
@@ -115,8 +123,8 @@ function toDateInputValue(value: any) {
     typeof value.toDate === 'function'
       ? value.toDate()
       : typeof value.seconds === 'number'
-      ? new Date(value.seconds * 1000)
-      : new Date(value);
+        ? new Date(value.seconds * 1000)
+        : new Date(value);
 
   if (Number.isNaN(date.getTime())) return '';
 
@@ -136,8 +144,10 @@ export default function LeadDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'notes' | 'quotation' | 'conversation' | 'history'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'sales_guide' | 'notes' | 'quotation' | 'conversation' | 'history'>('details');
   const [notesDrawerOpen, setNotesDrawerOpen] = useState(false);
+  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [showLostModal, setShowLostModal] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [composerText, setComposerText] = useState('');
   const [dismissedReassign, setDismissedReassign] = useState(false);
@@ -159,7 +169,7 @@ export default function LeadDetail() {
       setFeedback('No company name to enrich');
       return;
     }
-    
+
     setIsEnriching(true);
     try {
       const enrich = httpsCallable(functions, 'enrichCompanyManual');
@@ -173,11 +183,11 @@ export default function LeadDetail() {
     }
   };
 
-  // Stage change modal state & instant auto-send preference
-  const [autoSendOnMove, setAutoSendOnMove] = useState<boolean>(() => getAutoSendOnStageMoveEnabled());
+  // Stage change modal state & stage move preference (ask, auto_send, or without_message)
+  const [stageMoveMode, setStageMoveModeState] = useState<StageMovePromptMode>(() => getStageMoveMode());
   useEffect(() => {
-    return subscribeAutoSendOnStageMoveChange((enabled) => {
-      setAutoSendOnMove(enabled);
+    return subscribeStageMoveModeChange((mode) => {
+      setStageMoveModeState(mode);
     });
   }, []);
 
@@ -256,14 +266,14 @@ export default function LeadDetail() {
             typeof a.created_at?.toDate === 'function'
               ? a.created_at.toDate().getTime()
               : (a.created_at as any)?.seconds
-              ? (a.created_at as any).seconds * 1000
-              : 0;
+                ? (a.created_at as any).seconds * 1000
+                : 0;
           const bt =
             typeof b.created_at?.toDate === 'function'
               ? b.created_at.toDate().getTime()
               : (b.created_at as any)?.seconds
-              ? (b.created_at as any).seconds * 1000
-              : 0;
+                ? (b.created_at as any).seconds * 1000
+                : 0;
           return bt - at;
         });
         setActivities(rows);
@@ -296,14 +306,14 @@ export default function LeadDetail() {
             typeof a.created_at?.toDate === 'function'
               ? a.created_at.toDate().getTime()
               : (a.created_at as any)?.seconds
-              ? (a.created_at as any).seconds * 1000
-              : 0;
+                ? (a.created_at as any).seconds * 1000
+                : 0;
           const bt =
             typeof b.created_at?.toDate === 'function'
               ? b.created_at.toDate().getTime()
               : (b.created_at as any)?.seconds
-              ? (b.created_at as any).seconds * 1000
-              : 0;
+                ? (b.created_at as any).seconds * 1000
+                : 0;
           return at - bt;
         });
         setMessages(msgs);
@@ -408,6 +418,11 @@ export default function LeadDetail() {
   const handleStageSelectChange = async (newStageId: string) => {
     if (!lead || newStageId === lead.status) return;
 
+    if (newStageId === 'lost_cancelled' || newStageId === 'won_lost') {
+      setShowLostModal(true);
+      return;
+    }
+
     const fromStage = activeStages.find((s) => s.id === (lead.status || 'new_enquiry')) || {
       id: lead.status || 'new_enquiry',
       label: currentStageLabel,
@@ -417,23 +432,53 @@ export default function LeadDetail() {
       label: newStageId,
     };
 
-    if (!autoSendOnMove || stageRequiresReason(toStage)) {
-      setStageModalState({
-        isOpen: true,
+    let effectiveMode = toStage.move_prompt_mode || stageMoveMode;
+    if (!toStage.move_prompt_mode && stageMoveMode === 'ask') {
+      try {
+        const cfg = await getStageMessageConfig(toStage.id, toStage.label, activePipeline.id);
+        if (cfg?.move_prompt_mode) {
+          effectiveMode = cfg.move_prompt_mode;
+        }
+      } catch {
+        // use default effectiveMode
+      }
+    }
+
+    if (effectiveMode === 'auto_send' && !stageRequiresReason(toStage)) {
+      const res = await runAutoStageMoveWithToast({
+        lead,
         fromStage,
         toStage,
+        pipelineId: activePipeline.id,
+        pipelineName: activePipeline.name,
       });
+      setFeedback(res.message);
       return;
     }
 
-    const res = await runAutoStageMoveWithToast({
-      lead,
+    if (effectiveMode === 'without_message' && !stageRequiresReason(toStage)) {
+      try {
+        const res = await executeManualStageMove({
+          lead,
+          fromStage,
+          toStage,
+          pipelineId: activePipeline.id,
+          pipelineName: activePipeline.name,
+          sendMessage: false,
+        });
+        setFeedback(res.message);
+      } catch (err: any) {
+        setFeedback(err?.message || 'Failed to move lead');
+      }
+      return;
+    }
+
+    // Default 'ask': Open modal asking user "With Message" or "Without Message"
+    setStageModalState({
+      isOpen: true,
       fromStage,
       toStage,
-      pipelineId: activePipeline.id,
-      pipelineName: activePipeline.name,
     });
-    setFeedback(res.message);
   };
 
   const handleReassignPipeline = async (targetPipelineId: string) => {
@@ -471,10 +516,10 @@ export default function LeadDetail() {
         trophy_size: form.trophy_size.trim(),
         ...(isAdmin
           ? {
-              sales_person: form.sales_person.trim(),
-              owner_id: form.owner_id.trim(),
-              ownerId: form.owner_id.trim(),
-            }
+            sales_person: form.sales_person.trim(),
+            owner_id: form.owner_id.trim(),
+            ownerId: form.owner_id.trim(),
+          }
           : {}),
         design_person: form.design_person.trim(),
         tracking_number: form.tracking_number.trim(),
@@ -708,6 +753,33 @@ export default function LeadDetail() {
                   Campaign: {lead.campaign_name}
                 </span>
               )}
+
+              {/* EcoTrophy Intent Badge */}
+              {lead.intent_tier && (
+                <span
+                  className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 shadow-xs ${lead.intent_tier === 'HIGH'
+                      ? 'bg-rose-50 text-rose-700 border-rose-300'
+                      : lead.intent_tier === 'MEDIUM'
+                        ? 'bg-amber-50 text-amber-700 border-amber-300'
+                        : 'bg-slate-50 text-slate-700 border-slate-300'
+                    }`}
+                  title={`Intent Score: ${lead.intent_score ?? 50}/100. ${lead.intent_reasons?.join(', ') || ''}`}
+                >
+                  {lead.intent_tier === 'HIGH' && <Flame size={12} className="text-rose-500 fill-rose-500" />}
+                  {lead.intent_tier} INTENT ({lead.intent_score ?? 50}/100)
+                </span>
+              )}
+
+              {/* 100-Mark Quality Audit Button */}
+              <button
+                type="button"
+                onClick={() => setShowAuditModal(true)}
+                className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                title="View 100-Mark Sales Quality Audit Scorecard"
+              >
+                <Award size={12} className="text-indigo-600" />
+                <span>Audit: {lead.sales_audit?.total_score ?? 78}/100 M</span>
+              </button>
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold text-primary-dark">{lead.name}</h1>
@@ -823,13 +895,12 @@ export default function LeadDetail() {
             return (
               <div
                 key={phase.id}
-                className={`p-2.5 rounded-xl border text-xs transition-all ${
-                  hasCurrentStage
+                className={`p-2.5 rounded-xl border text-xs transition-all ${hasCurrentStage
                     ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/20'
                     : isPhasePassed
-                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                    : 'bg-transparent border-slate-200 text-slate-500 opacity-80'
-                }`}
+                      ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                      : 'bg-transparent border-slate-200 text-slate-500 opacity-80'
+                  }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="font-extrabold text-[11px] truncate">{phase.shortLabel}</span>
@@ -856,13 +927,12 @@ export default function LeadDetail() {
                         key={sId}
                         type="button"
                         onClick={() => handleStageSelectChange(sId)}
-                        className={`text-[9px] px-1.5 py-0.5 rounded transition-all font-semibold truncate max-w-[85px] ${
-                          isCurrent
+                        className={`text-[9px] px-1.5 py-0.5 rounded transition-all font-semibold truncate max-w-[85px] ${isCurrent
                             ? 'bg-primary text-white shadow-xs font-bold'
                             : isPassed
-                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                            : 'bg-transparent text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
-                        }`}
+                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                              : 'bg-transparent text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
+                          }`}
                         title={`Click to set stage to: ${stg.label}`}
                       >
                         {stg.label}
@@ -908,117 +978,122 @@ export default function LeadDetail() {
 
       {/* Company Intelligence Widget */}
       {((lead as any).company_intelligence || lead.company || lead.organization) && (
-         <div className="neo-card space-y-3 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-surface border border-indigo-500/20">
-            <div className="flex items-center justify-between gap-3 border-b border-shadow-darker/10 pb-2.5">
-               <div className="flex items-center gap-2">
-                 <Building size={16} className="text-indigo-600" />
-                 <h2 className="text-sm font-bold text-primary-dark">Company Intelligence</h2>
-               </div>
-               
-               <div className="flex items-center gap-2">
-                 {(lead as any).company_intelligence?.status === 'success' ? (
-                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
-                     <CheckCircle2 size={12}/> Enriched
-                   </span>
-                 ) : (lead as any).company_intelligence?.status === 'not_found' ? (
-                   <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-                     Not Found
-                   </span>
-                 ) : null}
-
-                 <button
-                    onClick={handleEnrichCompany}
-                    disabled={isEnriching}
-                    className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 disabled:opacity-50"
-                 >
-                    {isEnriching ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
-                    { (lead as any).company_intelligence ? 'Re-enrich' : 'Enrich Data' }
-                 </button>
-               </div>
+        <div className="neo-card space-y-3 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-surface border border-indigo-500/20">
+          <div className="flex items-center justify-between gap-3 border-b border-shadow-darker/10 pb-2.5">
+            <div className="flex items-center gap-2">
+              <Building size={16} className="text-indigo-600" />
+              <h2 className="text-sm font-bold text-primary-dark">Company Intelligence</h2>
             </div>
 
-            {(lead as any).company_intelligence?.status === 'success' && (lead as any).company_intelligence?.data && (
-               <div className="space-y-3">
-                  <div className="flex gap-4">
-                     { (lead as any).company_intelligence.data.logo_url && (
-                        <div className="w-12 h-12 rounded-xl bg-white border border-shadow-darker/10 flex items-center justify-center shrink-0 p-1">
-                           <img src={(lead as any).company_intelligence.data.logo_url} alt="Logo" className="w-full h-full object-contain" />
-                        </div>
-                     )}
-                     <div className="flex-1">
-                        <h3 className="font-bold text-primary-dark">{(lead as any).company_intelligence.data.name}</h3>
-                        <p className="text-xs text-secondary mt-1 line-clamp-3">
-                           {(lead as any).company_intelligence.data.description}
-                        </p>
-                     </div>
+            <div className="flex items-center gap-2">
+              {(lead as any).company_intelligence?.status === 'success' ? (
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                  <CheckCircle2 size={12} /> Enriched
+                </span>
+              ) : (lead as any).company_intelligence?.status === 'not_found' ? (
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                  Not Found
+                </span>
+              ) : null}
+
+              <button
+                onClick={handleEnrichCompany}
+                disabled={isEnriching}
+                className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 disabled:opacity-50"
+              >
+                {isEnriching ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                {(lead as any).company_intelligence ? 'Re-enrich' : 'Enrich Data'}
+              </button>
+            </div>
+          </div>
+
+          {(lead as any).company_intelligence?.status === 'success' && (lead as any).company_intelligence?.data && (
+            <div className="space-y-3">
+              <div className="flex gap-4">
+                {(lead as any).company_intelligence.data.logo_url && (
+                  <div className="w-12 h-12 rounded-xl bg-white border border-shadow-darker/10 flex items-center justify-center shrink-0 p-1">
+                    <img src={(lead as any).company_intelligence.data.logo_url} alt="Logo" className="w-full h-full object-contain" />
                   </div>
-                  
-                  {(lead as any).company_intelligence.data.website && (
-                     <div className="pt-2 border-t border-shadow-darker/5">
-                        <a href={(lead as any).company_intelligence.data.website} target="_blank" rel="noreferrer" className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1">
-                           <ExternalLink size={12} /> Visit Website
-                        </a>
-                     </div>
-                  )}
-               </div>
-            )}
-         </div>
+                )}
+                <div className="flex-1">
+                  <h3 className="font-bold text-primary-dark">{(lead as any).company_intelligence.data.name}</h3>
+                  <p className="text-xs text-secondary mt-1 line-clamp-3">
+                    {(lead as any).company_intelligence.data.description}
+                  </p>
+                </div>
+              </div>
+
+              {(lead as any).company_intelligence.data.website && (
+                <div className="pt-2 border-t border-shadow-darker/5">
+                  <a href={(lead as any).company_intelligence.data.website} target="_blank" rel="noreferrer" className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                    <ExternalLink size={12} /> Visit Website
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
 
-      {/* Tab Navigation Ribbon (5 Complete Tabs) */}
+      {/* Tab Navigation Ribbon */}
       <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2 flex-wrap">
         <button
           onClick={() => setActiveTab('details')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeTab === 'details'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'details'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-          }`}
+            }`}
         >
           <Award size={14} /> Customer & Order Specs
         </button>
 
         <button
+          onClick={() => setActiveTab('sales_guide')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'sales_guide'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
+        >
+          <BookOpen size={14} /> AI Sales Guide & Playbook
+        </button>
+
+        <button
           onClick={() => setActiveTab('notes')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeTab === 'notes'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'notes'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-          }`}
+            }`}
         >
           <StickyNote size={14} /> Notes & Reminders ({leadNotes.length || lead.notes_count || 0})
         </button>
 
         <button
           onClick={() => setActiveTab('quotation')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeTab === 'quotation'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'quotation'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-          }`}
+            }`}
         >
           <FileText size={14} /> Quotations ({leadQuotations.length})
         </button>
 
         <button
           onClick={() => setActiveTab('conversation')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeTab === 'conversation'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'conversation'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-          }`}
+            }`}
         >
           <MessageSquare size={14} /> Omnichannel Chat ({messages.length})
         </button>
 
         <button
           onClick={() => setActiveTab('history')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            activeTab === 'history'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'history'
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-          }`}
+            }`}
         >
           <History size={14} /> Stage History ({stageHistoryList.length + notificationHistoryList.length})
         </button>
@@ -1033,9 +1108,31 @@ export default function LeadDetail() {
         </div>
       )}
 
+      {/* DEDICATED SALES GUIDE TAB */}
+      {activeTab === 'sales_guide' && (
+        <div className="space-y-4">
+          <ContextualSalesGuide
+            lead={lead}
+            onApplyReply={(text) => {
+              setComposerText(text);
+              setActiveTab('conversation');
+            }}
+          />
+        </div>
+      )}
+
       {/* TAB 1: SECTIONAL CUSTOMER & ORDER DETAILS FORM */}
       {activeTab === 'details' && (
         <div className="space-y-5">
+          {/* Quick Contextual Sales Guide Banner */}
+          <ContextualSalesGuide
+            lead={lead}
+            onApplyReply={(text) => {
+              setComposerText(text);
+              setActiveTab('conversation');
+            }}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Section 1: Contact & Organization */}
             <div className="neo-card space-y-3.5">
@@ -1425,11 +1522,10 @@ export default function LeadDetail() {
                 {leadNotes.map((n) => (
                   <div
                     key={n.id}
-                    className={`p-3.5 rounded-2xl border text-xs space-y-2 transition-all ${
-                      n.is_pinned
+                    className={`p-3.5 rounded-2xl border text-xs space-y-2 transition-all ${n.is_pinned
                         ? 'bg-amber-50/50 border-amber-200'
                         : 'bg-transparent border-shadow-darker/10'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1456,9 +1552,8 @@ export default function LeadDetail() {
                         <button
                           type="button"
                           onClick={() => handleTogglePin(n.id, !!n.is_pinned)}
-                          className={`p-1 rounded hover:bg-transparent text-secondary ${
-                            n.is_pinned ? 'text-amber-600' : 'hover:text-primary'
-                          }`}
+                          className={`p-1 rounded hover:bg-transparent text-secondary ${n.is_pinned ? 'text-amber-600' : 'hover:text-primary'
+                            }`}
                           title={n.is_pinned ? 'Unpin note' : 'Pin note to top'}
                         >
                           <Pin size={13} className={n.is_pinned ? 'fill-amber-500' : ''} />
@@ -1673,21 +1768,21 @@ export default function LeadDetail() {
                     m.platform === 'whatsapp'
                       ? 'WhatsApp'
                       : m.platform === 'facebook_messenger'
-                      ? 'Messenger'
-                      : m.platform === 'facebook_lead_ad'
-                      ? 'Lead Ad'
-                      : m.platform === 'instagram'
-                      ? 'Instagram'
-                      : m.platform || 'Direct';
+                        ? 'Messenger'
+                        : m.platform === 'facebook_lead_ad'
+                          ? 'Lead Ad'
+                          : m.platform === 'instagram'
+                            ? 'Instagram'
+                            : m.platform || 'Direct';
 
                   const badgeColor =
                     m.platform === 'whatsapp'
                       ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
                       : m.platform === 'facebook_messenger'
-                      ? 'bg-sky-100 text-sky-800 border-sky-200'
-                      : m.platform === 'facebook_lead_ad'
-                      ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
-                      : 'bg-rose-100 text-rose-800 border-rose-200';
+                        ? 'bg-sky-100 text-sky-800 border-sky-200'
+                        : m.platform === 'facebook_lead_ad'
+                          ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
+                          : 'bg-rose-100 text-rose-800 border-rose-200';
 
                   return (
                     <div
@@ -1706,11 +1801,10 @@ export default function LeadDetail() {
                       </div>
 
                       <div
-                        className={`max-w-lg p-3.5 rounded-2xl border shadow-xs whitespace-pre-wrap leading-relaxed ${
-                          isInbound
+                        className={`max-w-lg p-3.5 rounded-2xl border shadow-xs whitespace-pre-wrap leading-relaxed ${isInbound
                             ? 'bg-transparent text-slate-800 border-shadow-darker/10 rounded-tl-none'
                             : 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none'
-                        }`}
+                          }`}
                       >
                         {m.content}
                       </div>
@@ -1773,8 +1867,7 @@ export default function LeadDetail() {
                   type="button"
                   onClick={() =>
                     setComposerText(
-                      `Hi ${lead.name}, thank you for contacting EcoTrophy! We have received your enquiry for ${
-                        lead.required_quantity || ''
+                      `Hi ${lead.name}, thank you for contacting EcoTrophy! We have received your enquiry for ${lead.required_quantity || ''
                       } trophies and our team is reviewing your requirements.`
                     )
                   }
@@ -1899,9 +1992,8 @@ export default function LeadDetail() {
                     <div className="flex items-center justify-between text-[11px] text-secondary pt-1">
                       <span>Recipient: {n.recipient}</span>
                       <span
-                        className={`font-semibold ${
-                          n.status === 'sent' ? 'text-emerald-700' : 'text-amber-700'
-                        }`}
+                        className={`font-semibold ${n.status === 'sent' ? 'text-emerald-700' : 'text-amber-700'
+                          }`}
                       >
                         Status: {n.status} {n.error ? `(${n.error})` : ''}
                       </span>
@@ -1940,6 +2032,36 @@ export default function LeadDetail() {
         lead={lead}
         stageName={currentStageLabel}
         onClose={() => setNotesDrawerOpen(false)}
+      />
+
+      {/* 100-Mark Sales Quality Audit Modal */}
+      <SalesQualityAuditModal
+        lead={lead}
+        isOpen={showAuditModal}
+        onClose={() => setShowAuditModal(false)}
+        onAuditUpdated={(newAudit) => {
+          setLead((prev) => (prev ? { ...prev, sales_audit: newAudit } : null));
+          setFeedback('Sales Quality Audit updated successfully!');
+        }}
+      />
+
+      {/* Lost Lead Intelligence Diagnostic Modal */}
+      <LostLeadIntelligenceModal
+        lead={lead}
+        isOpen={showLostModal}
+        onClose={() => setShowLostModal(false)}
+        onSave={(lostData) => {
+          setLead((prev) =>
+            prev
+              ? {
+                ...prev,
+                status: 'lost_cancelled',
+                lost_intelligence: lostData,
+              }
+              : null
+          );
+          setFeedback('Lost Lead Intelligence logged and annual win-back scheduled.');
+        }}
       />
     </div>
   );

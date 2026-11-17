@@ -52,6 +52,9 @@ import {
   CheckCircle2,
   Award,
   GitBranch,
+  Flame,
+  Crown,
+  Zap,
 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -62,19 +65,23 @@ import {
   type Lead,
   type Pipeline,
   type PipelineStage,
+  type StageMovePromptMode,
   STANDARD_CRM_STAGES,
   DEFAULT_QUANTITY_PIPELINES,
 } from '../types';
+import toast from 'react-hot-toast';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
 import {
-  getAutoSendOnStageMoveEnabled,
+  executeManualStageMove,
+  getStageMessageConfig,
+  getStageMoveMode,
+  setStageMoveMode,
+  subscribeStageMoveModeChange,
   openWhatsAppWebDirect,
   runAutoStageMoveWithToast,
-  setAutoSendOnStageMoveEnabled,
   stageRequiresReason,
-  subscribeAutoSendOnStageMoveChange,
 } from '../services/stageNotificationService';
 import { PipelineQuickChatModal } from '../components/Pipeline/PipelineQuickChatModal';
 import { formatWhatsAppNumberDisplay } from '../utils/whatsappNumberUtils';
@@ -87,16 +94,37 @@ function SourceWhatsappBadge({ lead, compact = false }: { lead: Lead; compact?: 
 
   return (
     <span
-      className={`inline-flex items-center font-bold rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono text-[9px] ${
-        compact ? 'gap-0.5 px-1.5 py-0.2' : 'gap-1 px-1.5 py-0.5'
-      }`}
-      title="Originating Business WhatsApp Number"
+      className={`inline-flex items-center font-bold rounded-input bg-primary/10 text-primary border border-primary/20 font-mono text-[9px] ${compact ? 'gap-0.5 px-1.5 py-0.2' : 'gap-1 px-1.5 py-0.5'
+        }`}
+      title={`WhatsApp: ${displayValue}`}
     >
-      <Phone size={compact ? 8 : 9} className="shrink-0" />
+      <Phone size={compact ? 8 : 9} className="shrink-0 text-primary" />
       {displayValue}
     </span>
   );
 }
+
+function LeadIntentPill({ lead, compact = false }: { lead: Lead; compact?: boolean }) {
+  if (!lead.intent_tier) return null;
+  const isHigh = lead.intent_tier === 'HIGH';
+  const isMed = lead.intent_tier === 'MEDIUM';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-input font-extrabold uppercase border ${compact ? 'px-1.5 py-0.2 text-[8px]' : 'px-2 py-0.5 text-[9px]'
+        } ${isHigh
+          ? 'bg-primary text-surface border-primary-dark shadow-sm'
+          : isMed
+            ? 'bg-tertiary/15 text-tertiary border-tertiary/30'
+            : 'bg-surface text-secondary border-shadow-darker/20'
+        }`}
+      title={`Intent: ${lead.intent_tier} (${lead.intent_score ?? 50}/100)`}
+    >
+      {isHigh && <Zap size={compact ? 8 : 9} className="fill-surface text-surface shrink-0" />}
+      {lead.intent_tier}
+    </span>
+  );
+}
+
 type StageDraft = {
   id: string;
   label: string;
@@ -123,40 +151,40 @@ export const STAGE_PHASES: StagePhase[] = [
     id: 'phase_discovery',
     name: 'Discovery & Requirements',
     shortLabel: '1. Discovery',
-    badgeTone: 'bg-sky-100 text-sky-800 border-sky-200',
-    borderTone: 'border-sky-300',
+    badgeTone: 'bg-primary/10 text-primary border-primary/20',
+    borderTone: 'border-primary/40',
     stageIds: ['new_enquiry', 'requirement_collection', 'requirement_confirmed'],
   },
   {
     id: 'phase_design_quote',
     name: 'Design & Quotation',
     shortLabel: '2. Design & Quote',
-    badgeTone: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-    borderTone: 'border-indigo-300',
+    badgeTone: 'bg-primary-dark/10 text-primary-dark border-primary-dark/20',
+    borderTone: 'border-primary-dark/40',
     stageIds: ['design_stage', 'design_approval', 'quotation_sent', 'follow_up'],
   },
   {
     id: 'phase_production',
     name: 'Order & Production',
     shortLabel: '3. Production',
-    badgeTone: 'bg-amber-100 text-amber-800 border-amber-200',
-    borderTone: 'border-amber-300',
+    badgeTone: 'bg-tertiary/10 text-tertiary border-tertiary/20',
+    borderTone: 'border-tertiary/40',
     stageIds: ['advance_payment', 'production', 'quality_check'],
   },
   {
     id: 'phase_fulfillment',
     name: 'Fulfillment & Dispatch',
     shortLabel: '4. Fulfillment',
-    badgeTone: 'bg-teal-100 text-teal-800 border-teal-200',
-    borderTone: 'border-teal-300',
+    badgeTone: 'bg-secondary/15 text-primary-dark border-secondary/25',
+    borderTone: 'border-secondary/40',
     stageIds: ['ready_for_dispatch', 'dispatch', 'delivered'],
   },
   {
     id: 'phase_closing',
     name: 'Payment & Closing',
     shortLabel: '5. Closing',
-    badgeTone: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    borderTone: 'border-emerald-300',
+    badgeTone: 'bg-primary text-surface border-primary',
+    borderTone: 'border-primary',
     stageIds: ['full_payment', 'completed', 'lost_cancelled'],
   },
 ];
@@ -168,18 +196,18 @@ function getStagePhase(stageId: string): StagePhase | null {
 const STORAGE_KEY = 'billpro.activePipelineId';
 
 const TONES = [
-  'bg-surface0/10 text-slate-700 border-slate-500/20',
-  'bg-sky-500/10 text-sky-700 border-sky-500/20',
-  'bg-blue-500/10 text-blue-700 border-blue-500/20',
-  'bg-indigo-500/10 text-indigo-700 border-indigo-500/20',
-  'bg-purple-500/10 text-purple-700 border-purple-500/20',
-  'bg-amber-500/10 text-amber-700 border-amber-500/20',
-  'bg-orange-500/10 text-orange-700 border-orange-500/20',
-  'bg-emerald-500/10 text-emerald-700 border-emerald-500/20',
-  'bg-teal-500/10 text-teal-700 border-teal-500/20',
-  'bg-cyan-500/10 text-cyan-700 border-cyan-500/20',
-  'bg-violet-500/10 text-violet-700 border-violet-200',
-  'bg-rose-500/10 text-rose-700 border-rose-500/20',
+  'border-primary/20 hover:border-primary/40',
+  'border-primary-dark/20 hover:border-primary-dark/40',
+  'border-secondary/30 hover:border-secondary/50',
+  'border-tertiary/25 hover:border-tertiary/45',
+  'border-primary/30 hover:border-primary/50',
+  'border-secondary/40 hover:border-secondary/60',
+  'border-tertiary/30 hover:border-tertiary/50',
+  'border-primary/25 hover:border-primary/45',
+  'border-primary-dark/25 hover:border-primary-dark/45',
+  'border-secondary/35 hover:border-secondary/55',
+  'border-tertiary/35 hover:border-tertiary/55',
+  'border-primary/35 hover:border-primary/55',
 ];
 
 function stageTone(index: number) {
@@ -200,8 +228,8 @@ function getReminderBadge(reminder: any): { text: string; tone: string; isOverdu
     typeof reminder.datetime.toDate === 'function'
       ? reminder.datetime.toDate()
       : typeof reminder.datetime.seconds === 'number'
-      ? new Date(reminder.datetime.seconds * 1000)
-      : new Date(reminder.datetime);
+        ? new Date(reminder.datetime.seconds * 1000)
+        : new Date(reminder.datetime);
   if (Number.isNaN(d.getTime())) return null;
 
   const diffMs = d.getTime() - Date.now();
@@ -211,16 +239,16 @@ function getReminderBadge(reminder: any): { text: string; tone: string; isOverdu
     const minsAgo = Math.abs(diffMins);
     const timeStr = minsAgo < 60 ? `${minsAgo}m ago` : `${Math.round(minsAgo / 60)}h ago`;
     return {
-      text: `🔔 Overdue (${timeStr})`,
-      tone: 'bg-rose-100 text-rose-900 border-rose-300 font-bold animate-pulse',
+      text: `Overdue (${timeStr})`,
+      tone: 'bg-tertiary text-surface border-tertiary font-bold',
       isOverdue: true,
     };
   }
 
   if (diffMins < 60) {
     return {
-      text: `🔔 In ${diffMins}m`,
-      tone: 'bg-amber-100 text-amber-900 border-amber-300 font-bold',
+      text: `In ${diffMins}m`,
+      tone: 'bg-tertiary/20 text-tertiary border-tertiary/40 font-bold',
       isOverdue: false,
     };
   }
@@ -228,8 +256,8 @@ function getReminderBadge(reminder: any): { text: string; tone: string; isOverdu
   const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
   const isToday = d.toDateString() === new Date().toDateString();
   return {
-    text: `🔔 ${isToday ? 'Today' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} ${timeStr}`,
-    tone: 'bg-emerald-50 text-emerald-800 border-emerald-200 font-semibold',
+    text: `${isToday ? 'Today' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} ${timeStr}`,
+    tone: 'bg-primary/10 text-primary border-primary/20 font-semibold',
     isOverdue: false,
   };
 }
@@ -238,10 +266,10 @@ function normalizePipeline(pipeline: any): Pipeline {
   const stages: PipelineStage[] =
     Array.isArray(pipeline?.stages) && pipeline.stages.length > 0
       ? pipeline.stages.map((stage: any, index: number) => ({
-          id: String(stage?.id || `stage_${index + 1}`),
-          label: String(stage?.label || `Stage ${index + 1}`),
-          required_fields: Array.isArray(stage?.required_fields) ? stage.required_fields : [],
-        }))
+        id: String(stage?.id || `stage_${index + 1}`),
+        label: String(stage?.label || `Stage ${index + 1}`),
+        required_fields: Array.isArray(stage?.required_fields) ? stage.required_fields : [],
+      }))
       : STANDARD_CRM_STAGES.map((stage) => ({ ...stage }));
 
   return {
@@ -274,7 +302,7 @@ export default function PipelineBoard() {
 
   const [dragId, setDragId] = useState('');
   const [message, setMessage] = useState('');
-  const [autoSendOnMove, setAutoSendOnMove] = useState<boolean>(() => getAutoSendOnStageMoveEnabled());
+  const [stageMoveMode, setStageMoveModeState] = useState<StageMovePromptMode>(() => getStageMoveMode());
   const { hasPermission } = useCRMPermission();
   const { dbUser } = useAuth();
   const isAdmin = isAdminUser(dbUser);
@@ -361,8 +389,8 @@ export default function PipelineBoard() {
   };
 
   useEffect(() => {
-    return subscribeAutoSendOnStageMoveChange((enabled) => {
-      setAutoSendOnMove(enabled);
+    return subscribeStageMoveModeChange((mode) => {
+      setStageMoveModeState(mode);
     });
   }, []);
 
@@ -546,7 +574,7 @@ export default function PipelineBoard() {
     localStorage.setItem(STORAGE_KEY, id);
   };
 
-  const initiateStageMove = (lead: Lead, targetStageId: string) => {
+  const initiateStageMove = async (lead: Lead, targetStageId: string) => {
     const currentStageId = lead.status || activeStages[0]?.id || 'new_enquiry';
     if (currentStageId === targetStageId) return;
 
@@ -559,7 +587,19 @@ export default function PipelineBoard() {
       label: targetStageId,
     };
 
-    if (autoSendOnMove && !stageRequiresReason(toStage)) {
+    let effectiveMode = toStage.move_prompt_mode || stageMoveMode;
+    if (!toStage.move_prompt_mode && stageMoveMode === 'ask') {
+      try {
+        const cfg = await getStageMessageConfig(toStage.id, toStage.label, activePipeline.id);
+        if (cfg?.move_prompt_mode) {
+          effectiveMode = cfg.move_prompt_mode;
+        }
+      } catch {
+        // use default effectiveMode
+      }
+    }
+
+    if (effectiveMode === 'auto_send' && !stageRequiresReason(toStage)) {
       void runAutoStageMoveWithToast({
         lead,
         fromStage,
@@ -570,6 +610,24 @@ export default function PipelineBoard() {
       return;
     }
 
+    if (effectiveMode === 'without_message' && !stageRequiresReason(toStage)) {
+      try {
+        const res = await executeManualStageMove({
+          lead,
+          fromStage,
+          toStage,
+          pipelineId: activePipeline.id,
+          pipelineName: activePipeline.name,
+          sendMessage: false,
+        });
+        toast.success(res.message);
+      } catch (err: any) {
+        toast.error(err?.message || 'Failed to move lead');
+      }
+      return;
+    }
+
+    // Default 'ask': Open modal asking user "With Message" or "Without Message"
     setConfirmModalState({
       isOpen: true,
       lead,
@@ -650,107 +708,129 @@ export default function PipelineBoard() {
   return (
     <div className="space-y-5 animate-fade-in max-w-full">
       {/* Top Header & Global Actions */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs font-bold uppercase tracking-wider text-primary">CRM Workspace</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold border border-emerald-200 flex items-center gap-1 shrink-0">
-              <CheckCircle2 size={11} /> Manual Stage Control
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-primary">CRM Workspace</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary-dark font-bold border border-primary/20 flex items-center gap-1 shrink-0">
+              <CheckCircle2 size={11} className="text-primary" /> Active Pipeline
             </span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-primary-dark mt-1">Pipeline Board</h1>
-          <p className="text-secondary text-xs sm:text-sm mt-1">
-            Track customer orders through all 16 production & fulfillment milestones with instant stage navigation.
-          </p>
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-primary-dark mt-1">Pipeline Board</h1>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap w-full sm:w-auto">
+        <div className="flex items-center gap-2.5 flex-wrap w-full sm:w-auto">
           {/* View Mode Switcher (Kanban vs Table) */}
-          <div className="flex items-center p-1 bg-transparent rounded-xl border border-shadow-darker/10">
+          <div className="flex items-center p-1 bg-surface rounded-xl border border-shadow-darker/20 shadow-neo-surface">
             <button
               type="button"
               onClick={() => setViewMode('kanban')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
-                viewMode === 'kanban'
-                  ? 'bg-transparent text-primary-dark shadow-sm'
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all ${viewMode === 'kanban'
+                  ? 'bg-primary text-surface shadow-sm'
                   : 'text-secondary hover:text-primary-dark'
-              }`}
+                }`}
             >
               <Columns3 size={14} /> Kanban
             </button>
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
-                viewMode === 'table'
-                  ? 'bg-transparent text-primary-dark shadow-sm'
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all ${viewMode === 'table'
+                  ? 'bg-primary text-surface shadow-sm'
                   : 'text-secondary hover:text-primary-dark'
-              }`}
+                }`}
             >
-              <LayoutList size={14} /> Table List
+              <LayoutList size={14} /> Table
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setAutoSendOnStageMoveEnabled(!autoSendOnMove)}
-            className={`text-xs px-3 py-2 rounded-xl border font-bold inline-flex items-center gap-1.5 transition-all ${
-              autoSendOnMove
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-sm'
-                : 'bg-surface text-secondary border-shadow-darker/15'
-            }`}
-            title="When ON, moving a lead immediately sends its WhatsApp stage update from the originating number without an extra confirmation dialog."
+          {/* Stage Move Option: Ask (With/Without Message), Auto-Send, or No Message */}
+          <div
+            className="flex items-center rounded-xl border border-shadow-darker/20 bg-surface p-0.5 shadow-xs text-xs"
+            title="Configure stage transition behavior"
           >
-            <Send size={13} className={autoSendOnMove ? 'text-emerald-600' : ''} />
-            Auto-Send on Move: {autoSendOnMove ? 'ON' : 'OFF'}
-          </button>
+            <button
+              type="button"
+              onClick={() => setStageMoveMode('ask')}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'ask'
+                  ? 'bg-primary text-white shadow-xs'
+                  : 'text-secondary hover:text-primary-dark'
+                }`}
+              title="Ask 'With Message' or 'Without Message' whenever a lead is moved"
+            >
+              <MessageSquare size={13} />
+              <span>Ask on Move</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStageMoveMode('auto_send')}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'auto_send'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-secondary hover:text-primary-dark'
+                }`}
+              title="Auto-send WhatsApp update and move stage immediately"
+            >
+              <Send size={13} />
+              <span>Auto-Send</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStageMoveMode('without_message')}
+              className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'without_message'
+                  ? 'bg-slate-700 text-white shadow-xs'
+                  : 'text-secondary hover:text-primary-dark'
+                }`}
+              title="Move stage without sending any message"
+            >
+              <CheckCircle2 size={13} />
+              <span>No Message</span>
+            </button>
+          </div>
 
           {isAdmin && (
             <button
               type="button"
               onClick={() => setShowAssignmentModal(true)}
-              className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold text-primary"
-              title="Configure automatic lead splitting & team routing rules"
+              className="neo-btn text-xs px-3 py-2 inline-flex items-center gap-1.5 font-bold text-primary-dark"
+              title="Configure routing rules"
             >
-              <GitBranch size={14} /> Auto-Assign Rules
+              <GitBranch size={14} className="text-primary" /> Auto-Assign
             </button>
           )}
           <button
             onClick={handleExportExcel}
-            className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold"
+            className="neo-btn text-xs px-3 py-2 inline-flex items-center gap-1.5 font-bold text-primary-dark"
           >
-            <Download size={14} /> Export Excel
+            <Download size={14} className="text-secondary" /> Export
           </button>
           <Link
             to="/leads/new"
-            className="neo-btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5 font-bold bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
+            className="neo-btn-primary text-xs px-4 py-2 inline-flex items-center gap-1.5 font-bold text-surface shadow-md"
           >
-            <UserPlus size={14} /> Add Customer Lead
+            <UserPlus size={14} /> + Lead
           </Link>
         </div>
       </div>
 
       {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom) */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-2 bg-transparent rounded-2xl border border-shadow-darker/10 w-full min-w-0">
-        <div className="w-full sm:flex-1 flex items-center gap-2 overflow-x-auto py-1 custom-sidebar-scrollbar snap-x">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-2 bg-surface rounded-2xl border border-shadow-darker/20 shadow-neo-surface w-full min-w-0">
+        <div className="w-full sm:flex-1 flex items-center gap-2 overflow-x-auto py-0.5 custom-sidebar-scrollbar snap-x">
           {pipelines.map((pipe) => {
             const isSelected = pipe.id === activePipeline.id;
             return (
               <button
                 key={pipe.id}
                 onClick={() => handleSelectPipeline(pipe.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-2 shrink-0 snap-start ${
-                  isSelected
-                    ? 'bg-transparent text-primary-dark shadow-sm border border-shadow-darker/15 scale-[1.02]'
-                    : 'text-secondary hover:text-primary-dark hover:bg-transparent'
-                }`}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-2 shrink-0 snap-start ${isSelected
+                    ? 'bg-primary text-surface shadow-sm'
+                    : 'text-secondary hover:text-primary-dark hover:bg-shadow-darker/10'
+                  }`}
               >
                 <span>{pipe.name}</span>
                 {pipe.scenario && (
                   <span
-                    className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                      isSelected ? 'bg-primary/10 text-primary' : 'bg-slate-200 text-slate-600'
-                    }`}
+                    className={`text-[10px] px-1.5 py-0.2 rounded font-bold ${isSelected ? 'bg-surface/20 text-surface' : 'bg-shadow-darker/20 text-secondary'
+                      }`}
                   >
                     {pipe.scenario}
                   </span>
@@ -761,37 +841,35 @@ export default function PipelineBoard() {
         </div>
 
         {/* Pipeline Quick Summary */}
-        <div className="flex items-center gap-4 text-xs font-semibold px-3 py-1 text-secondary shrink-0">
+        <div className="flex items-center gap-3 text-xs font-bold px-2 py-1 text-secondary shrink-0">
           <span>
-            Total Customers: <strong className="text-primary-dark">{totalPipelineLeads}</strong>
+            Deals: <strong className="text-primary-dark">{totalPipelineLeads}</strong>
           </span>
           {totalPipelineValue > 0 && (
             <span>
-              Pipeline Value:{' '}
-              <strong className="text-emerald-700">₹{totalPipelineValue.toLocaleString('en-IN')}</strong>
+              Value:{' '}
+              <strong className="text-primary font-black">₹{totalPipelineValue.toLocaleString('en-IN')}</strong>
             </span>
           )}
         </div>
       </div>
 
       {/* Stage Jump Navigator Ribbon (Bird's-Eye View across 5 Phases) */}
-      <div className="p-3 bg-transparent rounded-2xl border border-shadow-darker/10 shadow-xs space-y-2">
+      <div className="p-3 bg-surface rounded-2xl border border-shadow-darker/20 shadow-neo-surface space-y-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+          <div className="flex items-center gap-1.5 text-xs font-black text-primary-dark">
             <Layers size={14} className="text-primary" />
-            <span>Pipeline Stage Navigator</span>
-            <span className="text-[10px] text-secondary font-normal">(Click any stage to scroll directly)</span>
+            <span>Phase Navigator</span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-semibold text-secondary">Focus Phase:</span>
             <select
               aria-label="Focus on specific phase"
-              className="neo-input !py-1 !px-2.5 !text-xs font-bold"
+              className="neo-input !py-1 !px-2.5 !text-xs font-bold text-primary-dark"
               value={phaseFilter}
               onChange={(e) => setPhaseFilter(e.target.value)}
             >
-              <option value="all">All 5 Phases ({activeStages.length} Stages)</option>
+              <option value="all">All Phases ({activeStages.length} Stages)</option>
               {STAGE_PHASES.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -801,21 +879,20 @@ export default function PipelineBoard() {
           </div>
         </div>
 
-        <div className="flex sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-1 pb-1 overflow-x-auto custom-sidebar-scrollbar snap-x">
+        <div className="flex sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-0.5 pb-0.5 overflow-x-auto custom-sidebar-scrollbar snap-x">
           {phaseStats.map((phase) => {
             const isPhaseActive = phaseFilter === 'all' || phaseFilter === phase.id;
             return (
               <div
                 key={phase.id}
-                className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between min-w-[220px] sm:min-w-0 shrink-0 snap-start ${
-                  isPhaseActive
-                    ? 'bg-transparent border-shadow-darker/10 hover:border-primary/40 shadow-xs'
-                    : 'bg-transparent border-dashed border-slate-200 opacity-60'
-                }`}
+                className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between min-w-[200px] sm:min-w-0 shrink-0 snap-start ${isPhaseActive
+                    ? 'bg-surface border-shadow-darker/30 shadow-neo-surface'
+                    : 'bg-surface/50 border-dashed border-shadow-darker/15 opacity-60'
+                  }`}
               >
                 <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="font-bold text-primary-dark truncate text-[11px]">{phase.shortLabel}</span>
-                  <span className="text-[10px] font-extrabold px-1.5 py-0.2 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark">
+                  <span className="font-extrabold text-primary-dark truncate text-[11px]">{phase.shortLabel}</span>
+                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded-full bg-primary/10 text-primary border border-primary/20">
                     {phase.count}
                   </span>
                 </div>
@@ -830,14 +907,13 @@ export default function PipelineBoard() {
                         key={sId}
                         type="button"
                         onClick={() => scrollToStage(sId)}
-                        className={`text-[10px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${
-                          stageCount > 0
-                            ? 'bg-transparent font-bold text-slate-800 border-shadow-darker/20 hover:border-primary hover:text-primary'
-                            : 'bg-transparent text-secondary border-slate-200 hover:bg-transparent'
-                        }`}
-                        title={`Jump to ${stageObj.label} (${stageCount} leads)`}
+                        className={`text-[10px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${stageCount > 0
+                            ? 'bg-surface font-extrabold text-primary-dark border-primary/30 shadow-xs hover:border-primary hover:text-primary'
+                            : 'bg-transparent text-secondary border-shadow-darker/15 hover:bg-shadow-darker/10'
+                          }`}
+                        title={`Jump to ${stageObj.label} (${stageCount})`}
                       >
-                        <span className="truncate max-w-[80px]">{stageObj.label}</span>
+                        <span className="truncate max-w-[75px]">{stageObj.label}</span>
                         {stageCount > 0 && <span className="text-primary font-black">· {stageCount}</span>}
                       </button>
                     );
@@ -901,9 +977,9 @@ export default function PipelineBoard() {
               onChange={(e) => setUrgencyFilter(e.target.value)}
             >
               <option value="all">All Urgencies</option>
-              <option value="high">🔥 High Urgency</option>
-              <option value="medium">⚡ Medium Urgency</option>
-              <option value="low">🌱 Low Urgency</option>
+              <option value="high">High Urgency</option>
+              <option value="medium">Medium Urgency</option>
+              <option value="low">Low Urgency</option>
             </select>
           </div>
 
@@ -917,9 +993,9 @@ export default function PipelineBoard() {
               onChange={(e) => setQualificationFilter(e.target.value)}
             >
               <option value="all">All Qualifications</option>
-              <option value="Qualified">✨ Qualified</option>
-              <option value="Needs Follow-up">⏳ Needs Follow-up</option>
-              <option value="Not Qualified">❌ Not Qualified</option>
+              <option value="Qualified">Qualified</option>
+              <option value="Needs Follow-up">Needs Follow-up</option>
+              <option value="Not Qualified">Not Qualified</option>
             </select>
           </div>
         </div>
@@ -929,20 +1005,20 @@ export default function PipelineBoard() {
           qualificationFilter !== 'all' ||
           salesPersonFilter !== 'all' ||
           phaseFilter !== 'all') && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearchQuery('');
-              setUrgencyFilter('all');
-              setQualificationFilter('all');
-              setSalesPersonFilter('all');
-              setPhaseFilter('all');
-            }}
-            className="text-xs text-rose-600 hover:text-rose-700 font-bold px-2 py-1 underline shrink-0"
-          >
-            Reset Filters
-          </button>
-        )}
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery('');
+                setUrgencyFilter('all');
+                setQualificationFilter('all');
+                setSalesPersonFilter('all');
+                setPhaseFilter('all');
+              }}
+              className="text-xs text-tertiary hover:text-primary-dark font-extrabold px-2 py-1 underline shrink-0"
+            >
+              Reset Filters
+            </button>
+          )}
       </div>
 
       {message && (
@@ -999,34 +1075,27 @@ export default function PipelineBoard() {
                     };
 
                     return (
-                      <tr key={lead.id} className="hover:bg-transparent transition-colors">
+                      <tr key={lead.id} className="hover:bg-shadow-darker/10 transition-colors">
                         <td className="py-3 px-3">
                           <div className="space-y-0.5">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <Link
                                 to={`/leads/${lead.id}`}
-                                className="font-bold text-primary-dark hover:text-primary transition-colors text-sm"
+                                className="font-extrabold text-primary-dark hover:text-primary transition-colors text-sm inline-flex items-center gap-1"
                               >
-                                {lead.name}
+                                <span>{lead.name}</span>
+                                {(lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer') && (
+                                  <span title="Repeat Customer">
+                                    <Crown size={12} className="text-tertiary fill-tertiary shrink-0" />
+                                  </span>
+                                )}
                               </Link>
-                              {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
-                                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200">
-                                  Repeat
-                                </span>
-                              ) : lead.customer_lifecycle === 'existing_customer' ? (
-                                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                  Existing
-                                </span>
-                              ) : (
-                                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                  New
-                                </span>
-                              )}
                               <SourceWhatsappBadge lead={lead} compact />
+                              <LeadIntentPill lead={lead} compact />
                             </div>
                             {lead.company && (
-                              <div className="text-secondary text-[11px] flex items-center gap-1">
-                                <Building size={11} /> {lead.company}
+                              <div className="text-secondary text-[11px] font-medium flex items-center gap-1">
+                                <Building size={11} className="text-secondary/70" /> {lead.company}
                               </div>
                             )}
                           </div>
@@ -1035,19 +1104,19 @@ export default function PipelineBoard() {
                         <td className="py-3 px-3">
                           <div className="space-y-1">
                             {lead.phone ? (
-                              <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                              <div className="flex items-center gap-1.5 font-mono text-[11px] text-primary-dark font-bold">
                                 <span>{lead.phone}</span>
                                 <button
                                   type="button"
                                   onClick={() => setQuickChatLead(lead)}
-                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 rounded hover:bg-emerald-50"
+                                  className="text-primary hover:text-primary-dark p-0.5 rounded hover:bg-primary/10 transition-colors"
                                   title="Chat in WhatsApp Live Chat"
                                 >
                                   <MessageSquare size={12} />
                                 </button>
                               </div>
                             ) : (
-                              <span className="text-secondary">-</span>
+                              <span className="text-secondary/50">-</span>
                             )}
                             {lead.email && (
                               <div className="text-secondary text-[10px] truncate max-w-[140px]">{lead.email}</div>
@@ -1057,17 +1126,17 @@ export default function PipelineBoard() {
 
                         <td className="py-3 px-3">
                           <div className="space-y-0.5">
-                            {lead.required_quantity && (
-                              <div className="font-semibold text-primary-dark text-[11px]">
-                                🎯 {lead.required_quantity} pcs
-                              </div>
-                            )}
                             {lead.value ? (
-                              <div className="font-bold text-emerald-800 text-[11px]">
+                              <div className="font-black text-primary-dark text-xs">
                                 ₹{Number(lead.value).toLocaleString('en-IN')}
                               </div>
                             ) : (
-                              <span className="text-secondary text-[10px]">TBD</span>
+                              <span className="text-secondary/50 text-[10px] font-semibold">TBD</span>
+                            )}
+                            {lead.required_quantity && (
+                              <div className="font-bold text-secondary text-[10px]">
+                                {lead.required_quantity} pcs
+                              </div>
                             )}
                           </div>
                         </td>
@@ -1075,24 +1144,34 @@ export default function PipelineBoard() {
                         <td className="py-3 px-3">
                           <div className="space-y-0.5 text-[11px]">
                             {lead.event_name && (
-                              <div className="text-primary-dark truncate max-w-[150px]">🏆 {lead.event_name}</div>
+                              <div className="text-primary-dark font-bold truncate max-w-[150px] flex items-center gap-1">
+                                <Award size={11} className="text-primary shrink-0" /> {lead.event_name}
+                              </div>
                             )}
                             {lead.delivery_date && (
-                              <div className="text-amber-900 font-medium">🚚 {lead.delivery_date}</div>
+                              <div className="text-tertiary font-bold flex items-center gap-1">
+                                <Truck size={11} className="shrink-0" /> {lead.delivery_date}
+                              </div>
                             )}
                           </div>
                         </td>
 
                         {isAdmin && (
-                          <td className="py-3 px-3 text-secondary text-[11px]">
-                            {lead.sales_person || 'Unassigned'}
+                          <td className="py-3 px-3 text-secondary text-[11px] font-semibold">
+                            {lead.sales_person ? (
+                              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold text-[10px] border border-primary/20">
+                                {lead.sales_person}
+                              </span>
+                            ) : (
+                              <span className="text-secondary/50 text-[10px]">Unassigned</span>
+                            )}
                           </td>
                         )}
 
                         <td className="py-3 px-3">
                           <select
                             aria-label={`Change stage for ${lead.name}`}
-                            className="text-[11px] font-bold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
+                            className="text-[11px] font-bold bg-surface rounded-input px-2 py-1 border border-shadow-darker/20 text-primary-dark hover:border-primary transition-colors"
                             value={lead.status || currentStageObj.id}
                             onChange={(e) => handleQuickMove(lead, e.target.value)}
                           >
@@ -1105,7 +1184,7 @@ export default function PipelineBoard() {
                         </td>
 
                         <td className="py-3 px-3 text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1.5">
                             <button
                               type="button"
                               onClick={() =>
@@ -1115,20 +1194,20 @@ export default function PipelineBoard() {
                                   stageName: currentStageObj.label,
                                 })
                               }
-                              className="p-1.5 rounded-lg border border-shadow-darker/10 hover:bg-transparent text-slate-700"
+                              className="p-1.5 rounded-input border border-shadow-darker/20 hover:border-primary text-secondary hover:text-primary transition-colors"
                               title="Notes & Alarms"
                             >
                               <StickyNote
-                                size={14}
-                                className={lead.notes_count ? 'text-primary' : 'text-slate-400'}
+                                size={13}
+                                className={lead.notes_count ? 'text-primary' : 'text-secondary/60'}
                               />
                             </button>
 
                             <Link
                               to={`/leads/${lead.id}`}
-                              className="neo-btn text-[11px] px-2.5 py-1 font-bold inline-flex items-center gap-1 text-primary"
+                              className="neo-btn text-[10px] !px-2.5 !py-1 font-extrabold inline-flex items-center gap-1 text-primary-dark"
                             >
-                              <Eye size={12} /> 360°
+                              <Eye size={11} className="text-primary" /> 360°
                             </Link>
                           </div>
                         </td>
@@ -1185,7 +1264,7 @@ export default function PipelineBoard() {
                             </div>
                           )}
                         </div>
-                        
+
                         <div className="text-right flex flex-col items-end gap-1">
                           <select
                             aria-label={`Change stage for ${lead.name}`}
@@ -1203,7 +1282,7 @@ export default function PipelineBoard() {
                       </div>
 
                       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
-                        <Link 
+                        <Link
                           to={`/leads/${lead.id}`}
                           className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-primary-dark font-bold text-xs"
                         >
@@ -1240,9 +1319,8 @@ export default function PipelineBoard() {
             onClick={() => scrollPipeline('left')}
             disabled={!canScrollLeft}
             aria-label="Previous stages"
-            className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
-              !canScrollLeft ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
-            }`}
+            className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-2 md:-translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${!canScrollLeft ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
+              }`}
           >
             <ChevronLeft size={22} className="stroke-[2.5]" />
           </button>
@@ -1253,9 +1331,8 @@ export default function PipelineBoard() {
             onClick={() => scrollPipeline('right')}
             disabled={!canScrollRight}
             aria-label="Next stages"
-            className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${
-              !canScrollRight ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
-            }`}
+            className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-2 md:translate-x-4 z-20 p-2.5 rounded-full bg-transparent backdrop-blur border border-shadow-darker/20 shadow-neo-raised text-primary-dark hover:text-primary transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-0 disabled:pointer-events-none ${!canScrollRight ? 'opacity-0 pointer-events-none' : 'opacity-90 hover:opacity-100'
+              }`}
           >
             <ChevronRight size={22} className="stroke-[2.5]" />
           </button>
@@ -1305,12 +1382,12 @@ export default function PipelineBoard() {
                       </span>
                     </div>
 
-                    <div className="writing-vertical text-xs font-bold text-slate-700 tracking-wider rotate-180 uppercase select-none py-4">
+                    <div className="writing-vertical text-xs font-black text-primary-dark tracking-wider rotate-180 uppercase select-none py-4">
                       {index + 1}. {stage.label}
                     </div>
 
                     {stageVal > 0 && (
-                      <div className="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200 truncate max-w-[48px]">
+                      <div className="text-[10px] font-black text-primary bg-primary/10 px-1.5 py-0.5 rounded-input border border-primary/20 truncate max-w-[48px]">
                         ₹{(stageVal / 1000).toFixed(0)}k
                       </div>
                     )}
@@ -1325,7 +1402,7 @@ export default function PipelineBoard() {
                   id={`stage-col-${stage.id}`}
                   className={`flex-shrink-0 flex-grow-0 w-80 neo-card space-y-3 border ${stageTone(
                     index
-                  )} bg-transparent rounded-2xl transition-all`}
+                  )} bg-surface rounded-2xl transition-all shadow-neo-surface`}
                   onDragOver={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -1333,36 +1410,36 @@ export default function PipelineBoard() {
                   onDrop={() => handleCardDrop(stage.id)}
                 >
                   {/* Column Header */}
-                  <div className="border-b border-shadow-darker/10 pb-2.5">
+                  <div className="border-b border-shadow-darker/15 pb-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div>
                         {phase && (
                           <span
-                            className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded border block w-fit mb-1 ${phase.badgeTone}`}
+                            className={`text-[9px] font-black uppercase px-1.5 py-0.2 rounded-input border block w-fit mb-1 ${phase.badgeTone}`}
                           >
                             {phase.shortLabel}
                           </span>
                         )}
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-black text-primary-dark">
+                          <span className="text-xs font-black text-primary-dark tracking-tight">
                             {index + 1}. {stage.label}
                           </span>
                         </div>
                         {stageVal > 0 && (
-                          <div className="text-[11px] font-bold text-emerald-700 mt-0.5">
+                          <div className="text-[11px] font-black text-primary mt-0.5">
                             ₹{stageVal.toLocaleString('en-IN')}
                           </div>
                         )}
                       </div>
 
                       <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-transparent border border-shadow-darker/15 text-primary-dark shadow-xs">
+                        <span className="text-xs font-black px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-primary shadow-xs">
                           {stageLeads.length}
                         </span>
                         <button
                           type="button"
                           onClick={() => toggleStageCollapse(stage.id)}
-                          className="p-1 rounded-md text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
+                          className="p-1 rounded-md text-secondary hover:text-primary-dark hover:bg-shadow-darker/10 transition-colors"
                           title="Collapse this column"
                         >
                           <Minimize2 size={12} />
@@ -1372,229 +1449,216 @@ export default function PipelineBoard() {
                   </div>
 
                   {/* Customer Cards List */}
-                  <div className="space-y-3 min-h-[160px]">
+                  <div className="space-y-2.5 min-h-[160px]">
                     {stageLeads.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-shadow-darker/20 p-5 text-xs text-secondary text-center">
-                        Drop customer card here to move to {stage.label}
+                        Drop card here
                       </div>
                     ) : (
-                      stageLeads.map((lead) => (
-                        <div
-                          key={lead.id}
-                          draggable
-                          onDragStart={(e) => {
-                            e.dataTransfer.effectAllowed = 'move';
-                            e.dataTransfer.setData('text/plain', lead.id);
-                            setDragId(lead.id);
-                          }}
-                          onDragEnd={() => setDragId('')}
-                          className="rounded-2xl bg-transparent border border-shadow-darker/10 p-3.5 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-all relative overflow-hidden group space-y-2.5"
-                        >
-                          {/* AI Qualification Accent Strip */}
-                          {lead.qualification_status === 'Qualified' && (
-                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400" />
-                          )}
-                          {lead.qualification_status === 'Needs Follow-up' && (
-                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-500 to-orange-400" />
-                          )}
-                          {lead.qualification_status === 'Not Qualified' && (
-                            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-500 to-red-400" />
-                          )}
+                      stageLeads.map((lead) => {
+                        const isHigh = lead.intent_tier === 'HIGH';
+                        const isMed = lead.intent_tier === 'MEDIUM';
+                        const isRepeat = lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer';
 
-                          {/* Customer Title, Status & Phone */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="space-y-0.5">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
-                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200">
-                                    Repeat Customer
-                                  </span>
-                                ) : lead.customer_lifecycle === 'existing_customer' ? (
-                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200">
-                                    Existing Customer
-                                  </span>
-                                ) : (
-                                  <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                    New Customer
-                                  </span>
+                        return (
+                          <div
+                            key={lead.id}
+                            draggable
+                            onDragStart={(e) => {
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.dataTransfer.setData('text/plain', lead.id);
+                              setDragId(lead.id);
+                            }}
+                            onDragEnd={() => setDragId('')}
+                            className={`rounded-card bg-surface border border-shadow-darker/20 shadow-neo-surface p-3.5 cursor-grab active:cursor-grabbing hover:shadow-neo-hover transition-all relative overflow-hidden group space-y-2 border-l-4 ${isHigh
+                                ? 'border-l-primary'
+                                : isMed
+                                  ? 'border-l-tertiary'
+                                  : 'border-l-secondary/40'
+                              }`}
+                          >
+                            {/* Card Top: Client Name + Crown + Micro Badges */}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <Link
+                                    to={`/leads/${lead.id}`}
+                                    className="font-extrabold text-sm text-primary-dark hover:text-primary transition-colors truncate max-w-[170px] inline-flex items-center gap-1"
+                                    title={lead.name}
+                                  >
+                                    <span>{lead.name}</span>
+                                    {isRepeat && (
+                                      <span title="Repeat Customer">
+                                        <Crown
+                                          size={13}
+                                          className="text-tertiary fill-tertiary shrink-0"
+                                        />
+                                      </span>
+                                    )}
+                                  </Link>
+                                </div>
+                                {lead.company && (
+                                  <div className="text-[11px] text-secondary font-medium truncate flex items-center gap-1 mt-0.5">
+                                    <Building size={10} className="shrink-0 text-secondary/70" />
+                                    <span>{lead.company}</span>
+                                  </div>
                                 )}
-
-                                {lead.source && (
-                                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-transparent text-slate-700 border border-slate-200">
-                                    {lead.source}
-                                  </span>
-                                )}
-
-                                <SourceWhatsappBadge lead={lead} />
                               </div>
 
-                              <Link
-                                to={`/leads/${lead.id}`}
-                                className="font-bold text-sm text-primary-dark hover:text-primary transition-colors block"
-                              >
-                                {lead.name}
-                              </Link>
-                              {lead.company && (
-                                <div className="text-xs text-secondary flex items-center gap-1">
-                                  <Building size={11} /> {lead.company}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {lead.intent_tier && (
+                                  <span
+                                    className={`px-1.5 py-0.2 rounded-input text-[9px] font-black uppercase border ${isHigh
+                                        ? 'bg-primary text-surface border-primary'
+                                        : isMed
+                                          ? 'bg-tertiary/15 text-tertiary border-tertiary/30'
+                                          : 'bg-surface text-secondary border-shadow-darker/20'
+                                      }`}
+                                    title={`Intent: ${lead.intent_tier} (${lead.intent_score ?? 50}/100)`}
+                                  >
+                                    ⚡ {lead.intent_score ?? lead.intent_tier}
+                                  </span>
+                                )}
+                                <GripVertical
+                                  size={14}
+                                  className="text-secondary/40 group-hover:text-primary shrink-0 transition-colors"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Bolder Numbers: Deal Value + Units */}
+                            <div className="flex items-baseline justify-between pt-1 border-t border-shadow-darker/10">
+                              <div className="font-black text-base text-primary-dark tracking-tight">
+                                {lead.value ? (
+                                  `₹${Number(lead.value).toLocaleString('en-IN')}`
+                                ) : (
+                                  <span className="text-secondary/50 text-xs font-semibold">TBD</span>
+                                )}
+                              </div>
+                              {lead.required_quantity && (
+                                <div className="text-[11px] font-extrabold text-secondary px-2 py-0.5 rounded-input bg-shadow-darker/10 border border-shadow-darker/15">
+                                  {lead.required_quantity} pcs
                                 </div>
                               )}
                             </div>
-                            <GripVertical
-                              size={16}
-                              className="text-secondary/50 shrink-0 group-hover:text-primary mt-1"
-                            />
-                          </div>
 
-                          {/* Phone & Direct 1-Click WhatsApp Trigger */}
-                          {lead.phone && (
-                            <div className="text-xs text-slate-600 flex items-center justify-between font-mono bg-transparent px-2 py-1 rounded-lg border border-shadow-darker/5">
+                            {/* Event or Urgency Milestone Row */}
+                            {(lead.event_name || lead.delivery_date || lead.event_date || lead.urgency === 'high') && (
+                              <div className="flex items-center gap-1.5 flex-wrap text-[10px] font-bold">
+                                {lead.event_name && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded bg-shadow-darker/10 text-primary-dark truncate max-w-[150px] inline-flex items-center gap-1"
+                                    title={lead.event_name}
+                                  >
+                                    <Award size={10} className="shrink-0 text-primary" />
+                                    {lead.event_name}
+                                  </span>
+                                )}
+                                {lead.delivery_date && (
+                                  <span className="px-1.5 py-0.5 rounded bg-tertiary/10 text-tertiary border border-tertiary/20 inline-flex items-center gap-1">
+                                    <Truck size={10} className="shrink-0" />
+                                    {lead.delivery_date}
+                                  </span>
+                                )}
+                                {lead.urgency === 'high' && (
+                                  <span className="px-1.5 py-0.5 rounded bg-primary text-surface font-black inline-flex items-center gap-0.5">
+                                    <Zap size={9} className="fill-surface" /> High
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Active Reminder Micro Banner (if any) */}
+                            {lead.active_reminder &&
+                              (() => {
+                                const badge = getReminderBadge(lead.active_reminder);
+                                if (!badge) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })
+                                    }
+                                    className={`w-full text-left text-[10px] px-2 py-1 rounded-input border flex items-center justify-between transition-all ${badge.tone}`}
+                                    title={`Reminder: ${lead.active_reminder.title || ''}`}
+                                  >
+                                    <span className="truncate">{badge.text}</span>
+                                    <Clock size={10} className="shrink-0 ml-1 opacity-80" />
+                                  </button>
+                                );
+                              })()}
+
+                            {/* Card Footer: Rep Avatar + 1-Click WhatsApp + Actions */}
+                            <div className="flex items-center justify-between pt-1.5 border-t border-shadow-darker/10 gap-1.5">
                               <div className="flex items-center gap-1.5">
-                                <Phone size={11} className="text-emerald-600" />
-                                <span>{lead.phone}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => setQuickChatLead(lead)}
-                                className="text-[10px] text-emerald-700 hover:text-emerald-800 font-bold flex items-center gap-0.5 hover:underline"
-                                title="Chat in WhatsApp Live Chat"
-                              >
-                                <span>Chat</span>
-                                <MessageSquare size={10} />
-                              </button>
-                            </div>
-                          )}
+                                {lead.sales_person ? (
+                                  <span
+                                    className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[9px] font-black flex items-center justify-center border border-primary/20 shrink-0 uppercase"
+                                    title={`Rep: ${lead.sales_person}`}
+                                  >
+                                    {lead.sales_person.slice(0, 2)}
+                                  </span>
+                                ) : (
+                                  <span
+                                    className="w-5 h-5 rounded-full bg-shadow-darker/20 text-secondary text-[8px] font-bold flex items-center justify-center shrink-0"
+                                    title="Unassigned"
+                                  >
+                                    --
+                                  </span>
+                                )}
 
-                          {/* Last Inbound Message Snippet (if available) */}
-                          {lead.last_message && (
-                            <div className="text-[11px] text-slate-600 bg-transparent p-2 rounded-lg border border-shadow-darker/5 line-clamp-2 italic">
-                              "{lead.last_message}"
-                            </div>
-                          )}
+                                {lead.phone && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setQuickChatLead(lead)}
+                                    className="p-1 rounded-md text-primary hover:bg-primary/10 transition-colors"
+                                    title={`Chat with ${lead.phone}`}
+                                  >
+                                    <MessageSquare size={12} />
+                                  </button>
+                                )}
 
-                          {/* Order Specs Matrix (Quantity, Value, Event Date, Delivery) */}
-                          <div className="grid grid-cols-2 gap-1.5 text-[11px] pt-1 border-t border-shadow-darker/5">
-                            {lead.required_quantity ? (
-                              <div className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 font-semibold text-primary-dark">
-                                🎯 {lead.required_quantity} pcs
-                              </div>
-                            ) : null}
-
-                            {lead.value ? (
-                              <div className="bg-emerald-50/70 px-2 py-1 rounded-md border border-emerald-100 font-bold text-emerald-800">
-                                ₹{Number(lead.value).toLocaleString('en-IN')}
-                              </div>
-                            ) : null}
-
-                            {lead.event_name ? (
-                              <div
-                                className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary truncate col-span-2"
-                                title={lead.event_name}
-                              >
-                                🏆 {lead.event_name}
-                              </div>
-                            ) : null}
-
-                            {lead.event_date ? (
-                              <div className="bg-transparent px-2 py-1 rounded-md border border-shadow-darker/5 text-secondary">
-                                📅 {lead.event_date}
-                              </div>
-                            ) : null}
-
-                            {lead.delivery_date ? (
-                              <div className="bg-amber-50 px-2 py-1 rounded-md border border-amber-100 text-amber-900 font-medium">
-                                🚚 {lead.delivery_date}
-                              </div>
-                            ) : null}
-                          </div>
-
-                          {/* Assigned Rep (Admin Only) & Urgency */}
-                          <div className="flex items-center justify-between gap-1 text-[10px] text-secondary pt-1 flex-wrap">
-                            {isAdmin ? (
-                              lead.sales_person ? (
-                                <span className="flex items-center gap-1 font-semibold text-slate-700">
-                                  <User size={10} /> {lead.sales_person}
-                                </span>
-                              ) : (
-                                <span>Unassigned</span>
-                              )
-                            ) : (
-                              <span />
-                            )}
-
-                            {lead.urgency === 'high' && (
-                              <span className="px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-800 font-bold">
-                                High Urgency
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Active Reminder Banner (if any) */}
-                          {lead.active_reminder &&
-                            (() => {
-                              const badge = getReminderBadge(lead.active_reminder);
-                              if (!badge) return null;
-                              return (
                                 <button
                                   type="button"
                                   onClick={() =>
                                     setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })
                                   }
-                                  className={`w-full text-left text-[10px] px-2 py-1 rounded-lg border flex items-center justify-between transition-all hover:scale-[1.01] ${badge.tone}`}
-                                  title={`Active reminder: ${lead.active_reminder.title || ''}`}
+                                  className="p-1 rounded-md text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
+                                  title="Notes & Reminders"
                                 >
-                                  <span className="truncate">{badge.text}</span>
-                                  <Clock size={11} className="shrink-0 ml-1 opacity-80" />
+                                  <StickyNote
+                                    size={12}
+                                    className={lead.notes_count ? 'text-primary' : 'text-secondary/60'}
+                                  />
                                 </button>
-                              );
-                            })()}
+                              </div>
 
-                          {/* Card Footer Actions */}
-                          <div className="flex items-center justify-between pt-2 border-t border-shadow-darker/10 gap-1.5 flex-wrap">
-                            <div className="flex items-center gap-2">
-                              <Link
-                                to={`/leads/${lead.id}`}
-                                className="text-[11px] font-bold text-primary hover:underline flex items-center gap-1"
-                              >
-                                <Eye size={12} /> 360°
-                              </Link>
+                              <div className="flex items-center gap-1.5">
+                                <Link
+                                  to={`/leads/${lead.id}`}
+                                  className="text-[10px] font-black text-primary hover:underline"
+                                  title="View 360 profile"
+                                >
+                                  360°
+                                </Link>
 
-                              {/* Quick Notes & Reminders Drawer Trigger */}
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setNotesDrawerState({ isOpen: true, lead, stageName: stage.label })
-                                }
-                                className="text-[11px] font-bold text-slate-700 hover:text-primary transition-colors flex items-center gap-1 bg-transparent hover:bg-primary/10 px-2 py-0.5 rounded-md border border-shadow-darker/5"
-                                title="Open Notes, Team Mentions & Reminder Alarms"
-                              >
-                                <StickyNote
-                                  size={12}
-                                  className={lead.notes_count ? 'text-primary' : 'text-slate-500'}
-                                />
-                                <span>{lead.notes_count ? `${lead.notes_count} Notes` : '+ Note'}</span>
-                              </button>
+                                <select
+                                  aria-label={`Move stage for ${lead.name}`}
+                                  className="text-[10px] font-bold bg-surface rounded-input px-1.5 py-1 border border-shadow-darker/20 text-primary-dark hover:border-primary transition-colors max-w-[90px] truncate"
+                                  value={lead.status || stage.id}
+                                  onChange={(e) => handleQuickMove(lead, e.target.value)}
+                                >
+                                  {activeStages.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
-
-                            {/* Quick Stage Move Dropdown */}
-                            <select
-                              aria-label={`Move stage for ${lead.name}`}
-                              className="text-[11px] font-semibold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/10 text-primary-dark hover:bg-slate-200 transition-colors"
-                              value={lead.status || stage.id}
-                              onChange={(e) => handleQuickMove(lead, e.target.value)}
-                            >
-                              <option value="" disabled>
-                                Move stage...
-                              </option>
-                              {activeStages.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  ➔ {s.label}
-                                </option>
-                              ))}
-                            </select>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>

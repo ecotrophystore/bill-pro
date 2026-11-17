@@ -389,6 +389,8 @@ export interface PipelineRule {
   secondary_value?: any;
 }
 
+export type StageMovePromptMode = 'ask' | 'auto_send' | 'without_message';
+
 export interface StageMessageConfig {
   id: string;
   stage_id: string;
@@ -403,6 +405,7 @@ export interface StageMessageConfig {
   email_template: string;
   delay_minutes?: number;
   is_active: boolean;
+  move_prompt_mode?: StageMovePromptMode;
 }
 
 export interface Lead {
@@ -489,6 +492,92 @@ export interface Lead {
     priority?: NotePriority;
     alarm_enabled?: boolean;
   };
+  // EcoTrophy AI Sales Intelligence Extensions
+  intent_tier?: 'HIGH' | 'MEDIUM' | 'LOW';
+  intent_score?: number; // 0 - 100
+  intent_reasons?: string[];
+  fits_score?: number; // 0 - 15
+  fits_data?: FITSQualificationData;
+  sales_audit?: SalesQualityAudit;
+  prosper_breakdown?: PROSPERBreakdown;
+  lost_intelligence?: LostLeadIntelligence;
+  contextual_guide_dismissed?: boolean;
+}
+
+export interface FITSQualificationData {
+  fit_status: 'fit' | 'partial' | 'unfit';
+  fit_notes?: string;
+  intent_level: 'high' | 'medium' | 'low';
+  event_importance?: string; // e.g. Annual Day, Sports Meet, Corporate Gala
+  decision_maker?: string;
+  timeline_date?: string;
+  delivery_pincode?: string;
+  urgency_status?: 'normal' | 'urgent' | 'critical';
+  scope_quantity?: number;
+  scope_budget_limit?: number;
+  scope_material_preference?: string;
+  completed_at?: any;
+}
+
+export type ProsperStepStatus = 'completed' | 'weak' | 'missing';
+
+export interface PROSPERBreakdown {
+  // Exact EcoTrophy 7-Step PROSPER Framework (Sum = 40 Marks)
+  pitch: number;                 // 0 - 5 Marks (Value hook & in-house craft)
+  rapport: number;               // 0 - 5 Marks (Warm greeting & language mirroring)
+  open_questions: number;        // 0 - 6 Marks (Event format & diagnostic discovery)
+  story: number;                 // 0 - 5 Marks (Customer success stories & social proof)
+  proposal: number;              // 0 - 7 Marks (Good-Better-Best options & 2D mockup)
+  eliminate_objections: number;  // 0 - 6 Marks (Reframing price, samples & deadlines)
+  reserve_close: number;         // 0 - 6 Marks (Production slot urgency & 50% advance)
+
+  step_status?: {
+    pitch: ProsperStepStatus;
+    rapport: ProsperStepStatus;
+    open_questions: ProsperStepStatus;
+    story: ProsperStepStatus;
+    proposal: ProsperStepStatus;
+    eliminate_objections: ProsperStepStatus;
+    reserve_close: ProsperStepStatus;
+  };
+  next_best_action?: string;
+  suggested_whatsapp_draft?: string;
+  coaching_tips: string[];
+
+  // Compatibility aliases
+  prepare_probe?: number;
+  rapport_receptivity?: number;
+  outline_options?: number;
+  solve_objections?: number;
+  propose_next_steps?: number;
+  execute_terms?: number;
+  reengage_reinforce?: number;
+}
+
+export interface SalesQualityAudit {
+  total_score: number;               // 0 - 100
+  sla_score: number;                 // 0 - 10
+  followup_score: number;            // 0 - 15
+  appointment_design_score: number;  // 0 - 10
+  fits_score: number;                // 0 - 15
+  prosper_score: number;             // 0 - 40
+  call_whatsapp_quality_score: number; // 0 - 10
+  last_audited_at?: any;
+  audited_by?: 'ai_engine' | 'manager';
+  audit_notes?: string[];
+}
+
+export interface LostLeadIntelligence {
+  primary_reason: 'price_budget' | 'timeline_delivery' | 'sales_mistake' | 'process_bottleneck' | 'external_cancelled' | 'ghosted_unresponsive';
+  sub_reason?: string;
+  lost_to_competitor?: string;
+  competitor_price?: number;
+  salesperson_mistake?: string; // e.g. "Price Dropper", "Quotation Dumper", "SLA Breach", "Follow-up Delay"
+  recovery_strategy?: string;
+  winback_eligible: boolean;
+  winback_scheduled_date?: any;
+  manager_reviewed: boolean;
+  logged_at?: any;
 }
 
 export type NotePriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -619,6 +708,7 @@ export interface PipelineStage {
   id: string;
   label: string;
   required_fields?: string[]; // New: configurable stage validation requirements (e.g. ['phone', 'email'])
+  move_prompt_mode?: StageMovePromptMode;
 }
 
 export interface Pipeline {
@@ -633,6 +723,17 @@ export interface Pipeline {
   welcome_stage_id?: string;
   welcome_template_id?: string;
 }
+
+export const ECOTROPHY_SALES_STAGES: PipelineStage[] = [
+  { id: 'new_enquiry', label: '1. New Enquiry' },
+  { id: 'fits_qualification', label: '2. FITS Qualification' },
+  { id: 'requirement_design_finalization', label: '3. Req & Design Finalization' },
+  { id: 'quotation', label: '4. Quotation' },
+  { id: 'follow_up', label: '5. Follow-up' },
+  { id: 'payment', label: '6. Payment' },
+  { id: 'order_confirmation', label: '7. Order Confirmation' },
+  { id: 'won_lost', label: '8. Won / Lost', required_fields: ['reason'] },
+];
 
 export const STANDARD_CRM_STAGES: PipelineStage[] = [
   { id: 'new_enquiry', label: 'New Enquiry' },

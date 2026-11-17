@@ -88,8 +88,8 @@ export function StageChangeConfirmModal({
 
   const hasAnyNotification = Boolean(
     (config?.whatsapp_enabled && renderedWhatsApp) ||
-      (config?.sms_enabled && renderedSms) ||
-      (config?.email_enabled && renderedEmail)
+    (config?.sms_enabled && renderedSms) ||
+    (config?.email_enabled && renderedEmail)
   );
 
   const handleConfirmMove = async (sendMessage: boolean) => {
@@ -134,8 +134,11 @@ export function StageChangeConfirmModal({
               <span className="text-secondary font-medium shrink-0">Stage Transition</span>
             </div>
             <h2 className="text-xl font-bold text-primary-dark mt-1">
-              Move Customer Stage
+              Move Stage: With Message or Without Message?
             </h2>
+            <p className="text-xs text-secondary mt-0.5">
+              Choose whether to send an automated notification to this customer when moving to <strong>{toStage.label}</strong>.
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -302,45 +305,50 @@ export function StageChangeConfirmModal({
         )}
 
         {/* Modal Actions */}
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-shadow-darker/10 flex-wrap">
+        <div className="flex items-center justify-between gap-3 pt-3 border-t border-shadow-darker/10 flex-wrap">
           <button
             type="button"
             onClick={onClose}
             disabled={processing}
-            className="neo-btn text-xs px-3.5 py-2 font-semibold"
+            className="neo-btn text-xs px-3.5 py-2 font-semibold text-secondary hover:text-primary-dark"
           >
             Cancel
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleConfirmMove(false)}
-            disabled={processing || (requiresReason && !customReason.trim())}
-            className="neo-btn text-xs px-3.5 py-2 font-semibold text-secondary hover:text-primary-dark"
-          >
-            {duplicateInfo.isDuplicate ? 'Change Stage Without Sending' : 'Confirm Without Message'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleConfirmMove(false)}
+              disabled={processing || (requiresReason && !customReason.trim())}
+              className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-surface hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <CheckCircle2 size={14} className="text-slate-400" />
+              <span>Move Without Message</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => handleConfirmMove(true)}
-            disabled={processing || (requiresReason && !customReason.trim())}
-            className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md hover:shadow-lg"
-          >
-            {processing ? (
-              <>
-                <Loader2 size={14} className="animate-spin" /> Moving...
-              </>
-            ) : duplicateInfo.isDuplicate ? (
-              <>
-                <Send size={14} /> Send Again & Move
-              </>
-            ) : (
-              <>
-                <Send size={14} /> Confirm & Send Message
-              </>
-            )}
-          </button>
+            {hasAnyNotification ? (
+              <button
+                type="button"
+                onClick={() => handleConfirmMove(true)}
+                disabled={processing || (requiresReason && !customReason.trim())}
+                className="neo-btn-primary text-xs px-4 py-2.5 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md hover:shadow-lg transition-all"
+              >
+                {processing ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Moving...
+                  </>
+                ) : duplicateInfo.isDuplicate ? (
+                  <>
+                    <Send size={14} /> Send Again & Move With Message
+                  </>
+                ) : (
+                  <>
+                    <Send size={14} /> Move With Message
+                  </>
+                )}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
