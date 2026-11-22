@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Bot,
   Check,
@@ -20,7 +20,15 @@ import {
   Video,
   X,
   Zap,
-  Plus
+  Plus,
+  Calendar,
+  Clock,
+  Copy,
+  ChevronDown,
+  CheckCheck,
+  Tag,
+  AlertCircle,
+  UserPlus
 } from 'lucide-react';
 import type {
   AiLeadInsight,
@@ -29,6 +37,12 @@ import type {
   SessionInfo,
   WhatsAppStatusItem
 } from '../../services/whatsappMultiSessionService';
+import { STANDARD_CRM_STAGES, type Lead } from '../../types';
+import {
+  calculateDeadlineInfo,
+  generateClientSpecificReplies,
+  type SmartSuggestedReply
+} from '../../utils/whatsappSuggestedReplies';
 
 export function formatConversationTime(ts?: number): string {
   if (!ts) return '';
@@ -478,42 +492,124 @@ export function AiCopilotDrawer({
   analyzing,
   sending,
   saveSuccess,
+  lead,
+  leadId,
   onClose,
   onReanalyze,
   onDraftQuotation,
   onSaveToCrm,
-  onSendSuggestedReply
+  onSendSuggestedReply,
+  onUpdateStage,
+  updatingStage,
+  onUpdateDeadline,
+  updatingDeadline,
+  onInsertReply,
+  availableStages
 }: {
   insight: AiLeadInsight | null;
   crmPreview?: { pipelineName: string; stageLabel: string } | null;
   analyzing: boolean;
   sending: boolean;
   saveSuccess: boolean;
+  lead?: Lead | null;
+  leadId?: string | null;
   onClose: () => void;
   onReanalyze: () => void;
   onDraftQuotation: () => void;
-  onSaveToCrm: () => void;
+  onSaveToCrm: (override?: { name?: string; company?: string }) => void;
   onSendSuggestedReply: (reply: string) => void;
+  onUpdateStage?: (newStageId: string) => Promise<void> | void;
+  updatingStage?: boolean;
+  onUpdateDeadline?: (newDeliveryDate: string, newEventDate?: string) => Promise<void> | void;
+  updatingDeadline?: boolean;
+  onInsertReply?: (reply: string) => void;
+  availableStages?: { id: string; label: string }[];
 }) {
+  const [replyFilter, setReplyFilter] = useState<'all' | 'recommended' | 'quote' | 'deadline' | 'payment' | 'knowledge'>('all');
+  const [customDeadlineDate, setCustomDeadlineDate] = useState('');
+  const [drawerContactName, setDrawerContactName] = useState('');
+  const [drawerCompanyName, setDrawerCompanyName] = useState('');
+
+  // Effective values merging CRM Lead record + real-time AI insight
+  const clientName = lead?.name || insight?.leadName || '';
+  const companyName = lead?.company || lead?.organization || insight?.company || '';
+  const currentStage = lead?.status || insight?.pipelineStage || insight?.stage || 'new_enquiry';
+  const deliveryDate = lead?.delivery_date || insight?.deliveryDate || '';
+  const eventDate = lead?.event_date || insight?.eventDate || '';
+  const quantity = lead?.required_quantity || insight?.quantity || '';
+  const requirement = lead?.trophy_size || insight?.requirement || '';
+  const budget = lead?.value || insight?.budget || '';
+
+  const deadlineInfo = useMemo(() => {
+    return calculateDeadlineInfo(deliveryDate, eventDate);
+  }, [deliveryDate, eventDate]);
+
+  const stagesList = availableStages && availableStages.length > 0 ? availableStages : STANDARD_CRM_STAGES;
+  const currentStageLabel = stagesList.find((s) => s.id === currentStage)?.label || currentStage.replace(/_/g, ' ');
+
+  // Generate dynamic client-specific suggested replies grounded in EcoTrophy knowledge
+  const smartReplies = useMemo(() => {
+    return generateClientSpecificReplies({
+      clientName,
+      companyName,
+      requirement,
+      quantity,
+      deliveryDate,
+      eventDate,
+      currentStage,
+      budget
+    });
+  }, [clientName, companyName, requirement, quantity, deliveryDate, eventDate, currentStage, budget]);
+
+  const filteredReplies = useMemo(() => {
+    if (replyFilter === 'recommended') {
+      return smartReplies.filter((r) => r.isStageRecommended);
+    }
+    if (replyFilter === 'quote') {
+      return smartReplies.filter((r) => r.category === 'quote' || r.category === 'requirement');
+    }
+    if (replyFilter === 'deadline') {
+      return smartReplies.filter((r) => r.category === 'deadline');
+    }
+    if (replyFilter === 'payment') {
+      return smartReplies.filter((r) => r.category === 'payment');
+    }
+    if (replyFilter === 'knowledge') {
+      return smartReplies.filter((r) => r.category === 'knowledge');
+    }
+    return smartReplies;
+  }, [smartReplies, replyFilter]);
+
+  const handleQuickAddDays = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const dateStr = d.toISOString().split('T')[0];
+    setCustomDeadlineDate(dateStr);
+    if (onUpdateDeadline) {
+      onUpdateDeadline(dateStr, eventDate);
+    }
+  };
+
   return (
-    <div className="fixed inset-x-0 bottom-0 top-14 z-50 lg:static lg:inset-auto w-full lg:w-[340px] shrink-0 bg-surface border-t lg:border-t-0 lg:border-l border-shadow-dark flex flex-col min-h-0 overflow-hidden animate-fade-in rounded-t-card lg:rounded-none shadow-neo-raised lg:shadow-none">
-      <div className="px-4 py-3 border-b border-shadow-dark flex items-center justify-between">
+    <div className="fixed inset-x-0 bottom-0 top-14 z-50 lg:static lg:inset-auto w-full lg:w-[380px] shrink-0 bg-surface border-t lg:border-t-0 lg:border-l border-shadow-dark flex flex-col min-h-0 overflow-hidden animate-fade-in rounded-t-card lg:rounded-none shadow-neo-raised lg:shadow-none">
+      {/* Copilot Header */}
+      <div className="px-4 py-3 border-b border-shadow-dark flex items-center justify-between shrink-0 bg-surface/95 backdrop-blur-sm">
         <div className="flex items-center gap-2">
-          <Sparkles size={16} className="text-primary" />
-          <h3 className="text-xs font-bold text-primary-dark">AI Agent Copilot</h3>
+          <Sparkles size={16} className="text-primary animate-pulse" />
+          <h3 className="text-xs font-bold text-primary-dark">AI Copilot & Lead Manager</h3>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onReanalyze}
             disabled={analyzing}
-            title="Analyze recent chat messages"
-            className="p-1.5 rounded-full bg-surface shadow-neo-surface text-secondary hover:text-primary"
+            title="Re-analyze chat messages with AI"
+            className="p-1.5 rounded-full bg-surface shadow-neo-surface text-secondary hover:text-primary transition-colors"
           >
             <RefreshCw size={13} className={analyzing ? 'animate-spin text-primary' : ''} />
           </button>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full bg-surface shadow-neo-surface text-secondary hover:text-primary-dark"
+            className="p-1.5 rounded-full bg-surface shadow-neo-surface text-secondary hover:text-primary-dark transition-colors"
             title="Close AI Copilot"
           >
             <X size={13} />
@@ -521,120 +617,347 @@ export function AiCopilotDrawer({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-sidebar-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 custom-sidebar-scrollbar">
         {analyzing ? (
           <div className="py-12 flex flex-col items-center justify-center gap-2 text-secondary">
             <Loader2 size={24} className="animate-spin text-primary" />
-            <span className="text-xs font-semibold">Analyzing conversation...</span>
+            <span className="text-xs font-semibold">Analyzing client conversation...</span>
           </div>
-        ) : insight ? (
+        ) : (
           <>
-            <div className="p-4 rounded-card bg-surface shadow-neo-surface space-y-3">
+            {/* ── 1. PIPELINE STAGE SELECTOR (Directly Beside Chat) ── */}
+            <div className="p-3.5 rounded-card bg-surface shadow-neo-surface space-y-2.5 border-l-4 border-primary">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-bold text-secondary uppercase tracking-wider">Lead Specs</span>
-                <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-surface shadow-neo-surface text-primary font-bold">
-                  {crmPreview?.stageLabel || insight.pipelineStage || insight.stage}
+                <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <Tag size={13} className="text-primary" /> Pipeline Stage
+                </span>
+                {updatingStage ? (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-surface text-primary font-bold flex items-center gap-1">
+                    <Loader2 size={11} className="animate-spin" /> Saving...
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-primary/10 text-primary font-extrabold uppercase truncate max-w-[140px]">
+                    {currentStageLabel}
+                  </span>
+                )}
+              </div>
+
+              <div className="relative">
+                <select
+                  value={currentStage}
+                  disabled={updatingStage}
+                  onChange={(e) => onUpdateStage && onUpdateStage(e.target.value)}
+                  className="w-full text-xs font-bold text-primary-dark bg-surface shadow-neo-inset py-2 px-3 pr-8 rounded-card border-none outline-none appearance-none cursor-pointer focus:ring-1 focus:ring-primary disabled:opacity-50"
+                >
+                  {stagesList.map((st) => (
+                    <option key={st.id} value={st.id} className="text-primary-dark bg-surface">
+                      {st.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-secondary">
+                  <ChevronDown size={14} />
+                </div>
+              </div>
+              <span className="text-[10px] text-secondary block">
+                Update stage beside chat anytime to trigger automated follow-ups and board movements.
+              </span>
+            </div>
+
+            {/* ── 2. PROJECT DEADLINE / DELIVERY DATE (Directly Beside Chat) ── */}
+            <div className="p-3.5 rounded-card bg-surface shadow-neo-surface space-y-2.5 border-l-4 border-amber-500">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <Clock size={13} className="text-amber-500" /> Project Deadline
+                </span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${deadlineInfo.badgeClass}`}>
+                  {deadlineInfo.label}
                 </span>
               </div>
 
-              {crmPreview && (
-                <div className="px-2.5 py-1.5 rounded-card bg-surface shadow-neo-inset text-[11px] flex items-center justify-between gap-2">
-                  <span className="text-secondary font-medium">Pipeline</span>
-                  <span className="font-bold text-primary-dark truncate">{crmPreview.pipelineName}</span>
+              {/* Inline Date Picker & Presets */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={deliveryDate || customDeadlineDate}
+                    disabled={updatingDeadline}
+                    onChange={(e) => {
+                      setCustomDeadlineDate(e.target.value);
+                      if (onUpdateDeadline && e.target.value) {
+                        onUpdateDeadline(e.target.value, eventDate);
+                      }
+                    }}
+                    className="flex-1 text-xs font-semibold text-primary-dark bg-surface shadow-neo-inset py-1.5 px-2.5 rounded-card border-none outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-50"
+                  />
+                  {updatingDeadline && <Loader2 size={14} className="animate-spin text-primary shrink-0" />}
                 </div>
-              )}
 
-              <div className="grid grid-cols-2 gap-2.5 text-xs">
-                <div className="p-2.5 rounded-card bg-surface shadow-neo-surface">
-                  <span className="text-[10px] text-secondary block">Name</span>
-                  <strong className="text-primary-dark truncate block mt-0.5">{insight.leadName || 'Inquiry'}</strong>
+                {/* Quick Add Presets */}
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <span className="text-[10px] text-secondary font-medium">Quick Set:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddDays(3)}
+                    disabled={updatingDeadline}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-surface shadow-neo-surface text-primary-dark hover:text-primary transition-colors"
+                  >
+                    +3 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddDays(7)}
+                    disabled={updatingDeadline}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-surface shadow-neo-surface text-primary-dark hover:text-primary transition-colors"
+                  >
+                    +7 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickAddDays(14)}
+                    disabled={updatingDeadline}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-surface shadow-neo-surface text-primary-dark hover:text-primary transition-colors"
+                  >
+                    +14 Days
+                  </button>
                 </div>
-                <div className="p-2.5 rounded-card bg-surface shadow-neo-surface">
-                  <span className="text-[10px] text-secondary block">Phone</span>
-                  <strong className="text-primary-dark truncate block mt-0.5">
-                    {insight.phone ? `+${insight.phone}` : 'Private ID'}
-                  </strong>
-                </div>
-                <div className="col-span-2 p-2.5 rounded-card bg-surface shadow-neo-surface">
-                  <span className="text-[10px] text-secondary block">Requirement</span>
-                  <strong className="text-primary-dark text-[11px] leading-snug block mt-0.5">
-                    {insight.requirement}
-                  </strong>
-                </div>
-                {insight.quantity && (
-                  <div className="p-2.5 rounded-card bg-surface shadow-neo-surface">
-                    <span className="text-[10px] text-secondary block">Quantity</span>
-                    <strong className="text-primary-dark mt-0.5 block">{insight.quantity}</strong>
-                  </div>
-                )}
-                {insight.budget && (
-                  <div className="p-2.5 rounded-card bg-surface shadow-neo-surface">
-                    <span className="text-[10px] text-secondary block">Budget</span>
-                    <strong className="text-primary font-bold mt-0.5 block">{insight.budget}</strong>
-                  </div>
-                )}
               </div>
             </div>
 
-            <div className="p-4 rounded-card bg-surface shadow-neo-surface space-y-2.5">
-              <div className="flex items-start gap-2">
-                <Zap size={15} className="text-primary mt-0.5 shrink-0" />
-                <div>
-                  <h5 className="text-xs font-bold text-primary-dark">{insight.suggestedAction}</h5>
-                  <p className="text-[11px] text-secondary mt-0.5">Derived from conversation by AI Agent.</p>
-                </div>
-              </div>
-              <div className="pt-2 flex flex-col gap-2">
-                <button
-                  onClick={onDraftQuotation}
-                  className="neo-btn-primary w-full flex items-center justify-center gap-2 text-xs"
-                >
-                  <FileText size={14} /> Draft Quotation in Bill-Pro
-                </button>
-                <button
-                  onClick={onSaveToCrm}
-                  disabled={saveSuccess}
-                  className="neo-btn w-full flex items-center justify-center gap-1.5 text-xs text-primary-dark"
-                >
-                  {saveSuccess ? (
-                    <span className="text-primary flex items-center gap-1 font-bold">
-                      <Check size={14} /> Saved to CRM!
+            {/* ── 3. CLIENT SPECS & LEAD ACTIONS ── */}
+            {insight && (
+              <div className="p-3.5 rounded-card bg-surface shadow-neo-surface space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-secondary uppercase tracking-wider">Client Specs</span>
+                  {crmPreview && (
+                    <span className="text-[10px] font-bold text-primary truncate max-w-[160px]">
+                      {crmPreview.pipelineName}
                     </span>
-                  ) : (
-                    <>
-                      <Plus size={14} /> Save to CRM Pipeline
-                    </>
                   )}
-                </button>
-              </div>
-            </div>
+                </div>
 
-            {insight.suggestedReply && (
-              <div className="p-4 rounded-card bg-surface shadow-neo-surface space-y-2.5">
-                <span className="text-[11px] font-bold text-secondary uppercase flex items-center gap-1">
-                  <Bot size={13} className="text-primary" /> AI Suggested Reply
-                </span>
-                <p className="text-xs text-primary-dark bg-surface shadow-neo-inset p-3 rounded-card leading-relaxed italic">
-                  "{insight.suggestedReply}"
-                </p>
-                <button
-                  onClick={() => onSendSuggestedReply(insight.suggestedReply)}
-                  disabled={sending}
-                  className="neo-btn-primary w-full flex items-center justify-center gap-2 text-xs"
-                >
-                  <Send size={13} /> 1-Click Send via WhatsApp
-                </button>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 rounded-card bg-surface shadow-neo-surface">
+                    <span className="text-[10px] text-secondary block">Client</span>
+                    <strong className="text-primary-dark truncate block mt-0.5">{clientName || 'Inquiry'}</strong>
+                  </div>
+                  <div className="p-2 rounded-card bg-surface shadow-neo-surface">
+                    <span className="text-[10px] text-secondary block">Company / Inst.</span>
+                    <strong className="text-primary-dark truncate block mt-0.5">{companyName || 'Individual'}</strong>
+                  </div>
+                  <div className="col-span-2 p-2 rounded-card bg-surface shadow-neo-surface">
+                    <span className="text-[10px] text-secondary block">Requirement</span>
+                    <strong className="text-primary-dark text-[11px] leading-snug block mt-0.5">
+                      {requirement || 'Trophies / Awards'}
+                    </strong>
+                  </div>
+                  {quantity && (
+                    <div className="p-2 rounded-card bg-surface shadow-neo-surface">
+                      <span className="text-[10px] text-secondary block">Quantity</span>
+                      <strong className="text-primary-dark mt-0.5 block">{quantity} pcs</strong>
+                    </div>
+                  )}
+                  {budget && (
+                    <div className="p-2 rounded-card bg-surface shadow-neo-surface">
+                      <span className="text-[10px] text-secondary block">Budget</span>
+                      <strong className="text-primary font-bold mt-0.5 block">₹{budget}</strong>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-1.5 flex flex-col gap-2">
+                  <button
+                    onClick={onDraftQuotation}
+                    className="neo-btn-primary w-full flex items-center justify-center gap-2 text-xs py-2 font-bold"
+                  >
+                    <FileText size={13} /> Draft Quotation in Bill-Pro
+                  </button>
+                  {!lead?.id && !leadId && (
+                    <div className="p-2.5 rounded-card bg-amber-500/10 border border-amber-400/30 space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-amber-900">
+                        <span>Unsaved Contact</span>
+                        <span className="text-[10px] font-normal text-secondary">
+                          {requirement ? 'Requirement detected' : 'Chatting only'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-secondary leading-tight">
+                        {requirement
+                          ? 'Customer shared order specs. Save contact to CRM?'
+                          : 'Customer chatting. Save this contact to CRM pipeline?'}
+                      </p>
+                      <div className="space-y-1.5 pt-1">
+                        <input
+                          type="text"
+                          value={drawerContactName !== '' ? drawerContactName : (clientName || '')}
+                          onChange={(e) => setDrawerContactName(e.target.value)}
+                          placeholder="Contact Name (e.g. Ramesh Kumar)"
+                          className="w-full text-xs py-1.5 px-2.5 rounded-lg bg-surface border border-shadow-darker/20 font-medium text-primary-dark"
+                        />
+                        <input
+                          type="text"
+                          value={drawerCompanyName !== '' ? drawerCompanyName : (companyName || '')}
+                          onChange={(e) => setDrawerCompanyName(e.target.value)}
+                          placeholder="Company / School (optional)"
+                          className="w-full text-xs py-1.5 px-2.5 rounded-lg bg-surface border border-shadow-darker/20 font-medium text-primary-dark"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (onSaveToCrm) {
+                            onSaveToCrm({
+                              name: drawerContactName.trim() || clientName,
+                              company: drawerCompanyName.trim() || companyName
+                            });
+                          }
+                        }}
+                        disabled={saveSuccess}
+                        className="neo-btn-primary w-full flex items-center justify-center gap-1.5 text-xs py-2 font-bold"
+                      >
+                        {saveSuccess ? (
+                          <span className="flex items-center gap-1">
+                            <Check size={13} /> Saved to CRM Pipeline!
+                          </span>
+                        ) : (
+                          <>
+                            <UserPlus size={13} /> Save Contact to CRM
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
+
+            {/* ── 4. CLIENT-SPECIFIC SUGGESTED REPLIES & KNOWLEDGE ── */}
+            <div className="p-3.5 rounded-card bg-surface shadow-neo-surface space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                  <Bot size={14} className="text-primary" /> Suggested Replies
+                </span>
+                <span className="text-[10px] font-semibold text-secondary">
+                  {filteredReplies.length} tailored replies
+                </span>
+              </div>
+
+              {/* Category Filter Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-sidebar-scrollbar text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('all')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all ${
+                    replyFilter === 'all'
+                      ? 'bg-primary text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('recommended')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all flex items-center gap-1 ${
+                    replyFilter === 'recommended'
+                      ? 'bg-emerald-600 text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-emerald-700 dark:text-emerald-400 hover:text-emerald-800'
+                  }`}
+                >
+                  ⭐ Stage Focus
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('quote')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all ${
+                    replyFilter === 'quote'
+                      ? 'bg-primary text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  Quote
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('deadline')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all ${
+                    replyFilter === 'deadline'
+                      ? 'bg-primary text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  Deadline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('payment')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all ${
+                    replyFilter === 'payment'
+                      ? 'bg-primary text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  Advance
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setReplyFilter('knowledge')}
+                  className={`px-2.5 py-1 rounded-full whitespace-nowrap font-bold transition-all ${
+                    replyFilter === 'knowledge'
+                      ? 'bg-primary text-white shadow-neo-pressed'
+                      : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                  }`}
+                >
+                  Knowledge
+                </button>
+              </div>
+
+              {/* Dynamic Reply Cards */}
+              <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1 custom-sidebar-scrollbar">
+                {filteredReplies.map((r) => (
+                  <div
+                    key={r.id}
+                    className={`p-3 rounded-card bg-surface shadow-neo-inset space-y-2 border transition-all ${
+                      r.isStageRecommended ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-transparent'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[11px] font-bold text-primary-dark truncate">{r.title}</span>
+                      {r.isStageRecommended && (
+                        <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                          Recommended
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-primary-dark leading-relaxed italic bg-surface/70 p-2 rounded-card">
+                      "{r.text}"
+                    </p>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      {onInsertReply && (
+                        <button
+                          type="button"
+                          onClick={() => onInsertReply(r.text)}
+                          className="flex-1 text-[11px] font-bold py-1.5 px-2 rounded-card bg-surface shadow-neo-surface text-secondary hover:text-primary flex items-center justify-center gap-1 transition-colors"
+                          title="Copy into chat box to review/edit before sending"
+                        >
+                          <Copy size={11} /> Insert
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => onSendSuggestedReply(r.text)}
+                        disabled={sending}
+                        className="flex-1 text-[11px] font-bold py-1.5 px-2 rounded-card neo-btn-primary flex items-center justify-center gap-1 transition-colors text-white"
+                        title="Send immediately via WhatsApp"
+                      >
+                        <Send size={11} /> Send ⚡
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </>
-        ) : (
-          <div className="py-16 text-center text-secondary space-y-3">
-            <Sparkles size={28} className="mx-auto text-primary opacity-40" />
-            <p className="text-xs font-semibold text-primary-dark">AI Copilot Ready</p>
-            <p className="text-[11px] leading-relaxed">
-              Click analyze above or receive a customer message to extract quotation specs and draft replies.
-            </p>
-          </div>
         )}
       </div>
     </div>

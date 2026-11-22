@@ -425,7 +425,36 @@ export default function Quotations() {
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">No quotations found.</td></tr>
               ) : displayQuotations.map((q) => (
                 <tr key={q.id} className="border-b border-shadow-darker/10 hover:bg-shadow-darker/5 transition-colors group">
-                  <td className="py-4 px-4 pl-0 font-medium text-primary-dark">{q.number}</td>
+                  <td className="py-4 px-4 pl-0 font-medium text-primary-dark">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>{q.number}</span>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold" title={`Active version: v${q.version || 1}`}>
+                        v{q.version || 1}
+                      </span>
+                    </div>
+                    {q.versions && q.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {q.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/quotations/edit/${q.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (q.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary hover:bg-shadow-darker/20 hover:text-primary-dark'
+                            }`}
+                            title={`Click to edit Version ${v.versionNumber}`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id]?.name || 'Loading...'}</td>
                   <td className="py-4 px-4 text-secondary">{q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="py-4 px-4 font-bold text-primary-dark text-right">
@@ -477,7 +506,33 @@ export default function Quotations() {
               <div key={q.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{q.number}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-primary-dark text-lg leading-tight">{q.number}</h3>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold">
+                        v{q.version || 1}
+                      </span>
+                    </div>
+                    {q.versions && q.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {q.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/quotations/edit/${q.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (q.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary'
+                            }`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <p className="text-secondary font-medium mt-0.5">{customers[q.customer_id]?.name || 'Loading...'}</p>
                     <p className="text-xs text-secondary/70 mt-1">
                       {q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}

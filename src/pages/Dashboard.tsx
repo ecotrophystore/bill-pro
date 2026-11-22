@@ -461,10 +461,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* 2. Executive Summary Cards (6 Real-Time Metrics) */}
+      {/* 2. Executive Summary Cards (Real-Time Metrics) */}
       <section aria-label="Executive Summary Cards">
         <ExecutiveSummaryCards 
           metrics={metrics}
+          totalPurchases={purchaseExpenseResult.totalPurchases}
+          totalExpenses={purchaseExpenseResult.totalExpenses}
           onCardClick={handleDrillDown}
         />
       </section>
@@ -487,7 +489,9 @@ export default function Dashboard() {
           onStageClick={handleDrillDown}
           onCollectionsClick={() => handleDrillDown('payments_received')}
           onOutstandingClick={() => handleDrillDown('outstanding_amounts')}
+          onSalesClick={() => handleDrillDown('total_sales')}
           onPurchasesClick={() => handleDrillDown('purchases')}
+          onExpensesClick={() => handleDrillDown('expenses')}
         />
       </section>
 
@@ -512,6 +516,7 @@ export default function Dashboard() {
         proformaInvoices={proformaInvoices}
         quotations={quotations}
         purchases={purchases}
+        expenses={expenses}
       />
 
     </div>

@@ -7,7 +7,9 @@ import {
   AlertCircle, 
   PhoneCall,
   ArrowUpRight,
-  IndianRupee
+  IndianRupee,
+  ShoppingBag,
+  Receipt
 } from 'lucide-react';
 import type { DashboardMetrics } from '../../utils/dashboardMetrics';
 
@@ -17,15 +19,21 @@ export type DrillDownType =
   | 'total_sales' 
   | 'payments_received' 
   | 'outstanding_amounts' 
-  | 'pending_followups';
+  | 'pending_followups'
+  | 'purchases'
+  | 'expenses';
 
 interface ExecutiveSummaryCardsProps {
   metrics: DashboardMetrics;
+  totalPurchases?: number;
+  totalExpenses?: number;
   onCardClick: (type: DrillDownType) => void;
 }
 
 export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
   metrics,
+  totalPurchases = 0,
+  totalExpenses = 0,
   onCardClick
 }) => {
   const cards = [
@@ -56,12 +64,36 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
     {
       type: 'total_sales' as DrillDownType,
       title: 'Total Sales',
-      description: 'Gross revenue for selected timeframe',
+      description: 'Gross revenue across invoices & memos',
       value: `₹${metrics.totalSales.toLocaleString('en-IN')}`,
       icon: TrendingUp,
       accent: 'border-primary/30 text-primary-dark bg-primary/15',
       badge: 'Gross Revenue',
       badgeStyle: 'bg-primary/10 text-primary-dark border-primary/20',
+      isHighlight: false,
+      isCurrency: true
+    },
+    {
+      type: 'purchases' as DrillDownType,
+      title: 'Vendor Purchases',
+      description: 'Raw materials & supplier bills',
+      value: `₹${totalPurchases.toLocaleString('en-IN')}`,
+      icon: ShoppingBag,
+      accent: 'border-amber-500/40 text-amber-900 bg-amber-400/20',
+      badge: 'Procurement',
+      badgeStyle: 'bg-amber-400/20 text-amber-900 border-amber-500/30',
+      isHighlight: false,
+      isCurrency: true
+    },
+    {
+      type: 'expenses' as DrillDownType,
+      title: 'Operating Expenses',
+      description: 'Staff, utilities & shop overheads',
+      value: `₹${totalExpenses.toLocaleString('en-IN')}`,
+      icon: Receipt,
+      accent: 'border-rose-500/30 text-rose-900 bg-rose-500/15',
+      badge: 'Overheads',
+      badgeStyle: 'bg-rose-500/10 text-rose-900 border-rose-500/20',
       isHighlight: false,
       isCurrency: true
     },
@@ -104,7 +136,7 @@ export const ExecutiveSummaryCards: React.FC<ExecutiveSummaryCardsProps> = ({
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-8 gap-3.5">
       {cards.map((card) => {
         const Icon = card.icon;
         return (

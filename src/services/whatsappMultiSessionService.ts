@@ -73,6 +73,11 @@ export interface AiLeadInsight {
   isBusinessLead?: boolean;
   suggestedAction: string;
   suggestedReply: string;
+  flagForReview?: boolean;
+  confidenceScore?: number;
+  intentTier?: 'HIGH' | 'MEDIUM' | 'LOW';
+  fitsSummary?: string;
+  prosperCoachingTip?: string;
   analyzedAt: number;
 }
 

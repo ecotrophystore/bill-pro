@@ -40,6 +40,7 @@ const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const WhatsAppAutomation = lazy(() => import('./pages/WhatsAppAutomation'));
 const PurchaseAnalytics = lazy(() => import('./pages/PurchaseAnalytics'));
 const CompanyIntelligence = lazy(() => import('./pages/CompanyIntelligence'));
+const TrophyCreator = lazy(() => import('./pages/TrophyCreator'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, dbUser, loading, logout } = useAuth();
@@ -113,6 +114,7 @@ export default function App() {
                 <Route path="whatsapp-automation" element={<WhatsAppAutomation />} />
                 <Route path="crm-dashboard" element={<CRMDashboard />} />
                 <Route path="company-intelligence" element={<CompanyIntelligence />} />
+                <Route path="trophy-creator" element={<TrophyCreator />} />
                 <Route path="stage-automation" element={<StageAutomation />} />
                 <Route path="audit-logs" element={<AuditLogs />} />
 

@@ -166,6 +166,8 @@ You are the central autonomous AI operator of Bill Pro. You can perform all work
 9. If they say an invoice was paid, use "MARK_PAID" (invoiceNumber, paymentMethod).
 10. If they received or sold stock, use "UPDATE_STOCK" (productSearch, quantityToAdd).
 11. If they ask to send/dispatch via WhatsApp, use "DISPATCH" (documentType, customerSearch).
+12. If the user asks for financial guidance, planning a future monthly budget, specifying spending categories, cash flow advice, or profit improvements:
+NEVER state that Bill Pro doesn't support future monthly budget planning or specifying spending categories! You are the Chief Financial Officer (CFO) and Master Financial Strategist. Formulate a concrete, highly-structured future monthly budget plan with target revenue, target profit margin, total spending cap, and a clear spending categories table (Raw Materials, Production/Machinery, Staff/Labor, Office/Utilities, Logistics, Marketing, Emergency Reserve).
 
 Valid routes for NAVIGATE:
 - /dashboard
@@ -185,7 +187,7 @@ Valid routes for NAVIGATE:
 
 Respond STRICTLY in this JSON format:
 {
-  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "CREATE_QUOTATION" | "CREATE_INVOICE" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "REPLY",
+  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "CREATE_QUOTATION" | "CREATE_INVOICE" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "BUDGET_PLAN" | "FINANCIAL_ADVICE" | "REPLY",
   "target": "/route_path" (or "quotation", "invoice" for DISPATCH),
   "payload": { 
       "name": "Item Name / Lead Name", "retail_price": 100, "phone": "1234567890",
@@ -200,7 +202,8 @@ Respond STRICTLY in this JSON format:
   "status": "SUCCESS" | "ERROR",
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "avatarState": "thinking" | "warning" | "idle" | "celebrating",
-  "message": "Your helpful, accurate conversational response in English, Tanglish, or Tamil. Directly answer with the exact live numbers from LIVE ANALYTICS."
+  "message": "Your helpful, accurate conversational response in English, Tanglish, or Tamil. Directly answer with the exact live numbers from LIVE ANALYTICS.",
+  "spokenText": "Optional concise 2-sentence spoken digest for speech synthesis"
 }
 `;
         let injectedContext = "";

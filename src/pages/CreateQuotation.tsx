@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2 } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Calculator, Sparkles, Loader2, History, GitBranch, Check, Copy } from 'lucide-react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, functions } from '../lib/firebase';
 import { collection, getDocs, doc, getDoc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import type { Customer, Product, LineItem } from '../types';
+import type { Customer, Product, LineItem, DocumentVersion } from '../types';
 import SearchableAutocomplete from '../components/Billing/SearchableAutocomplete';
 import { DiscountSelector } from '../components/Billing/DiscountSelector';
 import { UnitSelector } from '../components/Billing/UnitSelector';
@@ -44,6 +44,38 @@ export default function CreateQuotation() {
   const [isSaving, setIsSaving] = useState(false);
   const { id } = useParams();
   const [loadingData, setLoadingData] = useState(true);
+  const [leadId, setLeadId] = useState<string | null>(null);
+  const [customerPhone, setCustomerPhone] = useState<string>('');
+
+  // Document Versioning State
+  const [docVersion, setDocVersion] = useState<number>(1);
+  const [selectedVersionNumber, setSelectedVersionNumber] = useState<number>(1);
+  const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [makeActiveOnSave, setMakeActiveOnSave] = useState<boolean>(true);
+
+  const applyVersionData = (vData: any) => {
+    if (!vData) return;
+    setItems(vData.items && vData.items.length > 0 ? vData.items : [{ description: '', desc: '', hsn_code: '', quantity: 1, rate: 0, discount: 0, tax_percentage: 18, priceTier: 'retail', unit: 'Pcs' }]);
+    const advAmt = vData.advance_amount !== undefined ? vData.advance_amount : 0;
+    setAdvanceAmount(advAmt);
+    setHasAdvance(advAmt > 0);
+    setAdvancePaymentMethod(vData.advance_payment_method || 'Cash');
+    setAdvancePaymentDate(vData.advance_payment_date || new Date().toISOString().split('T')[0]);
+    setAdvanceReferenceNumber(vData.advance_reference_number || '');
+    setDiscountPercent(vData.discount_percent || 0);
+    setChargeAmount(vData.charge_amount || 0);
+    if (vData.custom_date) {
+      setQuotationDate(vData.custom_date);
+    }
+  };
+
+  const switchVersion = (verNum: number) => {
+    const target = versions.find(v => v.versionNumber === verNum);
+    if (!target) return;
+    setSelectedVersionNumber(verNum);
+    applyVersionData(target.data);
+    setMakeActiveOnSave(verNum === docVersion);
+  };
 
   useEffect(() => {
     async function fetchData() {
@@ -63,23 +95,55 @@ export default function CreateQuotation() {
           const qDoc = await getDoc(doc(db, 'quotations', id));
           if (qDoc.exists()) {
             const data = qDoc.data();
+            const currentDocVer = data.version || 1;
+            setDocVersion(currentDocVer);
+            if (data.lead_id) setLeadId(data.lead_id);
+            if (data.customer_phone) setCustomerPhone(data.customer_phone);
+
+            // Construct versions list if not present
+            let loadedVersions: DocumentVersion[] = Array.isArray(data.versions) && data.versions.length > 0
+              ? data.versions
+              : [{
+                  versionNumber: 1,
+                  versionLabel: 'v1',
+                  createdAt: data.created_at || new Date().toISOString(),
+                  createdBy: data.created_by || 'system',
+                  notes: 'Initial quotation',
+                  data: {
+                    items: data.items || [],
+                    subtotal: data.subtotal || 0,
+                    tax_total: data.tax_total || 0,
+                    grand_total: data.grand_total || 0,
+                    discount_percent: data.discount_percent || 0,
+                    charge_amount: data.charge_amount || 0,
+                    advance_amount: data.advance_amount || 0,
+                    advance_payment_method: data.advance_payment_method || 'Cash',
+                    advance_payment_date: data.advance_payment_date || new Date().toISOString().split('T')[0],
+                    advance_reference_number: data.advance_reference_number || '',
+                    custom_date: data.custom_date || data.date || new Date().toISOString().split('T')[0]
+                  }
+                }];
+            setVersions(loadedVersions);
+
+            // Check if specific version requested via URL (?version=1)
+            const searchParams = new URLSearchParams(location.search);
+            const urlVersion = searchParams.get('version');
+            const targetVersionNum = urlVersion ? Number(urlVersion) : currentDocVer;
+            const targetVersion = loadedVersions.find(v => v.versionNumber === targetVersionNum) || loadedVersions[loadedVersions.length - 1];
+
+            setSelectedVersionNumber(targetVersion.versionNumber);
+            setMakeActiveOnSave(targetVersion.versionNumber === currentDocVer);
+
             setSelectedCustomerId(data.customer_id);
             setSelectedCustomerName(data.customer_name);
             setCustomerType(data.customer_type || 'gst');
             setCustomerAddress(data.customer_address || '');
             setCustomerState(data.customer_state || '');
             setCustomerGstin(data.customer_gstin || '');
-            setItems(data.items || []);
-            const advAmt = data.advance_amount || 0;
-            setAdvanceAmount(advAmt);
-            setHasAdvance(advAmt > 0);
-            setAdvancePaymentMethod(data.advance_payment_method || 'Cash');
-            setAdvancePaymentDate(data.advance_payment_date || new Date().toISOString().split('T')[0]);
-            setAdvanceReferenceNumber(data.advance_reference_number || '');
-            setDiscountPercent(data.discount_percent || 0);
-            setChargeAmount(data.charge_amount || 0);
             setDocumentNumber(data.number || '');
-            setQuotationDate(data.custom_date || data.date || new Date().toISOString().split('T')[0]);
+
+            // Apply selected version data
+            applyVersionData(targetVersion.data);
           }
         } else {
           // Auto-generate proposed quotation number based on settings
@@ -92,12 +156,16 @@ export default function CreateQuotation() {
 
           // Check if prefilled from lead URL query parameters
           const searchParams = new URLSearchParams(location.search);
+          const urlLeadId = searchParams.get('lead_id') || searchParams.get('leadId');
           const urlName = searchParams.get('name') || searchParams.get('leadName');
           const urlPhone = searchParams.get('phone');
           const urlCompany = searchParams.get('company');
           const urlRequirement = searchParams.get('requirement');
           const urlQuantity = searchParams.get('quantity');
           const urlBudget = searchParams.get('budget');
+          
+          if (urlLeadId) setLeadId(urlLeadId);
+          if (urlPhone) setCustomerPhone(urlPhone);
           
           const prefillData = location.state?.prefillData;
 
@@ -396,19 +464,73 @@ export default function CreateQuotation() {
 
   const { enrichedItems, ...totals } = calculateTotals();
 
-  const handleSave = async (status: 'draft' | 'convert_requested' = 'draft') => {
-    if (!selectedCustomerId || !auth?.currentUser || !functions) {
+  const handleSave = async (status: 'draft' | 'convert_requested' = 'draft', asNewVersion: boolean = false) => {
+    if (!selectedCustomerId || !auth?.currentUser) {
       alert("Please select a customer and ensure you are logged in.");
       return;
     }
 
     if (id) {
-      const confirm = window.confirm("Are you sure you want to update this quotation?");
+      const targetVersionNum = asNewVersion
+        ? (versions.length > 0 ? Math.max(...versions.map(v => v.versionNumber)) : 1) + 1
+        : selectedVersionNumber;
+
+      const confirmMsg = asNewVersion
+        ? `Create and save as new Version ${targetVersionNum}?`
+        : `Are you sure you want to update Version ${targetVersionNum}?`;
+
+      const confirm = window.confirm(confirmMsg);
       if (!confirm) return;
       setIsSaving(true);
+
       try {
-        await updateDoc(doc(db, 'quotations', id), {
+        const versionSnapshot: DocumentVersion = {
+          versionNumber: targetVersionNum,
+          versionLabel: `v${targetVersionNum}`,
+          createdAt: new Date().toISOString(),
+          createdBy: auth.currentUser.email || 'user',
+          notes: asNewVersion ? `Version ${targetVersionNum}` : `Updated Version ${targetVersionNum}`,
+          data: {
+            items: items,
+            discount_percent: discountPercent,
+            discount_amount: totals.discountAmount,
+            charge_amount: totals.chargeAmount,
+            advance_amount: hasAdvance ? advanceAmount : 0,
+            advance_payment_method: hasAdvance ? advancePaymentMethod : '',
+            advance_payment_date: hasAdvance ? advancePaymentDate : '',
+            advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
+            payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
+            subtotal: totals.subtotal,
+            tax_total: totals.taxTotal,
+            cgst: totals.cgstTotal,
+            sgst_igst: !isIntraState ? totals.igstTotal : (totals.cgstTotal + totals.sgstTotal),
+            round_off: totals.roundOff,
+            grand_total: totals.grandTotal,
+            custom_date: quotationDate
+          }
+        };
+
+        let updatedVersions: DocumentVersion[];
+        if (asNewVersion) {
+          updatedVersions = [...versions, versionSnapshot];
+        } else {
+          const idx = versions.findIndex(v => v.versionNumber === targetVersionNum);
+          if (idx >= 0) {
+            updatedVersions = versions.map((v, i) => i === idx ? versionSnapshot : v);
+          } else {
+            updatedVersions = [...versions, versionSnapshot];
+          }
+        }
+
+        const shouldUpdateRoot = asNewVersion || targetVersionNum === docVersion || makeActiveOnSave;
+        const activeVerNum = shouldUpdateRoot ? targetVersionNum : docVersion;
+
+        const updatePayload: any = {
+          version: activeVerNum,
+          versions: updatedVersions,
           number: documentNumber || undefined,
+          lead_id: leadId || undefined,
+          customer_phone: customerPhone || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
           customer_address: customerAddress,
@@ -416,24 +538,29 @@ export default function CreateQuotation() {
           customer_gstin: customerGstin,
           customer_type: customerType,
           status: status,
-          items: items,
-          discount_percent: discountPercent,
-          advance_amount: hasAdvance ? advanceAmount : 0,
-          advance_payment_method: hasAdvance ? advancePaymentMethod : '',
-          advance_payment_date: hasAdvance ? advancePaymentDate : '',
-          advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
-          payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
           is_igst: !isIntraState,
-          subtotal: totals.subtotal,
-          tax_total: totals.taxTotal,
-          cgst: totals.cgstTotal,
-          sgst_igst: !isIntraState ? totals.igstTotal : (totals.cgstTotal + totals.sgstTotal),
-          discount_amount: totals.discountAmount,
-          charge_amount: totals.chargeAmount,
-          round_off: totals.roundOff,
-          grand_total: totals.grandTotal,
-          custom_date: quotationDate
-        });
+        };
+
+        if (shouldUpdateRoot) {
+          updatePayload.items = items;
+          updatePayload.discount_percent = discountPercent;
+          updatePayload.discount_amount = totals.discountAmount;
+          updatePayload.charge_amount = totals.chargeAmount;
+          updatePayload.advance_amount = hasAdvance ? advanceAmount : 0;
+          updatePayload.advance_payment_method = hasAdvance ? advancePaymentMethod : '';
+          updatePayload.advance_payment_date = hasAdvance ? advancePaymentDate : '';
+          updatePayload.advance_reference_number = hasAdvance ? advanceReferenceNumber : '';
+          updatePayload.payment_method_to_show = hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details';
+          updatePayload.subtotal = totals.subtotal;
+          updatePayload.tax_total = totals.taxTotal;
+          updatePayload.cgst = totals.cgstTotal;
+          updatePayload.sgst_igst = !isIntraState ? totals.igstTotal : (totals.cgstTotal + totals.sgstTotal);
+          updatePayload.round_off = totals.roundOff;
+          updatePayload.grand_total = totals.grandTotal;
+          updatePayload.custom_date = quotationDate;
+        }
+
+        await updateDoc(doc(db, 'quotations', id), updatePayload);
         navigate('/quotations');
       } catch (error) {
         console.error("Error updating quotation:", error);
@@ -445,12 +572,40 @@ export default function CreateQuotation() {
     }
 
     setIsSaving(true);
+    const initialVersion: DocumentVersion = {
+      versionNumber: 1,
+      versionLabel: 'v1',
+      createdAt: new Date().toISOString(),
+      createdBy: auth?.currentUser?.email || 'user',
+      notes: 'Initial quotation',
+      data: {
+        items: items,
+        discount_percent: discountPercent,
+        discount_amount: totals.discountAmount,
+        charge_amount: chargeAmount,
+        advance_amount: hasAdvance ? advanceAmount : 0,
+        advance_payment_method: hasAdvance ? advancePaymentMethod : '',
+        advance_payment_date: hasAdvance ? advancePaymentDate : '',
+        advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
+        payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
+        subtotal: totals.subtotal,
+        tax_total: totals.taxTotal,
+        grand_total: totals.grandTotal,
+        custom_date: quotationDate
+      }
+    };
+
     try {
+      if (!functions) throw new Error("Functions not initialized");
       const createQuotationFn = httpsCallable(functions, 'createQuotation');
       const quotationData = {
+        version: 1,
+        versions: [initialVersion],
         number: documentNumber || undefined,
+        lead_id: leadId || undefined,
         customer_id: selectedCustomerId || `new_${Date.now()}`,
         customer_name: selectedCustomerName,
+        customer_phone: customerPhone || undefined,
         customer_address: customerAddress,
         customer_state: customerState,
         customer_gstin: customerGstin,
@@ -465,18 +620,30 @@ export default function CreateQuotation() {
         advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
         payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
         is_igst: !isIntraState,
+        grand_total: totals.grandTotal,
+        total_amount: totals.grandTotal,
+        subtotal: totals.subtotal,
+        tax_total: totals.taxTotal,
         custom_date: quotationDate,
       };
 
       await createQuotationFn({ quotationData });
-      navigate('/quotations');
+      if (leadId) {
+        navigate(`/leads/${leadId}`);
+      } else {
+        navigate('/quotations');
+      }
     } catch (error) {
       console.warn("Cloud function failed, attempting client-side save fallback:", error);
       try {
         const quotationData = {
+          version: 1,
+          versions: [initialVersion],
           number: documentNumber || undefined,
+          lead_id: leadId || undefined,
           customer_id: selectedCustomerId || `new_${Date.now()}`,
           customer_name: selectedCustomerName,
+          customer_phone: customerPhone || undefined,
           customer_address: customerAddress,
           customer_state: customerState,
           customer_gstin: customerGstin,
@@ -491,11 +658,19 @@ export default function CreateQuotation() {
           advance_reference_number: hasAdvance ? advanceReferenceNumber : '',
           payment_method_to_show: hasAdvance ? (advancePaymentMethod === 'Cash' ? 'None' : (advancePaymentMethod === 'GPay' ? 'GPay Details' : (['UPI', 'PhonePe', 'Paytm'].includes(advancePaymentMethod) ? 'UPI Details' : 'Bank Details'))) : 'Bank Details',
           is_igst: !isIntraState,
+          grand_total: totals.grandTotal,
+          total_amount: totals.grandTotal,
+          subtotal: totals.subtotal,
+          tax_total: totals.taxTotal,
           custom_date: quotationDate,
         };
         const { clientCreateQuotation } = await import('../utils/clientBillingCreator');
         await clientCreateQuotation(quotationData);
-        navigate('/quotations');
+        if (leadId) {
+          navigate(`/leads/${leadId}`);
+        } else {
+          navigate('/quotations');
+        }
       } catch (clientError) {
         console.error("Client-side fallback also failed:", clientError);
         alert("Failed to save quotation. Connection or Permission issue.");
@@ -516,21 +691,78 @@ export default function CreateQuotation() {
 
   return (
     <div className="space-y-4 animate-fade-in w-full max-w-[1440px] mx-auto px-2 sm:px-4">
-      <div className="flex items-center gap-3 mb-4">
-        <button onClick={() => navigate('/quotations')} className="p-2 neo-btn !px-3 !py-2">
-          <ArrowLeft size={18} className="text-secondary" />
-        </button>
-        <div>
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold tracking-tight text-primary-dark">
-              {id ? 'Edit Quotation' : 'Create Quotation'}
-            </h1>
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/quotations')} className="p-2 neo-btn !px-3 !py-2">
+            <ArrowLeft size={18} className="text-secondary" />
+          </button>
+          <div>
+            <div className="flex items-center gap-4">
+              <h1 className="text-2xl font-bold tracking-tight text-primary-dark">
+                {id ? 'Edit Quotation' : 'Create Quotation'}
+              </h1>
+              {id && (
+                <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-xs px-2.5 py-0.5 font-bold">
+                  v{docVersion} {selectedVersionNumber !== docVersion ? `(Viewing v${selectedVersionNumber})` : ''}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-secondary mt-0.5">
+              {id ? `Editing quotation #${documentNumber || id}. Switch versions below or create revisions.` : 'Draft a new quotation bound by FY sequencing rules.'}
+            </p>
           </div>
-          <p className="text-xs text-secondary mt-0.5">
-            {id ? 'Update the details of the selected quotation.' : 'Draft a new quotation bound by FY sequencing rules.'}
-          </p>
         </div>
       </div>
+
+      {id && (
+        <div className="neo-card p-3 mb-4 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-emerald-500/5 via-teal-500/5 to-transparent border border-emerald-500/20 rounded-xl">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="p-1.5 px-2.5 rounded-lg bg-emerald-600/10 text-emerald-800 font-bold flex items-center gap-1.5 text-xs">
+              <GitBranch size={15} />
+              <span>Version History:</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedVersionNumber}
+                onChange={(e) => switchVersion(Number(e.target.value))}
+                className="neo-input !py-1 !px-2.5 text-xs font-bold text-primary-dark cursor-pointer bg-white"
+              >
+                {versions.map(v => (
+                  <option key={v.versionNumber} value={v.versionNumber}>
+                    Version {v.versionNumber} {v.versionNumber === docVersion ? '(Active Quotation)' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedVersionNumber === docVersion ? (
+                <span className="neo-badge text-success bg-emerald-50 text-[11px] py-0.5 px-2 font-bold">Current Active</span>
+              ) : (
+                <label className="flex items-center gap-1.5 text-xs cursor-pointer text-secondary hover:text-primary-dark select-none ml-2 bg-amber-500/10 text-amber-800 px-2 py-0.5 rounded border border-amber-300">
+                  <input
+                    type="checkbox"
+                    checked={makeActiveOnSave}
+                    onChange={(e) => setMakeActiveOnSave(e.target.checked)}
+                    className="accent-primary rounded cursor-pointer"
+                  />
+                  <span>Make v{selectedVersionNumber} the Active Quotation</span>
+                </label>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={() => handleSave('draft', true)}
+              className="neo-btn !py-1.5 !px-3 text-xs font-bold text-primary flex items-center gap-1.5 hover:text-primary-dark"
+              title="Save current changes as a brand new version snapshot"
+            >
+              <Plus size={14} />
+              <span>Save as New Version (v{(versions.length > 0 ? Math.max(...versions.map(v => v.versionNumber)) : 1) + 1})</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left Column */}
@@ -950,21 +1182,60 @@ export default function CreateQuotation() {
 
 
           <div className="neo-card p-3 space-y-2.5">
-            <button 
-              disabled={isSaving}
-              onClick={() => handleSave('draft')}
-              className="neo-btn w-full py-3 flex items-center justify-center gap-2"
-            >
-              {isSaving ? <Loader2 size={18} className="animate-spin" /> : "Save Draft"}
-            </button>
-            <button 
-              disabled={isSaving}
-              onClick={() => handleSave('convert_requested')}
-              className="neo-btn-primary w-full py-3 flex items-center justify-center gap-2"
-            >
-              {isSaving ? <Loader2 size={18} className="animate-spin" /> : (id ? 'Update Quotation' : 'Request Conversion')}
-              {!isSaving && <Sparkles size={18}/>}
-            </button>
+            {id ? (
+              <>
+                <button 
+                  disabled={isSaving}
+                  onClick={() => handleSave('draft', false)}
+                  className="neo-btn-primary w-full py-3 flex items-center justify-center gap-2 font-bold"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : (
+                    <>
+                      <Check size={18} />
+                      <span>Update Version {selectedVersionNumber}</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  disabled={isSaving}
+                  onClick={() => handleSave('draft', true)}
+                  className="neo-btn w-full py-3 flex items-center justify-center gap-2 font-semibold text-primary hover:text-primary-dark"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : (
+                    <>
+                      <Plus size={18} />
+                      <span>Save as New Version (v{(versions.length > 0 ? Math.max(...versions.map(v => v.versionNumber)) : 1) + 1})</span>
+                    </>
+                  )}
+                </button>
+                <button 
+                  disabled={isSaving}
+                  onClick={() => handleSave('convert_requested', false)}
+                  className="neo-btn w-full py-2.5 flex items-center justify-center gap-2 text-xs font-semibold text-secondary hover:text-primary-dark"
+                >
+                  <Sparkles size={15}/>
+                  <span>Update & Request Conversion</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  disabled={isSaving}
+                  onClick={() => handleSave('draft', false)}
+                  className="neo-btn w-full py-3 flex items-center justify-center gap-2"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : "Save Draft"}
+                </button>
+                <button 
+                  disabled={isSaving}
+                  onClick={() => handleSave('convert_requested', false)}
+                  className="neo-btn-primary w-full py-3 flex items-center justify-center gap-2 font-bold"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : "Request Conversion"}
+                  {!isSaving && <Sparkles size={18}/>}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -3922,3 +3922,154 @@ export const processAutomationEnrollments = onSchedule({
     }
   }
 });
+
+/**
+ * Daily Morning 7:30 AM Automated Follow-Up Dispatcher
+ * Automatically sends a "Hi" WhatsApp message to all leads in "follow_up" stage every morning at 7:30 AM IST.
+ * Governed by the toggle in system_settings/whatsapp_followup_automation.
+ */
+export const dailyMorningFollowupDispatch = onSchedule({
+  schedule: "30 7 * * *",
+  timeZone: "Asia/Kolkata",
+  memory: "256MiB"
+}, async (event) => {
+  try {
+    const configDoc = await db.collection("system_settings").doc("whatsapp_followup_automation").get();
+    if (!configDoc.exists) {
+      console.log("[7:30 AM FollowUp] Config not found in system_settings.");
+      return;
+    }
+    const config = configDoc.data() || {};
+    if (!config.enabled) {
+      console.log("[7:30 AM FollowUp] Automation is toggled OFF. Skipping.");
+      return;
+    }
+
+    const now = new Date();
+    const todayIST = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    if (config.lastRunDate === todayIST) {
+      console.log(`[7:30 AM FollowUp] Already executed today (${todayIST}). Skipping duplicate.`);
+      return;
+    }
+
+    const targetStage = config.targetStageId || "follow_up";
+    const snap = await db.collection("leads").where("status", "==", targetStage).get();
+
+    if (snap.empty) {
+      console.log(`[7:30 AM FollowUp] 0 leads found in "${targetStage}" stage.`);
+      await configDoc.ref.update({
+        lastRunDate: todayIST,
+        lastRunAt: FieldValue.serverTimestamp(),
+        lastRunSummary: {
+          totalLeads: 0,
+          sentCount: 0,
+          failedCount: 0,
+          timestamp: new Date().toISOString()
+        }
+      });
+      return;
+    }
+
+    let phoneId = "1263075550230396";
+    let token = "EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD";
+    let graphApiVersion = "v18.0";
+
+    try {
+      const metaDoc = await db.collection("meta_integrations").doc("default").get();
+      if (metaDoc.exists) {
+        const d = metaDoc.data() || {};
+        if (d.whatsappPhoneNumberId) phoneId = d.whatsappPhoneNumberId;
+        if (d.metaWhatsAppAccessToken || d.accessToken) token = d.metaWhatsAppAccessToken || d.accessToken;
+        if (d.graphApiVersion) graphApiVersion = d.graphApiVersion;
+      }
+    } catch (e) {}
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const docSnap of snap.docs) {
+      const lead = docSnap.data() || {};
+      const rawPhone = String(lead.phone || lead.normalized_phone || "");
+      const digits = rawPhone.replace(/\D/g, "");
+      const finalPhone = digits.length === 10 ? `91${digits}` : digits;
+
+      if (!finalPhone || finalPhone.length < 10) continue;
+
+      let name = "";
+      if (lead.name && !/^\+?[0-9\s-]+$/.test(String(lead.name).trim())) {
+        name = String(lead.name).trim().split(" ")[0];
+      }
+
+      let messageText = config.messageTemplate || "Hi {{name}}!";
+      if (name) {
+        messageText = messageText.replace(/\{\{name\}\}/gi, name);
+      } else {
+        messageText = messageText.replace(/\s*\{\{name\}\}/gi, "").trim();
+        if (!messageText || messageText.toLowerCase() === "hi") messageText = "Hi!";
+      }
+
+      try {
+        const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneId}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: finalPhone,
+            type: "text",
+            text: { body: messageText }
+          })
+        });
+
+        const resJson = await res.json();
+        if (resJson.messages?.[0]?.id) {
+          sentCount++;
+          await db.collection("messages").add({
+            leadId: docSnap.id,
+            senderPhone: finalPhone,
+            direction: "outbound",
+            type: "text",
+            content: messageText,
+            metaMessageId: resJson.messages[0].id,
+            platform: "whatsapp",
+            triggeredBy: "daily_730am_followup_cloud_function",
+            created_at: FieldValue.serverTimestamp()
+          });
+
+          await db.collection("activities").add({
+            lead_id: docSnap.id,
+            type: "whatsapp_automated_followup",
+            title: "Automated 7:30 AM Follow-Up Sent",
+            message: `Sent automatic 7:30 AM greeting: "${messageText}"`,
+            actor: "System Scheduler (7:30 AM)",
+            created_at: FieldValue.serverTimestamp()
+          });
+        } else {
+          failedCount++;
+        }
+      } catch (err) {
+        failedCount++;
+      }
+
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    await configDoc.ref.update({
+      lastRunDate: todayIST,
+      lastRunAt: FieldValue.serverTimestamp(),
+      lastRunSummary: {
+        totalLeads: snap.size,
+        sentCount,
+        failedCount,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    console.log(`[7:30 AM FollowUp] Completed: sent ${sentCount} of ${snap.size} leads.`);
+  } catch (err: any) {
+    console.error("[7:30 AM FollowUp] Scheduled run error:", err);
+  }
+});

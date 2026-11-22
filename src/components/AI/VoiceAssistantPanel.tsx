@@ -2,10 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAi } from '../../contexts/AiContext';
 import { AiChatHistorySidebar } from './AiChatHistorySidebar';
 import { formatMessageTime, formatSessionDateLabel } from '../../services/aiChatHistoryService';
+import { FormattedChatMessage } from './FormattedChatMessage';
 
 export const VoiceAssistantPanel: React.FC = () => {
-    const { 
-        isOpen, toggleAi, status, 
+    const {
+        isOpen, toggleAi, status,
         interactionMode, setInteractionMode,
         transcript, aiResponse, messages,
         pendingAction, confirmAction, cancelAction,
@@ -13,7 +14,7 @@ export const VoiceAssistantPanel: React.FC = () => {
         sessions, activeSessionId, activeSession,
         startNewChat, isHistoryOpen, setIsHistoryOpen, toggleHistory
     } = useAi();
-    
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [textInput, setTextInput] = useState('');
     const [isExpanded, setIsExpanded] = useState(false);
@@ -33,12 +34,11 @@ export const VoiceAssistantPanel: React.FC = () => {
     };
 
     return (
-        <div 
-            className={`fixed z-50 neo-card overflow-hidden !p-0 transition-all duration-300 flex flex-col shadow-2xl border border-[#D8CCBC] ${
-                isExpanded 
-                    ? 'bottom-4 right-4 left-4 md:left-auto md:right-6 md:w-[860px] h-[88vh] max-h-[820px]' 
+        <div
+            className={`fixed z-50 neo-card overflow-hidden !p-0 transition-all duration-300 flex flex-col shadow-2xl border border-[#D8CCBC] ${isExpanded
+                    ? 'bottom-4 right-4 left-4 md:left-auto md:right-6 md:w-[860px] h-[88vh] max-h-[820px]'
                     : 'bottom-4 right-4 md:right-6 w-[94vw] md:w-[440px] h-[85vh] max-h-[680px]'
-            }`}
+                }`}
         >
             {/* Top Navigation Bar */}
             <div className="bg-primary p-3.5 text-white flex flex-col space-y-2.5 shrink-0 select-none shadow-md">
@@ -48,11 +48,10 @@ export const VoiceAssistantPanel: React.FC = () => {
                         <button
                             onClick={toggleHistory}
                             title={isHistoryOpen ? "Close chat history" : "Open ChatGPT-style chat history"}
-                            className={`p-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-xs font-medium ${
-                                isHistoryOpen 
-                                    ? 'bg-white/20 text-white shadow-inner' 
+                            className={`p-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-xs font-medium ${isHistoryOpen
+                                    ? 'bg-white/20 text-white shadow-inner'
                                     : 'bg-white/10 hover:bg-white/20 text-white/90'
-                            }`}
+                                }`}
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-4 h-4">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -68,11 +67,10 @@ export const VoiceAssistantPanel: React.FC = () => {
                         <div className="h-4 w-px bg-white/20"></div>
 
                         <div className="flex items-center space-x-2">
-                            <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${
-                                status === 'listening' || status === 'speaking' 
-                                    ? 'bg-red-400 animate-pulse' 
+                            <div className={`w-2.5 h-2.5 rounded-full shadow-sm ${status === 'listening' || status === 'speaking'
+                                    ? 'bg-red-400 animate-pulse'
                                     : 'bg-emerald-400'
-                            }`}></div>
+                                }`}></div>
                             <h3 className="font-bold text-base tracking-tight text-white">Bill Pro AI</h3>
                         </div>
                     </div>
@@ -90,8 +88,8 @@ export const VoiceAssistantPanel: React.FC = () => {
                             <span className="hidden sm:inline">New</span>
                         </button>
 
-                        <button 
-                            onClick={() => setIsExpanded(prev => !prev)} 
+                        <button
+                            onClick={() => setIsExpanded(prev => !prev)}
                             title={isExpanded ? "Collapse panel" : "Expand to ChatGPT widescreen"}
                             className="p-1.5 rounded-lg hover:bg-white/15 text-white/80 hover:text-white transition-colors hidden sm:flex items-center justify-center"
                         >
@@ -106,13 +104,13 @@ export const VoiceAssistantPanel: React.FC = () => {
                             )}
                         </button>
 
-                        <button 
-                            onClick={toggleAi} 
+                        <button
+                            onClick={toggleAi}
                             title="Close Bill Pro AI"
                             className="hover:bg-white/15 p-1.5 rounded-lg transition-colors text-white/80 hover:text-white"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-4 h-4">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
                     </div>
@@ -121,15 +119,15 @@ export const VoiceAssistantPanel: React.FC = () => {
                 {/* Subheader: Interaction Mode Selector */}
                 <div className="flex items-center justify-between gap-2">
                     <div className="flex bg-primary-dark/80 rounded-lg p-0.5 text-xs font-medium shadow-neo-inset max-w-[200px] w-full">
-                        <button 
+                        <button
                             onClick={() => setInteractionMode('voice')}
                             className={`flex-1 py-1 rounded-md transition-all text-[11px] ${interactionMode === 'voice' ? 'bg-primary shadow-sm text-white font-semibold' : 'text-gray-300 hover:text-white'}`}
                         >Voice</button>
-                        <button 
+                        <button
                             onClick={() => setInteractionMode('text')}
                             className={`flex-1 py-1 rounded-md transition-all text-[11px] ${interactionMode === 'text' ? 'bg-primary shadow-sm text-white font-semibold' : 'text-gray-300 hover:text-white'}`}
                         >Text</button>
-                        <button 
+                        <button
                             onClick={() => setInteractionMode('both')}
                             className={`flex-1 py-1 rounded-md transition-all text-[11px] ${interactionMode === 'both' ? 'bg-primary shadow-sm text-white font-semibold' : 'text-gray-300 hover:text-white'}`}
                         >Both</button>
@@ -148,12 +146,11 @@ export const VoiceAssistantPanel: React.FC = () => {
             <div className="flex-1 flex overflow-hidden relative bg-surface">
                 {/* ChatGPT-style History Sidebar */}
                 {(isHistoryOpen || isExpanded) && (
-                    <div 
-                        className={`${
-                            isExpanded 
-                                ? 'w-64 md:w-72 border-r border-[#E2D7C8] flex flex-col shrink-0' 
+                    <div
+                        className={`${isExpanded
+                                ? 'w-64 md:w-72 border-r border-[#E2D7C8] flex flex-col shrink-0'
                                 : 'absolute inset-0 z-20 bg-surface flex flex-col'
-                        }`}
+                            }`}
                     >
                         <AiChatHistorySidebar onClose={() => !isExpanded && setIsHistoryOpen(false)} />
                     </div>
@@ -196,7 +193,7 @@ export const VoiceAssistantPanel: React.FC = () => {
                             </div>
                             {volumeLevel > 0 && (
                                 <div className="w-24 bg-primary/20 h-1.5 rounded-full overflow-hidden">
-                                    <div 
+                                    <div
                                         className="bg-primary h-full transition-all duration-75"
                                         style={{ width: `${Math.min(100, volumeLevel * 100)}%` }}
                                     ></div>
@@ -217,15 +214,16 @@ export const VoiceAssistantPanel: React.FC = () => {
                                 <div className="space-y-1">
                                     <h4 className="font-bold text-sm text-primary-dark">Welcome to Bill Pro AI</h4>
                                     <p className="text-xs text-secondary max-w-xs">
-                                        Ask questions about sales, stock, invoices, or perform voice/text business actions!
+                                        Ask questions about sales, stock, invoices, or request financial guidance & budget planning!
                                     </p>
                                 </div>
                                 <div className="flex flex-wrap gap-2 justify-center max-w-xs pt-2">
                                     {[
+                                        "Plan future monthly budget with spending categories",
+                                        "Financial health & margin audit",
                                         "What were yesterday sales?",
                                         "Show pending invoices",
-                                        "Create invoice for customer",
-                                        "Check trophy inventory"
+                                        "Create invoice for customer"
                                     ].map((prompt, pIdx) => (
                                         <button
                                             key={pIdx}
@@ -243,8 +241,8 @@ export const VoiceAssistantPanel: React.FC = () => {
                                 const formattedTime = msg.timestamp ? formatMessageTime(msg.timestamp) : '';
 
                                 return (
-                                    <div 
-                                        key={msg.id || idx} 
+                                    <div
+                                        key={msg.id || idx}
                                         className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} group`}
                                     >
                                         <div className="flex items-end gap-2 max-w-[88%]">
@@ -254,16 +252,21 @@ export const VoiceAssistantPanel: React.FC = () => {
                                                 </div>
                                             )}
 
-                                            <div 
-                                                className={`relative rounded-2xl p-3.5 text-sm font-medium ${
-                                                    isUser 
-                                                        ? 'bg-surface border border-[#D8CCBC] shadow-neo-raised text-primary-dark rounded-br-none' 
+                                            <div
+                                                className={`relative rounded-2xl p-3.5 text-sm font-medium ${isUser
+                                                        ? 'bg-surface border border-[#D8CCBC] shadow-neo-raised text-primary-dark rounded-br-none'
                                                         : 'bg-primary/10 border border-primary/25 shadow-neo-inset text-primary-dark rounded-bl-none'
-                                                }`}
+                                                    }`}
                                             >
-                                                <div className="whitespace-pre-wrap leading-relaxed text-xs sm:text-sm">
-                                                    {msg.text}
-                                                </div>
+                                                {isUser ? (
+                                                    <div className="whitespace-pre-wrap leading-relaxed text-xs sm:text-sm">
+                                                        {msg.text}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-xs sm:text-sm leading-relaxed">
+                                                        <FormattedChatMessage text={msg.text} />
+                                                    </div>
+                                                )}
 
                                                 {/* Message Timestamp & Copy Tool */}
                                                 <div className="flex items-center justify-between gap-3 mt-1.5 pt-1 border-t border-black/5 text-[10px] text-secondary">
@@ -305,13 +308,13 @@ export const VoiceAssistantPanel: React.FC = () => {
                             <p className="font-bold text-warning text-xs">Confirm Business Action</p>
                             <p className="text-xs text-primary-dark">{pendingAction.summary}</p>
                             <div className="flex space-x-2 pt-1">
-                                <button 
+                                <button
                                     onClick={confirmAction}
                                     className="flex-1 neo-btn-primary !px-2 !py-1 text-xs"
                                 >
                                     Confirm
                                 </button>
-                                <button 
+                                <button
                                     onClick={cancelAction}
                                     className="flex-1 neo-btn !px-2 !py-1 text-xs"
                                 >
@@ -327,7 +330,7 @@ export const VoiceAssistantPanel: React.FC = () => {
                         {(interactionMode === 'voice' || interactionMode === 'both') && (
                             <div className="flex items-center justify-between">
                                 {status === 'disconnected' || status === 'error' ? (
-                                    <button 
+                                    <button
                                         onClick={startSession}
                                         className="w-full neo-btn-primary !py-2 text-xs flex items-center justify-center space-x-2"
                                     >
@@ -338,7 +341,7 @@ export const VoiceAssistantPanel: React.FC = () => {
                                         <span>Start Voice Session</span>
                                     </button>
                                 ) : (
-                                    <button 
+                                    <button
                                         onClick={stopSession}
                                         className="w-full neo-btn text-error !py-1.5 text-xs flex items-center justify-center space-x-1.5 font-semibold"
                                     >
@@ -350,11 +353,29 @@ export const VoiceAssistantPanel: React.FC = () => {
                                 )}
                             </div>
                         )}
-                        
+
+                        {/* Quick Financial Advisory Action Pills */}
+                        <div className="flex items-center space-x-1.5 overflow-x-auto pb-0.5 custom-sidebar-scrollbar text-[11px]">
+                            {[
+                                { label: "📊 Plan Monthly Budget", prompt: "Plan future monthly budget with spending categories list" },
+                                { label: "🩺 Financial Health Check", prompt: "Perform a financial health check and operating margin audit" },
+                                { label: "🏷️ Spending Categories", prompt: "Break down my spending categories and recommended expense limits" },
+                                { label: "💰 Collect Overdue Dues", prompt: "Show my receivables recovery strategy for pending customer dues" }
+                            ].map((chip, cIdx) => (
+                                <button
+                                    key={cIdx}
+                                    onClick={() => sendText(chip.prompt)}
+                                    className="shrink-0 px-2.5 py-1 rounded-full bg-[#FAF5EC] hover:bg-primary/10 border border-[#D8CCBC] hover:border-primary/40 text-primary-dark font-medium transition-colors shadow-2xs"
+                                >
+                                    {chip.label}
+                                </button>
+                            ))}
+                        </div>
+
                         {/* Text Message Input */}
                         <div className="flex w-full space-x-2 items-center">
-                            <input 
-                                type="text" 
+                            <input
+                                type="text"
                                 className="flex-1 neo-input !py-2.5 !px-3 text-xs md:text-sm"
                                 placeholder={activeSession ? `Reply in "${activeSession.title}"...` : "Message Bill Pro AI..."}
                                 value={textInput}
@@ -366,7 +387,7 @@ export const VoiceAssistantPanel: React.FC = () => {
                                     }
                                 }}
                             />
-                            <button 
+                            <button
                                 onClick={() => {
                                     if (textInput.trim()) {
                                         sendText(textInput.trim());

@@ -2,8 +2,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import {
   WHATSAPP_PAYMENT_TERM_RE,
   WHATSAPP_SPAM_OR_ALERT_RE,
+  WHATSAPP_VENDOR_OR_INDIAMART_RE,
   hasCommercialEnquirySignal,
   isMediaOrSystemNoise,
+  extractCustomerAndCompanyInfo,
 } from '../utils/whatsappEnquiryQualifier';
 
 export interface ExtractedLeadDetails {
@@ -18,6 +20,11 @@ export interface ExtractedLeadDetails {
   location: string;
   urgency: 'low' | 'medium' | 'high';
   recommended_next_action: string;
+  trophy_type?: string;
+  trophy_size?: string;
+  event_name?: string;
+  event_date?: string;
+  delivery_date?: string;
 }
 
 export type MessageClassification = 
@@ -62,47 +69,59 @@ function getGeminiApiKey(): string {
  */
 function heuristicAnalysis(messageText: string, senderPhone: string, senderName: string): WhatsAppAiAnalysisResult {
   const text = (messageText || '').toLowerCase();
+  const identity = extractCustomerAndCompanyInfo({
+    text: messageText,
+    senderName,
+    phone: senderPhone
+  });
 
-  // Spam / OTP / Bank alert / promotional / media-only placeholder detection
-  if (WHATSAPP_SPAM_OR_ALERT_RE.test(text) || isMediaOrSystemNoise(messageText)) {
+  // 1. Vendor pitches, IndiaMART broadcasts, machinery/raw material suppliers, and spam/noise
+  if (
+    WHATSAPP_VENDOR_OR_INDIAMART_RE.test(text) ||
+    WHATSAPP_SPAM_OR_ALERT_RE.test(text) ||
+    isMediaOrSystemNoise(messageText)
+  ) {
+    const isVendor = WHATSAPP_VENDOR_OR_INDIAMART_RE.test(text);
     const isSpamAlert = WHATSAPP_SPAM_OR_ALERT_RE.test(text);
     return {
-      classification: isSpamAlert ? 'spam' : 'other',
-      qualification_status: isSpamAlert ? 'Not Qualified' : 'Needs Follow-up',
+      classification: isVendor ? 'other' : isSpamAlert ? 'spam' : 'other',
+      qualification_status: 'Not Qualified',
       is_business_lead: false,
       extracted_details: {
-        name: senderName || 'Unknown',
-        company: '',
+        name: isVendor ? 'Vendor / IndiaMART Pitch' : senderName || 'Unknown',
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
-        requirement: isSpamAlert ? 'Spam/Advertisement' : messageText,
+        requirement: isVendor ? 'Vendor / Supplier / IndiaMART Broadcast' : isSpamAlert ? 'Spam / Advertisement' : messageText,
         quantity: '',
         budget: '',
         timeline: '',
         location: '',
         urgency: 'low',
-        recommended_next_action: isSpamAlert ? 'Block or archive spam' : 'Ignore non-enquiry message'
+        recommended_next_action: isVendor ? 'Ignore vendor pitch / IndiaMART broadcast' : 'Archive non-customer chat'
       },
-      qualification_reason: isSpamAlert
-        ? 'Message identified as spam, OTP, bank alert, or unsolicited broadcast.'
-        : 'Media attachment placeholder or regular non-enquiry chat without commercial intent.',
-      recommended_pipeline_stage: isSpamAlert ? 'lost' : 'new',
-      confidence_score: 0.9,
+      qualification_reason: isVendor
+        ? 'Vendor / Supplier / IndiaMART broadcast offering raw materials, machines, or B2B supply to us. Not a customer buying enquiry.'
+        : isSpamAlert
+          ? 'Message identified as spam, advertisement, OTP, bank alert, or promotional broadcast.'
+          : 'Media placeholder or casual non-enquiry chat without commercial intent.',
+      recommended_pipeline_stage: 'lost',
+      confidence_score: 0.95,
       flag_for_review: false,
       suggested_reply: '',
-      internal_audit_log: `Lead Name: ${senderName || 'Unknown'}\nWhatsApp Number: ${senderPhone}\nStatus: Not Qualified\nKey Details Extracted:\n• Requirement: Non-enquiry / Noise\nReason for Status: No customer enquiry detected.\nPipeline Updated: No`
+      internal_audit_log: `Lead Name: ${senderName || 'Unknown'}\nWhatsApp Number: ${senderPhone}\nStatus: Not Qualified\nReason: Vendor / IndiaMART / Non-enquiry\nPipeline Updated: No`
     };
   }
 
-  // Payment confirmation / invoice query detection
+  // 2. Payment confirmation / invoice query detection
   if (WHATSAPP_PAYMENT_TERM_RE.test(text)) {
     return {
       classification: 'payment_related',
       qualification_status: 'Qualified',
       is_business_lead: true,
       extracted_details: {
-        name: senderName || 'Valued Customer',
-        company: '',
+        name: identity.name,
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
         requirement: 'Payment Confirmation / Invoice Query',
@@ -117,20 +136,20 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
       recommended_pipeline_stage: 'contacted',
       confidence_score: 0.88,
       flag_for_review: false,
-      suggested_reply: `Hi ${senderName || 'there'}, thank you for sharing the payment update! Our accounts team is verifying it and will share the confirmed receipt shortly.`,
-      internal_audit_log: `Lead Name: ${senderName || 'Valued Customer'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: Payment update / Invoice inquiry\n• Urgency: High\nReason for Status: Active customer communicating regarding payment.\nPipeline Updated: Yes (Stage: Contacted)`
+      suggested_reply: `Hi ${identity.name || 'there'}, thank you for sharing the payment update! Our accounts team is verifying it and will share the confirmed receipt shortly.`,
+      internal_audit_log: `Lead Name: ${identity.name}\nCompany: ${identity.company || 'N/A'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: Payment update / Invoice inquiry\n• Urgency: High\nReason for Status: Active customer communicating regarding payment.\nPipeline Updated: Yes (Stage: Contacted)`
     };
   }
 
-  // Buying Intent / New enquiry (English + Tamil/Tanglish commercial keywords)
+  // 3. Buying Intent / New enquiry (English + Tamil/Tanglish commercial keywords)
   if (hasCommercialEnquirySignal(messageText)) {
     return {
       classification: 'new_lead',
       qualification_status: 'Qualified',
       is_business_lead: true,
       extracted_details: {
-        name: senderName || 'Prospective Lead',
-        company: '',
+        name: identity.name,
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
         requirement: messageText,
@@ -145,19 +164,19 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
       recommended_pipeline_stage: 'qualified',
       confidence_score: 0.85,
       flag_for_review: false,
-      suggested_reply: `Hi ${senderName || 'there'}, thank you for reaching out to EcoTrophy! We would be delighted to assist with your requirements. We are preparing our best options and catalog for you right now.`,
-      internal_audit_log: `Lead Name: ${senderName || 'Prospective Lead'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: ${messageText}\n• Urgency: ${text.includes('urgent') ? 'High' : 'Medium'}\nReason for Status: Clear buying intent for trophies/awards.\nPipeline Updated: Yes (Stage: Qualified)`
+      suggested_reply: `Hi ${identity.name || 'there'}, thank you for reaching out to EcoTrophy! We would be delighted to assist with your requirements. We are preparing our best options and catalog for you right now.`,
+      internal_audit_log: `Lead Name: ${identity.name}\nCompany: ${identity.company || 'N/A'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: ${messageText}\n• Urgency: ${text.includes('urgent') ? 'High' : 'Medium'}\nReason for Status: Clear buying intent for trophies/awards.\nPipeline Updated: Yes (Stage: Qualified)`
     };
   }
 
-  // Ambiguous / Short greeting or casual personal message (NOT a qualified business lead until they reply with inquiry)
+  // 4. Ambiguous / Short greeting or casual personal message (NOT a qualified business lead)
   return {
     classification: 'other',
     qualification_status: 'Needs Follow-up',
     is_business_lead: false,
     extracted_details: {
-      name: senderName || 'Contact',
-      company: '',
+      name: identity.name,
+      company: identity.company || '',
       email: '',
       phone: senderPhone,
       requirement: messageText,
@@ -172,8 +191,8 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
     recommended_pipeline_stage: 'new',
     confidence_score: 0.6,
     flag_for_review: true,
-    suggested_reply: `Vanakkam ${senderName || ''}! Welcome to EcoTrophy Innovations — India's Premier Sustainable Trophy & Awards maker. How can we help you today?`,
-    internal_audit_log: `Lead Name: ${senderName || 'Contact'}\nWhatsApp Number: ${senderPhone}\nStatus: Needs Follow-up\nKey Details Extracted:\n• Requirement: Unspecified message\nReason for Status: No clear sales lead intent detected yet.\nPipeline Updated: Skipped`
+    suggested_reply: `Vanakkam ${identity.name || ''}! Welcome to EcoTrophy Innovations — India's Premier Sustainable Trophy & Awards maker. How can we help you today?`,
+    internal_audit_log: `Lead Name: ${identity.name}\nWhatsApp Number: ${senderPhone}\nStatus: Needs Follow-up\nKey Details Extracted:\n• Requirement: Unspecified message\nReason for Status: No clear sales lead intent detected yet.\nPipeline Updated: Skipped`
   };
 }
 
@@ -208,14 +227,20 @@ RULES:
 1. Multi-Lingual Understanding: Accurately understand colloquial Tamil & Tanglish (e.g. "50 pcs venum", "budget 25k kulla", "memento model anupunga", "naalai ku kidaikuma", "payment panniten").
 2. Store ALL extracted fields and reasoning in CLEAN, PROFESSIONAL ENGLISH.
 3. "is_business_lead":
-   - true ONLY if the conversation clearly shows a customer product enquiry, quote/price/catalog/sample request, custom trophy/award/medal/memento/plaque/corporate-gift requirement, artwork/design discussion, or customer order/payment follow-up.
-   - false for ALL regular personal conversations ("Hi", "Hello", "Call me", "Where are you", "Check this", casual friend/family/staff chats), greetings, single-word acknowledgements ("Ok", "Thanks"), media-only placeholders ("Photo", "Video"), spam, OTPs, or automated notifications. Use classification "other" when not a business enquiry.
-4. Strict Qualification:
-   - "Qualified": Matches our business ICP (trophies, mementos, plaques, medals, corporate gifts) with clear intent, quantity, or budget.
-   - "Not Qualified": Clear mismatch, spam, promotional broadcast, or non-business message.
-   - "Needs Follow-up": Business inquiry with incomplete specs (e.g. asking for catalog or prices without quantity yet).
-5. If confidence is below 0.70 or intent is ambiguous, set flag_for_review: true.
-6. Suggested reply: Draft a polite, concise response acknowledging their specific need. (DO NOT send automatically, this is for human approval).
+   - true ONLY if the conversation clearly shows a prospective customer enquiry wanting to purchase custom trophies, awards, medals, mementos, plaques, or corporate gifts, or a customer following up on an existing order or payment.
+   - FALSE for ALL VENDOR / SUPPLIER pitches (e.g. suppliers selling acrylic sheets, MDF, raw materials, trophy blanks, laser machines, UV printers, machinery, courier services, loans, digital marketing, website development). EcoTrophy is the SELLER; anyone trying to sell TO EcoTrophy is NOT a business lead.
+   - FALSE for ALL IndiaMART, TradeIndia, JustDial broadcasts, alerts ("buy lead", "view enquiry"), advertisements, spam, job seekers, and promotional broadcasts.
+   - FALSE for ALL regular personal conversations ("Hi", "Hello", "Call me", "Where are you", casual friend/family chats), greetings, acknowledgements ("Ok", "Thanks"), media-only placeholders ("Photo", "Video"), OTPs, bank alerts.
+4. Name & Company Extraction:
+   - Extract real personal name into "name" (e.g. from "I am Rajesh", "Name: Suresh", "Regards, Anand", or sender profile name if not a phone number).
+   - Extract company / institution name into "company" (e.g. from "ABC School", "Infosys", "Company: Tech Corp").
+   - NEVER set "name" to a phone number or generic "Customer" if an actual name or company name is found. If only a company is mentioned, use the company name in "name".
+5. Strict Qualification:
+   - "Qualified": Matches our business ICP (trophies, mementos, plaques, medals, corporate gifts) with clear customer buying intent, quantity, or budget.
+   - "Not Qualified": Vendor/supplier pitches, IndiaMART broadcasts, advertisements, spam, or non-business message.
+   - "Needs Follow-up": Customer buyer inquiry with incomplete specs (e.g. asking for catalog or prices without quantity yet).
+6. If confidence is below 0.70 or intent is ambiguous, set flag_for_review: true.
+7. Suggested reply: Draft a polite, concise response acknowledging their specific need. (DO NOT send automatically, this is for human approval).
 
 Incoming Message Details:
 Sender Phone: ${senderPhone}

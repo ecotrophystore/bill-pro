@@ -47,13 +47,18 @@ import {
   importLeadsFromHistory,
   subscribeToWhatsAppEvents
 } from '../../services/whatsappMultiSessionService';
+import { doc, onSnapshot, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
+import { type Lead, STANDARD_CRM_STAGES } from '../../types';
 import {
   getAutoCrmSyncEnabled,
   previewCrmPipelineAndStage,
   setAutoCrmSyncEnabled,
   subscribeAutoCrmSyncChange,
-  syncWhatsAppLeadToCrm
+  syncWhatsAppLeadToCrm,
+  findLeadForWhatsAppContact
 } from '../../services/whatsappCrmSyncService';
+import { hasCommercialEnquirySignal } from '../../utils/whatsappEnquiryQualifier';
 import { MultiAccountManager } from './MultiAccountManager';
 import {
   WhatsAppDateImportModal,
@@ -125,9 +130,64 @@ export function WhatsAppAiAgentHub() {
   const [importProgressText, setImportProgressText] = useState('');
   const [importSummary, setImportSummary] = useState<WhatsAppImportSummary | null>(null);
 
+  // Real-time matched CRM lead doc for active thread
+  const [matchedLead, setMatchedLead] = useState<{ id: string; data: Lead } | null>(null);
+  const [updatingLeadStage, setUpdatingLeadStage] = useState(false);
+  const [updatingLeadDeadline, setUpdatingLeadDeadline] = useState(false);
+  const [dismissedAddLeadKeys, setDismissedAddLeadKeys] = useState<Set<string>>(new Set());
+
+  const hasThreadRequirement = useMemo(() => {
+    const combined = `${selectedThread?.lastMessage || ''}\n${activeInsight?.requirement || ''}`;
+    return hasCommercialEnquirySignal(combined, {
+      quantity: activeInsight?.quantity,
+      budget: activeInsight?.budget
+    });
+  }, [selectedThread?.lastMessage, activeInsight?.requirement, activeInsight?.quantity, activeInsight?.budget]);
+
   useEffect(() => {
     return subscribeAutoCrmSyncChange((enabled) => setAutoPilotEnabled(enabled));
   }, []);
+
+  // Look up & real-time sync matching CRM lead for the selected contact
+  useEffect(() => {
+    if (!selectedThread) {
+      setMatchedLead(null);
+      return;
+    }
+
+    let unsub: (() => void) | null = null;
+    let active = true;
+
+    const lookupLead = async () => {
+      try {
+        const match = await findLeadForWhatsAppContact({
+          phone: selectedThread.phone,
+          remoteJid: selectedThread.remoteJid,
+          name: selectedThread.name
+        });
+        if (!active) return;
+        if (match && db) {
+          setMatchedLead(match);
+          unsub = onSnapshot(doc(db, 'leads', match.id), (snap) => {
+            if (snap.exists() && active) {
+              setMatchedLead({ id: snap.id, data: snap.data() as Lead });
+            }
+          });
+        } else {
+          setMatchedLead(null);
+        }
+      } catch (e) {
+        console.warn('Could not match lead for thread:', e);
+      }
+    };
+
+    lookupLead();
+
+    return () => {
+      active = false;
+      if (unsub) unsub();
+    };
+  }, [selectedThread?.id, selectedThread?.phone, selectedThread?.remoteJid]);
 
   useEffect(() => {
     if (!activeInsight) {
@@ -144,6 +204,96 @@ export function WhatsAppAiAgentHub() {
       cancelled = true;
     };
   }, [activeInsight, selectedThread?.id]);
+
+  // Handle stage change directly beside WhatsApp chat
+  const handleUpdateLeadStage = async (newStageId: string) => {
+    if (!db) return;
+    setUpdatingLeadStage(true);
+    try {
+      const stageName = STANDARD_CRM_STAGES.find((s) => s.id === newStageId)?.label || newStageId;
+      if (matchedLead?.id) {
+        await updateDoc(doc(db, 'leads', matchedLead.id), {
+          status: newStageId,
+          updated_at: serverTimestamp()
+        });
+        toast.success(`Pipeline stage updated to "${stageName}"!`);
+      } else if (selectedThread) {
+        const fallbackInsight: AiLeadInsight = activeInsight
+          ? { ...activeInsight, pipelineStage: newStageId }
+          : {
+              leadName: selectedThread.name || 'Inquiry',
+              company: '',
+              phone: selectedThread.phone || '',
+              requirement: selectedThread.lastMessage || 'Custom trophy inquiry',
+              quantity: '1',
+              budget: '',
+              urgency: 'medium',
+              stage: 'qualified',
+              pipelineStage: newStageId,
+              suggestedAction: 'Customer enquiry',
+              suggestedReply: '',
+              analyzedAt: Date.now()
+            };
+
+        const outcome = await syncWhatsAppLeadToCrm({
+          sessionId: selectedThread.sessionId,
+          sessionLabel: selectedThread.sessionLabel,
+          remoteJid: selectedThread.remoteJid,
+          phone: selectedThread.phone,
+          name: selectedThread.name,
+          messageText: selectedThread.lastMessage,
+          insight: fallbackInsight,
+          forceCreate: true,
+          triggeredBy: 'manual'
+        });
+        if (outcome.action === 'created' || outcome.action === 'updated') {
+          toast.success(`Lead created in stage "${stageName}"!`);
+          const refreshed = await findLeadForWhatsAppContact({
+            phone: selectedThread.phone,
+            remoteJid: selectedThread.remoteJid,
+            name: selectedThread.name
+          });
+          if (refreshed) setMatchedLead(refreshed);
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to update stage:', err);
+      toast.error('Failed to update pipeline stage.');
+    } finally {
+      setUpdatingLeadStage(false);
+    }
+  };
+
+  // Handle project deadline update directly beside WhatsApp chat
+  const handleUpdateLeadDeadline = async (deliveryDate: string, eventDate?: string) => {
+    if (!db) return;
+    if (!matchedLead?.id) {
+      toast.error('Please save contact to CRM first to assign deadline.');
+      return;
+    }
+    setUpdatingLeadDeadline(true);
+    try {
+      const payload: any = {
+        delivery_date: deliveryDate,
+        updated_at: serverTimestamp()
+      };
+      if (eventDate !== undefined) {
+        payload.event_date = eventDate;
+      }
+      await updateDoc(doc(db, 'leads', matchedLead.id), payload);
+      toast.success(`Project deadline set to ${deliveryDate}!`);
+    } catch (err) {
+      console.error('Failed to update deadline:', err);
+      toast.error('Failed to update project deadline.');
+    } finally {
+      setUpdatingLeadDeadline(false);
+    }
+  };
+
+  const handleInsertSuggestedReply = (replyText: string) => {
+    setMessageInput(replyText);
+    toast.success('Inserted into chat composer!');
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -696,7 +846,21 @@ export function WhatsAppAiAgentHub() {
   };
 
   const handleSaveToCrm = async () => {
-    if (!selectedThread || !activeInsight) return;
+    if (!selectedThread) return;
+    const effectiveInsight: AiLeadInsight = activeInsight || {
+      isBusinessLead: true,
+      leadName: selectedThread.name,
+      phone: selectedThread.phone,
+      company: '',
+      quantity: '',
+      budget: '',
+      requirement: selectedThread.lastMessage || 'Direct WhatsApp Inbound Chat',
+      urgency: 'medium',
+      stage: 'qualified',
+      suggestedAction: '',
+      suggestedReply: '',
+      analyzedAt: Date.now()
+    };
     try {
       const outcome = await syncWhatsAppLeadToCrm({
         sessionId: selectedThread.sessionId,
@@ -705,12 +869,23 @@ export function WhatsAppAiAgentHub() {
         phone: selectedThread.phone,
         name: selectedThread.name,
         messageText: selectedThread.lastMessage,
-        insight: activeInsight,
+        insight: effectiveInsight,
         forceCreate: true,
         triggeredBy: 'manual'
       });
       setCrmPreview({ pipelineName: outcome.pipelineName, stageLabel: outcome.stageLabel });
       setSaveLeadSuccess(true);
+      if (outcome.leadId) {
+        setMatchedLead({
+          id: outcome.leadId,
+          data: {
+            name: outcome.leadName,
+            status: outcome.stageId,
+            pipeline_id: outcome.pipelineId,
+            phone: selectedThread.phone || ''
+          } as any
+        });
+      }
       toast.success(
         outcome.action === 'updated'
           ? `Lead updated in ${outcome.pipelineName} (${outcome.stageLabel})`
@@ -1472,6 +1647,45 @@ export function WhatsAppAiAgentHub() {
                       </div>
                     )}
 
+                    {/* Interactive Lead Confirmation Prompt: If contact chatted without requirement and is not in CRM */}
+                    {!matchedLead && !selectedThread.isGroup && !selectedThread.remoteJid?.endsWith('@g.us') && !dismissedAddLeadKeys.has(selectedThread.id) && (
+                      <div className="mx-4 mt-2.5 mb-1 p-3 rounded-card bg-amber-500/10 border border-amber-500/30 shadow-neo-surface flex flex-wrap items-center justify-between gap-3 animate-fade-in shrink-0">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0 font-bold">
+                            <UserPlus size={16} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-primary-dark">
+                              {hasThreadRequirement ? 'New Inquiry Detected' : 'No Order Requirement Detected'}
+                            </p>
+                            <p className="text-[11px] text-secondary">
+                              {hasThreadRequirement
+                                ? `Order details detected. Would you like to add ${selectedThread.phone ? `+${selectedThread.phone}` : selectedThread.name} as a lead?`
+                                : `This contact is only chatting without order specs. Can I add ${selectedThread.phone ? `+${selectedThread.phone}` : selectedThread.name} as a lead?`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleSaveToCrm}
+                            disabled={saveLeadSuccess}
+                            className="neo-btn-primary !py-1.5 !px-3 text-xs font-bold flex items-center gap-1.5"
+                          >
+                            <UserPlus size={13} />
+                            <span>Add as Lead</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDismissedAddLeadKeys((prev) => new Set(prev).add(selectedThread.id))}
+                            className="neo-btn !py-1.5 !px-2.5 text-xs text-secondary hover:text-primary-dark"
+                          >
+                            Ignore
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Messages Scroll Canvas */}
                     <div
                       className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 custom-sidebar-scrollbar"
@@ -1649,11 +1863,18 @@ export function WhatsAppAiAgentHub() {
                   analyzing={analyzing}
                   sending={sending}
                   saveSuccess={saveLeadSuccess}
+                  lead={matchedLead?.data}
+                  leadId={matchedLead?.id}
                   onClose={() => setIsCopilotOpen(false)}
                   onReanalyze={handleReanalyzeThread}
                   onDraftQuotation={handleDraftQuotation}
                   onSaveToCrm={handleSaveToCrm}
                   onSendSuggestedReply={(reply) => handleSendMessage(reply)}
+                  onUpdateStage={handleUpdateLeadStage}
+                  updatingStage={updatingLeadStage}
+                  onUpdateDeadline={handleUpdateLeadDeadline}
+                  updatingDeadline={updatingLeadDeadline}
+                  onInsertReply={handleInsertSuggestedReply}
                 />
               )}
             </>

@@ -33,6 +33,10 @@ import {
   Monitor,
   Square,
   Maximize2,
+  RotateCcw,
+  Palette,
+  Factory,
+  Trophy,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../../contexts/AuthContext';
@@ -40,8 +44,10 @@ import { useAi } from '../../contexts/AiContext';
 import { GlobalSearchModal } from './GlobalSearchModal';
 import { NotificationDrawer } from './NotificationDrawer';
 import { ActiveAlarmModal } from '../CRM/ActiveAlarmModal';
+import { WhatsAppLeadApprovalModal } from '../WhatsAppAutomation/WhatsAppLeadApprovalModal';
 import { WhatsAppWebBrowserView } from '../WhatsAppAutomation/WhatsAppWebBrowserView';
 import { useWhatsAppAutoProcessor } from '../../hooks/useWhatsAppAutoProcessor';
+import { useWhatsAppFollowupScheduler } from '../../hooks/useWhatsAppFollowupScheduler';
 import {
   copyDesktopWinRCommand,
   getDesktopAppStatus,
@@ -77,7 +83,10 @@ const navCategories: NavCategory[] = [
     label: 'CRM',
     icon: Target,
     items: [
+      { path: '/trophy-creator', label: 'Trophy Studio (AI)', icon: Trophy },
       { path: '/pipeline', label: 'Pipeline Board', icon: Columns3 },
+      { path: '/pipeline?pipeline=design_pipeline', label: 'Design Pipeline', icon: Palette },
+      { path: '/pipeline?pipeline=production_pipeline', label: 'Production Pipeline', icon: Factory },
       { path: '/leads', label: 'Leads Directory', icon: Users },
       { path: '/company-intelligence', label: 'Company Intelligence', icon: Building2 },
       { path: '/crm-dashboard', label: 'CRM Analytics', icon: BarChart3 },
@@ -117,6 +126,7 @@ const navCategories: NavCategory[] = [
 
 function WhatsAppProcessorGuard() {
   useWhatsAppAutoProcessor();
+  useWhatsAppFollowupScheduler();
   return null;
 }
 
@@ -128,7 +138,7 @@ export function AppLayout() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const navigate = useNavigate();
-  
+
   useEffect(() => {
     const handleNavigate = (e: any) => {
       if (e.detail) {
@@ -144,6 +154,23 @@ export function AppLayout() {
   const currentRole = normalizeRole(dbUser?.role);
   const roleInfo = ROLE_META[currentRole];
   const canUseWhatsApp = canAccessRoute(currentRole, '/whatsapp-automation');
+  const currentFullPath = location.pathname + (location.search || '');
+
+  // Role-enforced pipeline redirect
+  useEffect(() => {
+    if (location.pathname === '/pipeline') {
+      if (currentRole === 'design' && !location.search.includes('design_pipeline')) {
+        navigate('/pipeline?pipeline=design_pipeline', { replace: true });
+      } else if (currentRole === 'production' && !location.search.includes('production_pipeline')) {
+        navigate('/pipeline?pipeline=production_pipeline', { replace: true });
+      } else if (
+        currentRole === 'sales' &&
+        (location.search.includes('design_pipeline') || location.search.includes('production_pipeline'))
+      ) {
+        navigate('/pipeline', { replace: true });
+      }
+    }
+  }, [location.pathname, location.search, currentRole, navigate]);
 
   const visibleNavCategories = useMemo(() => {
     return navCategories
@@ -157,7 +184,14 @@ export function AppLayout() {
   // Helper to identify category for path
   const getActiveCategoryForPath = (pathname: string): string | null => {
     for (const category of visibleNavCategories) {
-      if (category.items.some((item) => pathname === item.path || pathname.startsWith(item.path + '/'))) {
+      if (
+        category.items.some((item) => {
+          if (item.path.includes('?')) {
+            return currentFullPath === item.path || currentFullPath.startsWith(item.path + '&');
+          }
+          return pathname === item.path || pathname.startsWith(item.path + '/');
+        })
+      ) {
         return category.id;
       }
     }
@@ -328,8 +362,8 @@ export function AppLayout() {
                     isOpen
                       ? 'bg-transparent shadow-neo-pressed text-primary-dark'
                       : hasActiveChild
-                      ? 'bg-primary/5 text-primary border border-primary/20 shadow-sm'
-                      : 'bg-transparent hover:bg-transparent shadow-neo-surface text-secondary hover:text-primary-dark',
+                        ? 'bg-primary/5 text-primary border border-primary/20 shadow-sm'
+                        : 'bg-transparent hover:bg-transparent shadow-neo-surface text-secondary hover:text-primary-dark',
                     !isExpanded && 'justify-center px-0 w-11 mx-auto'
                   )}
                 >
@@ -375,6 +409,17 @@ export function AppLayout() {
                       <div className="ml-4 pl-2.5 border-l-2 border-primary/20 space-y-1 my-1">
                         {category.items.map((subItem) => {
                           const SubIcon = subItem.icon;
+                          const isDesignItem = subItem.path.includes('design_pipeline');
+                          const isProductionItem = subItem.path.includes('production_pipeline');
+                          const isRegularPipelineItem = subItem.path === '/pipeline';
+                          const isCustomActive = isDesignItem
+                            ? location.pathname === '/pipeline' && location.search.includes('design_pipeline')
+                            : isProductionItem
+                            ? location.pathname === '/pipeline' && location.search.includes('production_pipeline')
+                            : isRegularPipelineItem
+                            ? location.pathname === '/pipeline' && !location.search.includes('pipeline=')
+                            : undefined;
+
                           return (
                             <NavLink
                               key={subItem.path}
@@ -382,14 +427,15 @@ export function AppLayout() {
                               onClick={() => setMobileMenuOpen(false)}
                               onMouseEnter={() => preloadRoute(subItem.path)}
                               onTouchStart={() => preloadRoute(subItem.path)}
-                              className={({ isActive }) =>
-                                clsx(
+                              className={({ isActive }) => {
+                                const active = isCustomActive !== undefined ? isCustomActive : isActive;
+                                return clsx(
                                   'flex items-center min-h-[38px] px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-200 group',
-                                  isActive
+                                  active
                                     ? 'bg-primary text-surface shadow-md font-bold'
                                     : 'text-secondary hover:text-primary-dark hover:bg-primary/10'
-                                )
-                              }
+                                );
+                              }}
                             >
                               <SubIcon size={16} className="shrink-0 mr-2.5 transition-transform group-hover:scale-110" />
                               <span className="truncate">{subItem.label}</span>
@@ -446,6 +492,22 @@ export function AppLayout() {
               title="Search"
             >
               <Search size={18} className="text-primary-dark" />
+            </button>
+
+            {/* Quick Refresh App Button */}
+            <button
+              onClick={() => {
+                if ('caches' in window) {
+                  caches.keys().then((names) => {
+                    names.forEach((name) => caches.delete(name));
+                  });
+                }
+                window.location.href = window.location.origin + window.location.pathname + '?reload=' + Date.now();
+              }}
+              className="p-2 neo-btn !rounded-full !px-3 text-secondary hover:text-primary transition-colors cursor-pointer"
+              title="Refresh / Sync Latest Version"
+            >
+              <RotateCcw size={18} />
             </button>
 
             {/* Notification Bell with Drawer */}
@@ -643,36 +705,47 @@ export function AppLayout() {
               : 'p-3 sm:p-4 md:p-8 max-w-[1440px] mx-auto pb-28 sm:pb-32 md:pb-8'
           )}
         >
-          {canAccessRoute(currentRole, location.pathname) ? (
-            <Outlet />
-          ) : (
-            <div className="min-h-[60vh] flex items-center justify-center p-4 animate-fade-in">
-              <div className="neo-card max-w-md w-full text-center space-y-4">
-                <div className="w-16 h-16 mx-auto rounded-card bg-surface shadow-neo-surface text-error flex items-center justify-center">
-                  <ShieldAlert size={32} />
+          {(() => {
+            const isRouteAllowed =
+              canAccessRoute(currentRole, currentFullPath) ||
+              (location.pathname === '/pipeline' && (currentRole === 'design' || currentRole === 'production'));
+
+            return isRouteAllowed ? (
+              <Outlet />
+            ) : (
+              <div className="min-h-[60vh] flex items-center justify-center p-4 animate-fade-in">
+                <div className="neo-card max-w-md w-full text-center space-y-4">
+                  <div className="w-16 h-16 mx-auto rounded-card bg-surface shadow-neo-surface text-error flex items-center justify-center">
+                    <ShieldAlert size={32} />
+                  </div>
+                  <div className="space-y-1">
+                    <span className="inline-block px-3 py-1 rounded-btn bg-surface shadow-neo-surface text-[11px] font-bold text-primary uppercase tracking-wider mb-1">
+                      Active Role: {roleInfo.label}
+                    </span>
+                    <h2 className="text-xl font-bold text-primary-dark">Access Restricted</h2>
+                    <p className="text-xs text-secondary leading-relaxed">
+                      Your department role ({roleInfo.label}) does not have permission to open <code className="text-primary-dark font-semibold">{currentFullPath}</code>. Contact your Administrator or HR if you require access.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate(roleInfo.homePath)}
+                    className="neo-btn-primary text-xs w-full"
+                  >
+                    Return to {roleInfo.label} Home
+                  </button>
                 </div>
-                <div className="space-y-1">
-                  <span className="inline-block px-3 py-1 rounded-btn bg-surface shadow-neo-surface text-[11px] font-bold text-primary uppercase tracking-wider mb-1">
-                    Active Role: {roleInfo.label}
-                  </span>
-                  <h2 className="text-xl font-bold text-primary-dark">Access Restricted</h2>
-                  <p className="text-xs text-secondary leading-relaxed">
-                    Your department role ({roleInfo.label}) does not have permission to open <code className="text-primary-dark font-semibold">{location.pathname}</code>. Contact your Administrator or HR if you require access.
-                  </p>
-                </div>
-                <button
-                  onClick={() => navigate(roleInfo.homePath)}
-                  className="neo-btn-primary text-xs w-full"
-                >
-                  Return to {roleInfo.label} Home
-                </button>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {isElectronDesktop && canUseWhatsApp && (
             <WhatsAppWebBrowserView
-              visible={isFullBleedWorkspace && !browserMinimized && canAccessRoute(currentRole, location.pathname)}
+              visible={
+                isFullBleedWorkspace &&
+                !browserMinimized &&
+                (canAccessRoute(currentRole, currentFullPath) ||
+                  (location.pathname === '/pipeline' && (currentRole === 'design' || currentRole === 'production')))
+              }
               onSummaryChange={setWaSummary}
               onMinimize={() => {
                 setBrowserMinimized(true);
@@ -838,6 +911,7 @@ export function AppLayout() {
         </button>
       </nav>
 
+      <WhatsAppLeadApprovalModal />
       <Toaster position="top-right" />
     </div>
   );

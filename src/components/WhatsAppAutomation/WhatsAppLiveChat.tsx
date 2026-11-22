@@ -59,6 +59,8 @@ import { ManageLabelsModal } from './ManageLabelsModal';
 import { useChatLabels } from '../../hooks/useChatLabels';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchScopedLeads, isLeadAssignedToUser } from '../../utils/leadVisibility';
+import { calculateDeadlineInfo, generateClientSpecificReplies } from '../../utils/whatsappSuggestedReplies';
+import toast from 'react-hot-toast';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface MessageItem {
@@ -106,7 +108,7 @@ const QUICK_TEMPLATES = [
   },
   {
     title: 'Advance Payment Request',
-    text: 'Hi {{name}}, regarding your trophy order, please transfer the 50% advance to confirm your production slot. GPay / UPI: 9344309369. Once paid, kindly share the screenshot here!'
+    text: 'Hi {{name}}, regarding your trophy order, please transfer the 50% advance to confirm your production slot. Once paid, kindly share the screenshot here!'
   },
   {
     title: 'In Production Update',
@@ -584,11 +586,42 @@ export function WhatsAppLiveChat() {
 
       setLeadDetails((prev: any) => (prev ? { ...prev, status: newStageId } : prev));
       setSelectedConv((prev: any) => (prev ? { ...prev, pipelineStage: newStageId } : prev));
+      toast.success('Pipeline stage updated!');
     } catch (err) {
       console.error('Failed to update stage:', err);
+      toast.error('Failed to update pipeline stage.');
     } finally {
       setUpdatingStage(false);
     }
+  };
+
+  const [updatingDeadline, setUpdatingDeadline] = useState(false);
+  const [customDeadlineLiveChat, setCustomDeadlineLiveChat] = useState('');
+
+  const handleUpdateLeadDeadline = async (newDeadline: string) => {
+    if (!db || !leadDetails?.id || updatingDeadline) return;
+    setUpdatingDeadline(true);
+    try {
+      await updateDoc(doc(db, 'leads', leadDetails.id), {
+        delivery_date: newDeadline,
+        updated_at: serverTimestamp()
+      });
+      setLeadDetails((prev: any) => (prev ? { ...prev, delivery_date: newDeadline } : prev));
+      toast.success(`Project deadline set to ${newDeadline}!`);
+    } catch (err) {
+      console.error('Failed to update deadline:', err);
+      toast.error('Failed to update project deadline.');
+    } finally {
+      setUpdatingDeadline(false);
+    }
+  };
+
+  const handleQuickAddDaysLiveChat = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    const dateStr = d.toISOString().split('T')[0];
+    setCustomDeadlineLiveChat(dateStr);
+    handleUpdateLeadDeadline(dateStr);
   };
 
   const handleToggleLabel = async (labelId: string) => {
@@ -1538,6 +1571,124 @@ export function WhatsAppLiveChat() {
                 </div>
               )}
             </div>
+
+            {/* Project Deadline Section */}
+            {leadDetails?.id && (
+              <div className="bg-transparent px-5 py-4 shadow-sm mb-2 space-y-3 border-l-4 border-l-amber-500">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-800 font-medium text-[15px] flex items-center gap-1.5">
+                    <Clock size={16} className="text-amber-500" /> Project Deadline
+                  </span>
+                  {(() => {
+                    const dl = calculateDeadlineInfo(leadDetails.delivery_date, leadDetails.event_date);
+                    return (
+                      <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${dl.badgeClass}`}>
+                        {dl.label}
+                      </span>
+                    );
+                  })()}
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={leadDetails.delivery_date || customDeadlineLiveChat}
+                      disabled={updatingDeadline}
+                      onChange={(e) => {
+                        setCustomDeadlineLiveChat(e.target.value);
+                        if (e.target.value) handleUpdateLeadDeadline(e.target.value);
+                      }}
+                      className="flex-1 text-sm bg-transparent border border-slate-200 rounded-lg p-2 text-slate-800 focus:outline-none focus:border-amber-500"
+                    />
+                    {updatingDeadline && <Loader2 size={16} className="animate-spin text-amber-500" />}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 pt-0.5">
+                    <span className="text-[11px] text-slate-400 font-medium">Quick Set:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAddDaysLiveChat(3)}
+                      disabled={updatingDeadline}
+                      className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                    >
+                      +3 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAddDaysLiveChat(7)}
+                      disabled={updatingDeadline}
+                      className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                    >
+                      +7 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleQuickAddDaysLiveChat(14)}
+                      disabled={updatingDeadline}
+                      className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                    >
+                      +14 Days
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Client-Specific Suggested Replies */}
+            {leadDetails && (
+              <div className="bg-transparent px-5 py-4 shadow-sm mb-2 space-y-3">
+                <span className="text-[#008069] font-medium text-[13px] flex items-center gap-1.5">
+                  <Sparkles size={14} /> Client-Specific Suggested Replies
+                </span>
+
+                <div className="space-y-2 max-h-60 overflow-y-auto custom-sidebar-scrollbar pr-1">
+                  {generateClientSpecificReplies({
+                    clientName: leadDetails.name || selectedConv.participantName,
+                    companyName: leadDetails.company || leadDetails.organization,
+                    requirement: leadDetails.trophy_size,
+                    quantity: leadDetails.required_quantity,
+                    deliveryDate: leadDetails.delivery_date,
+                    eventDate: leadDetails.event_date,
+                    currentStage: leadDetails.status || selectedConv.pipelineStage
+                  }).slice(0, 5).map((r) => (
+                    <div
+                      key={r.id}
+                      className="p-2.5 rounded-lg border border-slate-100 bg-slate-50/70 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-800">{r.title}</span>
+                        {r.isStageRecommended && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                            Recommended
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-snug italic">"{r.text}"</p>
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInputText(r.text);
+                            toast.success('Inserted into chat composer!');
+                          }}
+                          className="flex-1 text-[11px] font-bold py-1 px-2 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition-colors"
+                        >
+                          Insert
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSendMessage(r.text)}
+                          className="flex-1 text-[11px] font-bold py-1 px-2 rounded bg-[#008069] hover:bg-[#006e5a] text-white transition-colors"
+                        >
+                          Send ⚡
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* AI Lead Qualification Summary */}
             {leadDetails?.qualification_status && (

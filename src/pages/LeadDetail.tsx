@@ -41,10 +41,26 @@ import {
   ChevronRight,
   Flame,
   BookOpen,
+  Palette,
+  Shapes,
+  Download,
+  Image as ImageIcon,
+  Factory,
+  Box,
+  Bus,
+  Plane,
+  Printer,
+  TrendingUp,
 } from 'lucide-react';
 import { ContextualSalesGuide } from '../components/CRM/ContextualSalesGuide';
 import { SalesQualityAuditModal } from '../components/CRM/SalesQualityAuditModal';
 import { LostLeadIntelligenceModal } from '../components/CRM/LostLeadIntelligenceModal';
+import { SubmitDesignRequestModal } from '../components/Pipeline/SubmitDesignRequestModal';
+import { ProductionSpecsModal } from '../components/Production/ProductionSpecsModal';
+import { ProductionJobCardModal } from '../components/Production/ProductionJobCardModal';
+import { ProductionProgressModal } from '../components/Production/ProductionProgressModal';
+import { printDesignTeamChecklist, printProductionTeamChecklist } from '../utils/printDesignProductionSheet';
+import { normalizeRole } from '../config/roleAccess';
 import { db, auth, functions } from '../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import {
@@ -144,7 +160,12 @@ export default function LeadDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [activeTab, setActiveTab] = useState<'details' | 'sales_guide' | 'notes' | 'quotation' | 'conversation' | 'history'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'artwork' | 'production' | 'sales_guide' | 'notes' | 'quotation' | 'conversation' | 'history'>('details');
+  const [showEditBriefModal, setShowEditBriefModal] = useState(false);
+  const [showProductionSpecsModal, setShowProductionSpecsModal] = useState(false);
+  const [productionSpecsMode, setProductionSpecsMode] = useState<'view' | 'edit'>('view');
+  const [showProductionProgressModal, setShowProductionProgressModal] = useState(false);
+  const [showJobCardModal, setShowJobCardModal] = useState(false);
   const [notesDrawerOpen, setNotesDrawerOpen] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [showLostModal, setShowLostModal] = useState(false);
@@ -154,6 +175,15 @@ export default function LeadDetail() {
   const { hasPermission } = useCRMPermission();
   const { dbUser } = useAuth();
   const isAdmin = isAdminUser(dbUser);
+  const userRole = normalizeRole(dbUser?.role);
+
+  useEffect(() => {
+    if (userRole === 'design') {
+      setActiveTab('artwork');
+    } else if (userRole === 'production') {
+      setActiveTab('production');
+    }
+  }, [userRole]);
 
   // Inline Note Form State
   const [newNoteContent, setNewNoteContent] = useState('');
@@ -357,21 +387,72 @@ export default function LeadDetail() {
     });
   }, [lead]);
 
-  // Load linked quotations for this lead
+  // Load linked quotations for this lead with robust matching (lead_id, name, phone, company, customer_id)
   useEffect(() => {
     if (!db || !lead) return;
+
+    const normalize = (val?: string) => (val || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanDigits = (val?: string) => (val || '').replace(/\D/g, '');
+
+    const leadIdNorm = id || lead.id;
+    const leadDigits = cleanDigits(lead.phone);
+    const leadCleanName = normalize(lead.name);
+    const leadCleanCompany = normalize(lead.company);
+    const leadCustId = (lead as any).customer_id;
+
     const unsubQuotations = onSnapshot(collection(db, 'quotations'), (snap) => {
       const rows = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
-        .filter(
-          (q: any) =>
-            q.lead_id === id ||
-            (q.customer_name && lead.name && q.customer_name.trim().toLowerCase() === lead.name.trim().toLowerCase())
-        );
+        .filter((q: any) => {
+          // 1. Direct lead_id match
+          if (q.lead_id && (q.lead_id === leadIdNorm || q.lead_id === lead.id)) {
+            return true;
+          }
+
+          // 2. Direct customer_id match
+          if (leadCustId && q.customer_id && leadCustId === q.customer_id) {
+            return true;
+          }
+
+          // 3. Phone number match (last 8-10 digits or exact)
+          const quotePhoneDigits = cleanDigits(q.customer_phone || q.phone);
+          if (leadDigits && quotePhoneDigits && leadDigits.length >= 7 && quotePhoneDigits.length >= 7) {
+            if (leadDigits.endsWith(quotePhoneDigits) || quotePhoneDigits.endsWith(leadDigits)) {
+              return true;
+            }
+          }
+
+          // 4. Normalized customer name match (handles extra spaces, punctuation, e.g. "Rajesh  Rathinam")
+          const quoteCleanName = normalize(q.customer_name);
+          if (quoteCleanName && leadCleanName) {
+            if (quoteCleanName === leadCleanName) return true;
+            // Substring containment if name is at least 4 letters
+            if (leadCleanName.length >= 4 && (quoteCleanName.includes(leadCleanName) || leadCleanName.includes(quoteCleanName))) {
+              return true;
+            }
+          }
+
+          // 5. Company name match
+          if (quoteCleanName && leadCleanCompany && leadCleanCompany.length >= 3) {
+            if (quoteCleanName.includes(leadCleanCompany) || leadCleanCompany.includes(quoteCleanName)) {
+              return true;
+            }
+          }
+
+          return false;
+        });
+
+      // Sort by creation date descending
+      rows.sort((a: any, b: any) => {
+        const tA = a.created_at?.toMillis ? a.created_at.toMillis() : new Date(a.created_at || a.custom_date || 0).getTime();
+        const tB = b.created_at?.toMillis ? b.created_at.toMillis() : new Date(b.created_at || b.custom_date || 0).getTime();
+        return tB - tA;
+      });
+
       setLeadQuotations(rows);
     });
     return () => unsubQuotations();
-  }, [id, lead?.name]);
+  }, [id, lead?.name, lead?.phone, lead?.company, (lead as any)?.customer_id]);
 
   const activePipeline = useMemo(() => {
     if (!lead) return DEFAULT_QUANTITY_PIPELINES[1];
@@ -728,11 +809,11 @@ export default function LeadDetail() {
 
               {/* Customer Lifecycle Badge */}
               {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 shadow-xs">
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-primary/10 text-primary-dark border border-primary/20 shadow-xs">
                   Repeat Customer
                 </span>
               ) : lead.customer_lifecycle === 'existing_customer' ? (
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-xs">
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-primary/10 text-primary-dark border border-primary/20 shadow-xs">
                   Existing Customer
                 </span>
               ) : (
@@ -758,10 +839,10 @@ export default function LeadDetail() {
               {lead.intent_tier && (
                 <span
                   className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 shadow-xs ${lead.intent_tier === 'HIGH'
-                      ? 'bg-rose-50 text-rose-700 border-rose-300'
-                      : lead.intent_tier === 'MEDIUM'
-                        ? 'bg-amber-50 text-amber-700 border-amber-300'
-                        : 'bg-slate-50 text-slate-700 border-slate-300'
+                    ? 'bg-rose-50 text-rose-700 border-rose-300'
+                    : lead.intent_tier === 'MEDIUM'
+                      ? 'bg-amber-50 text-amber-700 border-amber-300'
+                      : 'bg-slate-50 text-slate-700 border-slate-300'
                     }`}
                   title={`Intent Score: ${lead.intent_score ?? 50}/100. ${lead.intent_reasons?.join(', ') || ''}`}
                 >
@@ -774,10 +855,10 @@ export default function LeadDetail() {
               <button
                 type="button"
                 onClick={() => setShowAuditModal(true)}
-                className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary-dark border border-primary/20 shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
                 title="View 100-Mark Sales Quality Audit Scorecard"
               >
-                <Award size={12} className="text-indigo-600" />
+                <Award size={12} className="text-primary" />
                 <span>Audit: {lead.sales_audit?.total_score ?? 78}/100 M</span>
               </button>
             </div>
@@ -896,10 +977,10 @@ export default function LeadDetail() {
               <div
                 key={phase.id}
                 className={`p-2.5 rounded-xl border text-xs transition-all ${hasCurrentStage
-                    ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/20'
-                    : isPhasePassed
-                      ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                      : 'bg-transparent border-slate-200 text-slate-500 opacity-80'
+                  ? 'bg-primary/10 border-primary shadow-xs ring-1 ring-primary/20'
+                  : isPhasePassed
+                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                    : 'bg-transparent border-slate-200 text-slate-500 opacity-80'
                   }`}
               >
                 <div className="flex items-center justify-between mb-1.5">
@@ -928,10 +1009,10 @@ export default function LeadDetail() {
                         type="button"
                         onClick={() => handleStageSelectChange(sId)}
                         className={`text-[9px] px-1.5 py-0.5 rounded transition-all font-semibold truncate max-w-[85px] ${isCurrent
-                            ? 'bg-primary text-white shadow-xs font-bold'
-                            : isPassed
-                              ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                              : 'bg-transparent text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
+                          ? 'bg-primary text-white shadow-xs font-bold'
+                          : isPassed
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                            : 'bg-transparent text-slate-600 hover:bg-slate-200 border border-shadow-darker/5'
                           }`}
                         title={`Click to set stage to: ${stg.label}`}
                       >
@@ -978,16 +1059,16 @@ export default function LeadDetail() {
 
       {/* Company Intelligence Widget */}
       {((lead as any).company_intelligence || lead.company || lead.organization) && (
-        <div className="neo-card space-y-3 bg-gradient-to-br from-indigo-500/5 via-purple-500/5 to-surface border border-indigo-500/20">
+        <div className="neo-card space-y-3 bg-surface border border-shadow-darker/20 shadow-neo-surface">
           <div className="flex items-center justify-between gap-3 border-b border-shadow-darker/10 pb-2.5">
             <div className="flex items-center gap-2">
-              <Building size={16} className="text-indigo-600" />
+              <Building size={16} className="text-primary" />
               <h2 className="text-sm font-bold text-primary-dark">Company Intelligence</h2>
             </div>
 
             <div className="flex items-center gap-2">
               {(lead as any).company_intelligence?.status === 'success' ? (
-                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200 flex items-center gap-1">
+                <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-primary/10 text-primary-dark border border-primary/20 flex items-center gap-1">
                   <CheckCircle2 size={12} /> Enriched
                 </span>
               ) : (lead as any).company_intelligence?.status === 'not_found' ? (
@@ -999,7 +1080,7 @@ export default function LeadDetail() {
               <button
                 onClick={handleEnrichCompany}
                 disabled={isEnriching}
-                className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-700 flex items-center gap-1 disabled:opacity-50"
+                className="text-[10px] font-bold px-2 py-1 rounded bg-primary text-white hover:bg-primary-dark flex items-center gap-1 disabled:opacity-50"
               >
                 {isEnriching ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                 {(lead as any).company_intelligence ? 'Re-enrich' : 'Enrich Data'}
@@ -1025,7 +1106,7 @@ export default function LeadDetail() {
 
               {(lead as any).company_intelligence.data.website && (
                 <div className="pt-2 border-t border-shadow-darker/5">
-                  <a href={(lead as any).company_intelligence.data.website} target="_blank" rel="noreferrer" className="text-xs font-bold text-indigo-600 hover:underline flex items-center gap-1">
+                  <a href={(lead as any).company_intelligence.data.website} target="_blank" rel="noreferrer" className="text-xs font-bold text-primary hover:underline flex items-center gap-1">
                     <ExternalLink size={12} /> Visit Website
                   </a>
                 </div>
@@ -1039,20 +1120,40 @@ export default function LeadDetail() {
       {/* Tab Navigation Ribbon */}
       <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2 flex-wrap">
         <button
-          onClick={() => setActiveTab('details')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'details'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+          onClick={() => setActiveTab('artwork')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'artwork'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
-          <Award size={14} /> Customer & Order Specs
+          <Palette size={14} /> Creative Brief &amp; Artwork
+        </button>
+
+        <button
+          onClick={() => setActiveTab('details')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'details'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
+        >
+          <Award size={14} /> Customer &amp; Order Specs
+        </button>
+
+        <button
+          onClick={() => setActiveTab('production')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'production'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
+        >
+          <Factory size={14} /> Production Specs &amp; Logistics
         </button>
 
         <button
           onClick={() => setActiveTab('sales_guide')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'sales_guide'
-              ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
           <BookOpen size={14} /> AI Sales Guide & Playbook
@@ -1061,8 +1162,8 @@ export default function LeadDetail() {
         <button
           onClick={() => setActiveTab('notes')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'notes'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
           <StickyNote size={14} /> Notes & Reminders ({leadNotes.length || lead.notes_count || 0})
@@ -1071,8 +1172,8 @@ export default function LeadDetail() {
         <button
           onClick={() => setActiveTab('quotation')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'quotation'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
           <FileText size={14} /> Quotations ({leadQuotations.length})
@@ -1081,8 +1182,8 @@ export default function LeadDetail() {
         <button
           onClick={() => setActiveTab('conversation')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'conversation'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
           <MessageSquare size={14} /> Omnichannel Chat ({messages.length})
@@ -1091,8 +1192,8 @@ export default function LeadDetail() {
         <button
           onClick={() => setActiveTab('history')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${activeTab === 'history'
-              ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            ? 'bg-primary text-white shadow-sm'
+            : 'text-secondary hover:text-primary-dark hover:bg-transparent'
             }`}
         >
           <History size={14} /> Stage History ({stageHistoryList.length + notificationHistoryList.length})
@@ -1108,6 +1209,325 @@ export default function LeadDetail() {
         </div>
       )}
 
+      {/* DEDICATED CREATIVE BRIEF & ARTWORK TAB */}
+      {activeTab === 'artwork' && (
+        <div className="space-y-5 animate-fade-in">
+          {/* Header Action Banner */}
+          <div className="neo-card bg-surface border border-shadow-darker/30 shadow-neo-surface space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold uppercase tracking-wider text-primary-dark flex items-center gap-1.5">
+                    <Palette size={14} className="text-primary" /> Creative Brief &amp; Design Specifications
+                  </span>
+                  <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-primary/10 text-primary-dark border border-primary/20">
+                    17 Parameters
+                  </span>
+                </div>
+                <h2 className="text-lg font-bold text-primary-dark mt-1">
+                  Design Requirements for {lead.company || lead.name}
+                </h2>
+                <p className="text-xs text-secondary mt-0.5">
+                  Designer: <strong className="text-primary-dark">{lead.design_person || 'Unassigned'}</strong> • Sales: <strong className="text-primary-dark">{lead.sales_person || 'Sales Team'}</strong>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigate(
+                      `/trophy-creator?leadId=${lead.id}&leadName=${encodeURIComponent(
+                        lead.name || ''
+                      )}&company=${encodeURIComponent(lead.company || '')}`
+                    )
+                  }
+                  className="neo-btn text-xs px-3.5 py-1.5 font-bold text-amber-900 border border-amber-300 bg-amber-50 hover:bg-amber-100 flex items-center gap-1.5 shadow-2xs"
+                  title="Launch AI Trophy Design Creator with Lead details"
+                >
+                  <Sparkles size={13} className="text-amber-600" />
+                  <span>✨ AI Trophy Studio</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => lead && printDesignTeamChecklist(lead)}
+                  className="neo-btn text-xs px-3.5 py-1.5 font-bold text-secondary hover:text-primary-dark border border-shadow-darker/30 flex items-center gap-1.5 shadow-2xs"
+                  title="Print Design Team Checklist with details provided by Sales"
+                >
+                  <Printer size={13} className="text-primary" />
+                  <span>Print Design Checklist</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductionSpecsMode('edit');
+                    setShowProductionSpecsModal(true);
+                  }}
+                  className="neo-btn text-xs px-3.5 py-1.5 font-bold text-primary-dark hover:text-primary border border-primary/20 bg-primary/10 hover:bg-primary/20 flex items-center gap-1.5 transition-colors shadow-2xs"
+                  title="Specify 9 manufacturing requirements and hand off to Production Pipeline"
+                >
+                  <Factory size={13} className="text-primary" />
+                  <span>🏭 + Add Details for Production</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEditBriefModal(true)}
+                  className="neo-btn-primary text-xs px-3.5 py-1.5 font-bold flex items-center gap-1.5 bg-primary hover:bg-primary-dark text-white shadow-xs"
+                >
+                  <Palette size={13} />
+                  <span>Edit Creative Brief</span>
+                </button>
+                {(userRole === 'design' || isAdmin) && (
+                  <Link
+                    to="/pipeline?pipeline=design_pipeline"
+                    className="neo-btn text-xs px-3.5 py-1.5 font-bold text-primary-dark hover:text-primary border border-shadow-darker/30 flex items-center gap-1.5"
+                  >
+                    <ExternalLink size={13} />
+                    <span>Design Pipeline</span>
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 17-Point Design Specifications Card */}
+          <div className="neo-card border border-shadow-darker/25 shadow-neo-surface space-y-4">
+            <div className="flex items-center justify-between border-b border-shadow-darker/15 pb-2.5">
+              <h3 className="text-xs font-bold uppercase tracking-wide text-primary-dark flex items-center gap-1.5">
+                <Sparkles size={14} className="text-primary" /> Physical &amp; Creative Specifications
+              </h3>
+            </div>
+
+            {/* Micro specs grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-xs">
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  1. Size / Dimensions
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.trophy_size || 'To be specified'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  2. Shape / Silhouette
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.shapes || lead.trophy_type || 'Custom Cut'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  3. Material
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.material || 'Acrylic / Wood'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  4. Theme / Occasion
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.theme || lead.event_name || 'Standard'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  5. Quantity
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.required_quantity ? `${lead.required_quantity} pcs` : 'TBD'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-surface border border-shadow-darker/15 shadow-2xs">
+                <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block mb-0.5">
+                  6. Budget / Value
+                </span>
+                <span className="font-bold text-primary-dark">
+                  {lead.value ? `₹${lead.value.toLocaleString('en-IN')}` : lead.budget || 'Custom'}
+                </span>
+              </div>
+            </div>
+
+            {/* Concept, Variants & Brand Colors */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-surface border border-shadow-darker/10 md:col-span-2 space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  7. Concept &amp; Creative Instructions
+                </span>
+                <p className="text-xs text-slate-700 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
+                  {lead.concept || lead.concept_notes || lead.design_notes || 'No custom concept notes entered yet. Click "Edit Creative Brief" to add.'}
+                </p>
+                {lead.model_variants && (
+                  <div className="pt-2 border-t border-shadow-darker/10 text-xs">
+                    <strong className="text-slate-500 font-semibold">8. Models / Variants:</strong>{' '}
+                    <span className="text-slate-800 dark:text-slate-200 font-medium">{lead.model_variants}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-surface border border-shadow-darker/10 space-y-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  9. Brand Colors
+                </span>
+                <p className="text-xs font-medium text-slate-800 dark:text-slate-200">
+                  {lead.brand_colors || 'No specific colors specified'}
+                </p>
+                <div className="pt-2 border-t border-shadow-darker/10 space-y-1 text-xs">
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-400">10. Design Deadline:</span>
+                    <strong className="text-amber-700">{lead.design_deadline || 'Not set'}</strong>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-400">11. Production Target:</span>
+                    <strong className="text-slate-700 dark:text-slate-200">{lead.production_deadline || 'Not set'}</strong>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-400">12. Delivery Deadline:</span>
+                    <strong className="text-slate-700 dark:text-slate-200">{lead.delivery_date || 'Not set'}</strong>
+                  </div>
+                  <div className="flex justify-between text-[11px]">
+                    <span className="text-slate-400">13. Event Date:</span>
+                    <strong className="text-slate-700 dark:text-slate-200">{lead.event_date || 'Not set'}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Assets: Logo & References */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+              {/* 14. Customer Logo */}
+              <div className="p-3 rounded-xl border border-shadow-darker/10 bg-slate-50 dark:bg-slate-900/40">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                  14. Customer Logo
+                </span>
+                {lead.artwork_url ? (
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={lead.artwork_url}
+                      alt="Logo"
+                      className="w-16 h-16 object-contain rounded-lg border border-shadow-darker/20 bg-white p-1"
+                    />
+                    <div className="space-y-1">
+                      <a
+                        href={lead.artwork_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                      >
+                        <Download size={12} /> Download Original Logo
+                      </a>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">No logo uploaded yet.</p>
+                )}
+              </div>
+
+              {/* 15. Reference Designs */}
+              <div className="p-3 rounded-xl border border-shadow-darker/10 bg-slate-50 dark:bg-slate-900/40">
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                  15. Reference Designs ({Array.isArray(lead.reference_designs) ? lead.reference_designs.length : 0})
+                </span>
+                {Array.isArray(lead.reference_designs) && lead.reference_designs.length > 0 ? (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {lead.reference_designs.map((refUrl, idx) => (
+                      <a
+                        key={idx}
+                        href={refUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-14 h-14 rounded-lg overflow-hidden border border-shadow-darker/20 shrink-0 bg-white"
+                      >
+                        <img src={refUrl} alt={`Ref ${idx + 1}`} className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">No reference images attached.</p>
+                )}
+              </div>
+            </div>
+
+            {/* 16 & 17: Company & Contact Information */}
+            <div className="p-3 rounded-xl border border-shadow-darker/10 bg-slate-50 dark:bg-slate-900/40 text-xs">
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
+                16 &amp; 17. Company &amp; Contact Details
+              </span>
+              <div className="flex flex-wrap items-center gap-4 text-slate-700 dark:text-slate-200">
+                <span><strong>Company:</strong> {lead.company || lead.name}</span>
+                <span><strong>Contact Person:</strong> {lead.name}</span>
+                {lead.phone && (
+                  <a href={`tel:${lead.phone}`} className="text-primary font-mono hover:underline">
+                    📞 {lead.phone}
+                  </a>
+                )}
+                {lead.email && (
+                  <a href={`mailto:${lead.email}`} className="text-primary hover:underline">
+                    ✉️ {lead.email}
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Production Team Handoff & Manufacturing Requirements Card */}
+            <div className="p-4 rounded-2xl bg-surface border border-shadow-darker/25 shadow-neo-surface space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-shadow-darker/15 pb-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary-dark">
+                    <Factory size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wide">
+                      Production Team Handoff &amp; Manufacturing Requirements
+                    </h3>
+                    <p className="text-[11px] text-secondary">
+                      Provide the 9 manufacturing and dispatch specifications before transferring the order to the factory floor.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProductionSpecsMode('edit');
+                    setShowProductionSpecsModal(true);
+                  }}
+                  className="neo-btn-primary text-xs px-4 py-2 font-bold bg-primary text-white hover:bg-primary-dark inline-flex items-center gap-1.5 shadow-xs shrink-0"
+                >
+                  ✏️ Fill / Edit Details for Production
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs text-primary-dark">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-shadow-darker/10">
+                  <span className="text-[10px] text-secondary font-bold uppercase block mb-0.5">1. Trophy Size</span>
+                  <span className="font-semibold">{lead.trophy_size || 'Pending size'}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-shadow-darker/10">
+                  <span className="text-[10px] text-secondary font-bold uppercase block mb-0.5">3. Materials to Use</span>
+                  <span className="font-semibold">{lead.trophy_materials_used || lead.material || 'Pending materials'}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-shadow-darker/10">
+                  <span className="text-[10px] text-secondary font-bold uppercase block mb-0.5">5. Single Box Size</span>
+                  <span className="font-semibold">{lead.single_box_size || 'Not specified'}</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-shadow-darker/10">
+                  <span className="text-[10px] text-secondary font-bold uppercase block mb-0.5">7. Delivery Mode</span>
+                  <span className="font-semibold">{lead.delivery_mode ? lead.delivery_mode.replace(/_/g, ' ') : 'Courier'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* DEDICATED SALES GUIDE TAB */}
       {activeTab === 'sales_guide' && (
         <div className="space-y-4">
@@ -1118,6 +1538,286 @@ export default function LeadDetail() {
               setActiveTab('conversation');
             }}
           />
+        </div>
+      )}
+
+      {/* DEDICATED PRODUCTION TEAM WORKSPACE TAB */}
+      {activeTab === 'production' && (
+        <div className="neo-card space-y-6">
+          {/* Header Banner */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-surface/40 border border-shadow-darker/10">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary-dark">
+                <Factory size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold text-primary-dark tracking-tight">
+                  Production Specifications &amp; Manufacturing
+                </h3>
+                <p className="text-xs text-secondary">
+                  Targeted production requirements, raw materials stock, packaging specifications, and logistics.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setShowProductionProgressModal(true)}
+                className="neo-btn-primary px-4 py-2 text-xs font-bold text-white bg-primary hover:bg-primary-dark flex items-center gap-1.5 shadow-sm"
+              >
+                <Plus size={14} /> Log Pieces &amp; Steps
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowProductionSpecsModal(true)}
+                className="neo-btn px-4 py-2 text-xs font-bold text-primary-dark border-primary/20 hover:bg-primary/5 flex items-center gap-1.5"
+              >
+                ✏️ Edit Production Specs
+              </button>
+              <button
+                type="button"
+                onClick={() => lead && printProductionTeamChecklist(lead)}
+                className="neo-btn px-4 py-2 text-xs font-bold text-secondary hover:text-primary-dark border border-shadow-darker/30 flex items-center gap-1.5"
+                title="Print clean 1-page Production Team Checklist with 9 manufacturing specifications"
+              >
+                🖨️ Print Production Checklist
+              </button>
+            </div>
+          </div>
+
+          {/* Project-Based Manufacturing Progress by Quantity Section */}
+          <div className="p-4 rounded-2xl bg-surface border border-shadow-darker/25 shadow-neo-surface space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-shadow-darker/15 pb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary-dark">
+                  <TrendingUp size={16} />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-primary-dark uppercase tracking-wide">
+                    Project Manufacturing Progress by Quantity
+                  </h3>
+                  <p className="text-[11px] text-secondary">
+                    Live piece count tracking across cutting, printing, base assembly, and finishing steps.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <span className="text-xs text-secondary font-bold block">Overall Completion</span>
+                  <span className="text-sm font-mono font-extrabold text-primary">
+                    {lead.production_overall_progress || 0}% Complete
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowProductionProgressModal(true)}
+                  className="neo-btn-primary text-xs px-3.5 py-1.5 font-bold bg-primary text-white hover:bg-primary-dark inline-flex items-center gap-1 shadow-xs"
+                >
+                  <Plus size={13} /> + Record Piece Count
+                </button>
+              </div>
+            </div>
+
+            {/* Overall Progress Bar */}
+            <div className="w-full h-2.5 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden shadow-inner">
+              <div
+                className="h-full bg-primary transition-all duration-500 rounded-full"
+                style={{ width: `${lead.production_overall_progress || 0}%` }}
+              />
+            </div>
+
+            {/* Step-by-Step Breakdown Cards */}
+            {lead.production_batch_stages && lead.production_batch_stages.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                {lead.production_batch_stages.map((stage) => {
+                  const pct =
+                    stage.target_quantity > 0
+                      ? Math.min(100, Math.round((stage.completed_quantity / stage.target_quantity) * 100))
+                      : 0;
+                  const isDone = stage.completed_quantity >= stage.target_quantity;
+                  return (
+                    <div
+                      key={stage.id}
+                      className={`p-2.5 rounded-xl border text-xs space-y-1.5 ${
+                        isDone ? 'bg-primary/5 border-primary/20' : 'bg-slate-50 dark:bg-slate-900/40 border-shadow-darker/10'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-1">
+                        <strong className="text-primary-dark line-clamp-1">{stage.name}</strong>
+                        <span className="font-mono font-bold text-primary shrink-0">
+                          {stage.completed_quantity} / {stage.target_quantity} pcs
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                        <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-secondary">
+                        <span>{pct}% complete</span>
+                        <span>{Math.max(0, stage.target_quantity - stage.completed_quantity)} pcs left</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xs text-secondary italic text-center py-2">
+                Workflow steps initialized for order ({lead.required_quantity || 100} pcs). Click "+ Record Piece Count" to log daily progress.
+              </div>
+            )}
+          </div>
+
+          {/* 9 Targeted Production Parameters Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* 1. Size */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Shapes size={14} className="text-primary" /> 1. Trophy Size / Dimensions
+                </span>
+              </div>
+              <p className="text-sm font-bold text-primary-dark">
+                {lead.trophy_size || 'Not specified'}
+              </p>
+              <p className="text-[11px] text-slate-500">Exact physical height / dimensions for tooling and cutting</p>
+            </div>
+
+            {/* 2. Production Deadline */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Clock size={14} className="text-tertiary" /> 2. Production Deadline
+                </span>
+              </div>
+              <p className="text-sm font-bold text-tertiary">
+                {lead.production_deadline || lead.delivery_date ? formatDate(lead.production_deadline || lead.delivery_date) : 'Pending Timeline'}
+              </p>
+              <p className="text-[11px] text-slate-500">Required manufacturing completion date before dispatch</p>
+            </div>
+
+            {/* 3. Materials to Use */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Layers size={14} className="text-primary" /> 3. Materials to Use in Trophy
+                </span>
+              </div>
+              <p className="text-sm font-bold text-primary-dark">
+                {lead.trophy_materials_used || lead.material || 'Standard Trophy Materials'}
+              </p>
+              <p className="text-[11px] text-slate-500">Wood, Acrylic, Brass, Crystal, MDF, Recycled composite, etc.</p>
+            </div>
+
+            {/* 4. Stock / Materials to Buy */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Box size={14} className="text-primary" /> 4. Raw Material Stock Status
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${lead.materials_stock_status === 'in_stock'
+                  ? 'bg-primary/10 text-primary-dark border border-primary/20'
+                  : lead.materials_stock_status === 'need_to_buy'
+                    ? 'bg-tertiary/15 text-tertiary border border-tertiary/30'
+                    : lead.materials_stock_status === 'ordered'
+                      ? 'bg-secondary/15 text-secondary border border-secondary/30'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}>
+                  {lead.materials_stock_status ? lead.materials_stock_status.replace(/_/g, ' ') : 'Check Stock'}
+                </span>
+              </div>
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-lg border border-shadow-darker/10 text-xs text-slate-700 dark:text-slate-200">
+                <strong className="text-[10px] uppercase text-secondary block mb-0.5">Purchases Required:</strong>
+                {lead.materials_to_buy || 'No custom purchase requirement specified.'}
+              </div>
+            </div>
+
+            {/* 5. Packing Single Box Size */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Box size={14} className="text-primary" /> 5. Single Box Packing Size
+                </span>
+              </div>
+              <p className="text-sm font-bold text-primary-dark">
+                {lead.single_box_size || 'Standard individual box'}
+              </p>
+              <p className="text-[11px] text-slate-500">Dimensions of the individual presentation / inner box</p>
+            </div>
+
+            {/* 6. Whole Box / Master Carton Size */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Box size={14} className="text-primary" /> 6. Whole Box / Master Carton Size
+                </span>
+              </div>
+              <p className="text-sm font-bold text-primary-dark">
+                {lead.master_box_size || 'Standard corrugated master carton'}
+              </p>
+              <p className="text-[11px] text-slate-500">Outer packaging specifications for transit safety</p>
+            </div>
+
+            {/* 7. Delivery Mode & Transport Details */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Truck size={14} className="text-primary" /> 7. Logistics &amp; Transport Mode
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-primary/10 text-primary-dark border border-primary/20">
+                  {lead.delivery_mode ? lead.delivery_mode.replace(/_/g, ' ') : 'Standard Courier'}
+                </span>
+              </div>
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-lg border border-shadow-darker/10 text-xs text-slate-700 dark:text-slate-200">
+                <strong className="text-[10px] uppercase text-secondary block mb-0.5">Transit / Booking Notes:</strong>
+                {lead.delivery_details || 'Dispatch via preferred transport partner (Courier, Bus, Flight or Train).'}
+              </div>
+            </div>
+
+            {/* 8. Delivery Location */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-1.5">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <MapPin size={14} className="text-primary" /> 8. Delivery Destination Address
+                </span>
+              </div>
+              <p className="text-sm font-bold text-primary-dark">
+                {lead.delivery_location || lead.location || 'Customer pickup or address pending'}
+              </p>
+              <p className="text-[11px] text-slate-500">Final factory dispatch destination</p>
+            </div>
+
+            {/* 9. Prototype Status & Physical Sample */}
+            <div className="p-4 rounded-xl border border-shadow-darker/10 bg-slate-50/80 dark:bg-slate-900/40 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-bold text-secondary uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <Award size={14} className="text-primary" /> 9. Prototype / Sample Status
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${lead.prototype_status === 'client_approved' || lead.prototype_status === 'sample_ready'
+                  ? 'bg-primary/10 text-primary-dark border border-primary/20'
+                  : lead.prototype_status === 'sample_in_progress' || lead.prototype_status === 'needed'
+                    ? 'bg-tertiary/15 text-tertiary border border-tertiary/30'
+                    : 'bg-slate-100 text-slate-600'
+                  }`}>
+                  {lead.prototype_status ? lead.prototype_status.replace(/_/g, ' ') : 'Not Required'}
+                </span>
+              </div>
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-lg border border-shadow-darker/10 text-xs text-slate-700 dark:text-slate-200">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="line-clamp-2">{lead.prototype_notes || 'No prototype notes logged.'}</span>
+                  {lead.prototype_photo_url && (
+                    <a
+                      href={lead.prototype_photo_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-10 h-10 rounded-md overflow-hidden border border-shadow-darker/20 shrink-0 bg-slate-100"
+                    >
+                      <img src={lead.prototype_photo_url} alt="Prototype" className="w-full h-full object-cover" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1523,8 +2223,8 @@ export default function LeadDetail() {
                   <div
                     key={n.id}
                     className={`p-3.5 rounded-2xl border text-xs space-y-2 transition-all ${n.is_pinned
-                        ? 'bg-amber-50/50 border-amber-200'
-                        : 'bg-transparent border-shadow-darker/10'
+                      ? 'bg-amber-50/50 border-amber-200'
+                      : 'bg-transparent border-shadow-darker/10'
                       }`}
                   >
                     <div className="flex items-start justify-between gap-2">
@@ -1653,7 +2353,7 @@ export default function LeadDetail() {
                           : 'General Estimate'}
                       </td>
                       <td className="py-3 px-3 font-bold text-emerald-800">
-                        ₹{(q.total_amount || q.total || 0).toLocaleString('en-IN')}
+                        ₹{(q.grand_total || q.total_amount || q.total || 0).toLocaleString('en-IN')}
                       </td>
                       <td className="py-3 px-3">
                         {q.advance_amount ? (
@@ -1688,7 +2388,7 @@ export default function LeadDetail() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <div className="font-bold text-emerald-800">
-                          ₹{(q.total_amount || q.total || 0).toLocaleString('en-IN')}
+                          ₹{(q.grand_total || q.total_amount || q.total || 0).toLocaleString('en-IN')}
                         </div>
                       </div>
                     </div>
@@ -1775,14 +2475,7 @@ export default function LeadDetail() {
                             ? 'Instagram'
                             : m.platform || 'Direct';
 
-                  const badgeColor =
-                    m.platform === 'whatsapp'
-                      ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                      : m.platform === 'facebook_messenger'
-                        ? 'bg-sky-100 text-sky-800 border-sky-200'
-                        : m.platform === 'facebook_lead_ad'
-                          ? 'bg-indigo-100 text-indigo-800 border-indigo-200'
-                          : 'bg-rose-100 text-rose-800 border-rose-200';
+                  const badgeColor = 'bg-primary/10 text-primary-dark border-primary/20';
 
                   return (
                     <div
@@ -1802,8 +2495,8 @@ export default function LeadDetail() {
 
                       <div
                         className={`max-w-lg p-3.5 rounded-2xl border shadow-xs whitespace-pre-wrap leading-relaxed ${isInbound
-                            ? 'bg-transparent text-slate-800 border-shadow-darker/10 rounded-tl-none'
-                            : 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none'
+                          ? 'bg-transparent text-slate-800 border-shadow-darker/10 rounded-tl-none'
+                          : 'bg-emerald-600 text-white border-emerald-700 rounded-tr-none'
                           }`}
                       >
                         {m.content}
@@ -2063,6 +2756,55 @@ export default function LeadDetail() {
           setFeedback('Lost Lead Intelligence logged and annual win-back scheduled.');
         }}
       />
+
+      {/* Submit / Edit Design Request Modal */}
+      {showEditBriefModal && lead && (
+        <SubmitDesignRequestModal
+          isOpen={showEditBriefModal}
+          lead={lead}
+          onClose={() => setShowEditBriefModal(false)}
+          onSuccess={() => {
+            setShowEditBriefModal(false);
+            setFeedback('Design Brief specifications updated successfully.');
+          }}
+        />
+      )}
+
+      {/* Production Specifications & Parameters Modal */}
+      {showProductionSpecsModal && lead && (
+        <ProductionSpecsModal
+          isOpen={showProductionSpecsModal}
+          lead={lead}
+          initialTab={productionSpecsMode}
+          onClose={() => setShowProductionSpecsModal(false)}
+          onSuccess={() => {
+            setShowProductionSpecsModal(false);
+            setFeedback('Production specifications updated successfully.');
+          }}
+        />
+      )}
+
+      {/* Production Factory Job Card / Work Order Modal */}
+      {showJobCardModal && lead && (
+        <ProductionJobCardModal
+          isOpen={showJobCardModal}
+          lead={lead}
+          onClose={() => setShowJobCardModal(false)}
+          onOpenSpecsModal={() => {
+            setShowJobCardModal(false);
+            setShowProductionSpecsModal(true);
+          }}
+        />
+      )}
+
+      {/* Project-based Manufacturing Progress Modal */}
+      {showProductionProgressModal && lead && (
+        <ProductionProgressModal
+          isOpen={showProductionProgressModal}
+          lead={lead}
+          onClose={() => setShowProductionProgressModal(false)}
+        />
+      )}
     </div>
   );
 }

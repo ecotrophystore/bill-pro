@@ -12,6 +12,7 @@
     "desktop:prod": "npm run build && node electron/dev-launcher.mjs --prod",
     "build:server": "node electron/build-server.mjs",
     "dist:win": "npm run build:server && electron-builder --win",
+    "dist:mac": "npm run build:server && electron-builder --mac",
     "whatsapp:service": "tsx server/whatsappService.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -39,6 +40,7 @@
     "jszip": "^3.10.2",
     "nodemailer": "^10.4.0",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^6.5.438",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
@@ -110,6 +112,41 @@
         }
       ],
       "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "EcoBill-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "EcoBill Desktop Installer",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,

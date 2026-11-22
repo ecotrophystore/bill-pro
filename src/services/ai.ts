@@ -19,7 +19,7 @@ export function setApiKey(key: string): void {
   }
 }
 
-const CANDIDATE_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+const CANDIDATE_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
 export async function extractDataFromDocument(
   base64Data: string,
@@ -28,7 +28,7 @@ export async function extractDataFromDocument(
 ): Promise<any> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured. Please add it to .env as VITE_GEMINI_API_KEY.');
+    throw new Error('Gemini API key is not configured. Please configure your API key in AI Key Settings or add VITE_GEMINI_API_KEY in .env.');
   }
 
   const prompt = getPromptForType(type);
@@ -45,7 +45,7 @@ export async function extractDataFromDocument(
 
   for (const modelName of CANDIDATE_MODELS) {
     try {
-      const model = genAI.getGenerativeModel({ 
+      const model = genAI.getGenerativeModel({
         model: modelName,
         generationConfig: {
           responseMimeType: "application/json",
@@ -55,7 +55,11 @@ export async function extractDataFromDocument(
 
       const result = await model.generateContent([prompt, imagePart]);
       const text = result.response.text();
-      return JSON.parse(text);
+      const cleaned = text
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      return JSON.parse(cleaned);
     } catch (error: any) {
       lastError = error;
       const msg = error?.message || '';
@@ -74,8 +78,8 @@ export async function extractDataFromDocument(
   if (errMsg.includes('402') || errMsg.includes('prepayment') || errMsg.includes('credits are depleted')) {
     throw new Error('AI Error (402): Prepayment credits are depleted for this Gemini API key in Google AI Studio. Please check your billing at ai.studio/projects or enter a new API key.');
   }
-  if (errMsg.includes('401') || errMsg.includes('API key not valid')) {
-    throw new Error('AI Error: Gemini API key is invalid or expired. Please verify VITE_GEMINI_API_KEY in .env.');
+  if (errMsg.includes('401') || errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID')) {
+    throw new Error('AI Error: Gemini API key is invalid or expired. Please click "AI Key Settings" to update your key from Google AI Studio (aistudio.google.com).');
   }
   throw new Error('AI Error: ' + errMsg);
 }
@@ -141,20 +145,24 @@ function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
   } else if (type === 'statement') {
     return `
       You are an expert financial data extraction system.
-      Extract the bank transactions from this bank statement document.
-      Return the output as a JSON object matching this schema exactly:
+      Extract all individual bank transactions from this bank statement document.
+      Return the output as a valid JSON object matching this schema exactly:
       {
         "transactions": [
           {
             "date": "YYYY-MM-DD",
-            "description": "Transaction Description/Narration",
+            "description": "Transaction Description or Narration",
             "amount": 100.00,
-            "type": "credit" or "debit",
-            "reference": "Reference number or cheque number if any"
+            "type": "credit",
+            "reference": "Reference number, UTR, or cheque number if any"
           }
         ]
       }
-      Important: Ensure amount is a positive number. Determine type based on withdrawal/deposit columns.
+      Important Rules:
+      1. Ensure amount is always a positive number (e.g. 1500.50, never negative).
+      2. The "type" field must be exactly "credit" for deposits/inward money, or "debit" for withdrawals/outward expenses.
+      3. Format all dates as YYYY-MM-DD.
+      4. Ensure valid strict JSON output matching the schema.
     `;
   }
   return '';

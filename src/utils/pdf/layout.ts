@@ -1,7 +1,12 @@
 import type { DocumentKind, DocumentData, DocumentCustomer, PdfRenderContext } from './types';
 
 export function getDocumentNumber(docData: DocumentData) {
-  return 'number' in docData ? docData.number : 'Draft';
+  const baseNum = 'number' in docData ? docData.number : 'Draft';
+  const ver = (docData as any).version;
+  if (ver && ver > 1) {
+    return `${baseNum} (Rev ${ver})`;
+  }
+  return baseNum;
 }
 
 export function getDocumentDate(docData: DocumentData) {

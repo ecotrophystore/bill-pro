@@ -183,6 +183,8 @@ export async function clientCreateQuotation(rawData: any) {
     const quotationRef = doc(collection(db, "quotations"));
     const quotationData = {
       ...rawData,
+      lead_id: rawData.lead_id || undefined,
+      customer_phone: rawData.customer_phone || undefined,
       number: quotationNumber,
       items: validatedItems,
       subtotal: exactRound(rawSubtotal),
@@ -193,6 +195,7 @@ export async function clientCreateQuotation(rawData: any) {
       charge_amount: charge,
       round_off: roundOff,
       grand_total: finalGrandTotal,
+      total_amount: finalGrandTotal,
       status: rawData.status || 'draft',
       created_by: uid,
       created_at: serverTimestamp()

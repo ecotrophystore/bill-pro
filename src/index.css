@@ -133,4 +133,22 @@
   background-color: rgba(0, 103, 102, 0.4);
 }
 
+/* Print Isolation Safeguards */
+@media print {
+  /* Hide the web application chrome, sidebar, and background panels */
+  body > #root > div > aside,
+  body > #root > div > header,
+  body > #root nav,
+  .print\:hidden,
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
+
 

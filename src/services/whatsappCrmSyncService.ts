@@ -2,9 +2,11 @@ import {
   addDoc,
   collection,
   doc,
+  getDoc,
   getDocs,
   limit,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -20,7 +22,15 @@ import {
 } from '../types';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
 import { extractMetaRequirements } from '../utils/metaRequirementExtractor';
-import { isMediaOrSystemNoise } from '../utils/whatsappEnquiryQualifier';
+import {
+  isMediaOrSystemNoise,
+  isCustomerEnquiryLead,
+  hasCommercialEnquirySignal,
+  extractCustomerAndCompanyInfo,
+  isRealContactName,
+  WHATSAPP_VENDOR_OR_INDIAMART_RE,
+  WHATSAPP_SPAM_OR_ALERT_RE
+} from '../utils/whatsappEnquiryQualifier';
 import {
   extractLast10Digits,
   formatWhatsAppNumberDisplay,
@@ -28,6 +38,13 @@ import {
 } from '../utils/whatsappNumberUtils';
 import type { AiLeadInsight } from './whatsappMultiSessionService';
 import { resolveLeadAssignment } from './leadAssignmentService';
+import {
+  classifyLeadIntent,
+  evaluateFitsQualification,
+  evaluateProsperSkills,
+  computeSalesQualityAudit,
+} from '../utils/salesIntelligenceEngine';
+import type { FITSQualificationData } from '../types';
 
 const AUTO_SYNC_STORAGE_KEY = 'ecobill.whatsappAutoCrmSync';
 const AUTO_SYNC_EVENT_NAME = 'ecobill:whatsapp-autosync-changed';
@@ -81,13 +98,61 @@ function buildPhoneVariants(raw: string): { canonical: string; variants: string[
   return { canonical, variants };
 }
 
-function parseNumericQuantity(rawQty?: string | number): number | undefined {
+/**
+ * Derives a canonical, deterministic Firestore document ID for a WhatsApp lead.
+ * Guarantees that even if multiple team members are logged into the same WhatsApp account
+ * in different browser windows/computers, all concurrent incoming message events target
+ * the exact same Firestore document ID, preventing duplicate lead creation.
+ */
+export function getDeterministicWhatsAppLeadId(
+  canonicalPhone?: string,
+  remoteJid?: string,
+  orderSuffix?: string
+): string {
+  const digits = (canonicalPhone || '').replace(/\D/g, '');
+  const phone10 = digits.length >= 10 ? digits.slice(-10) : digits;
+  const suffix = orderSuffix ? `_${orderSuffix}` : '';
+  if (phone10 && phone10.length >= 7) {
+    return `lead_wa_${phone10}${suffix}`;
+  }
+  const cleanJid = (remoteJid || 'contact')
+    .replace(/@.*$/, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_');
+  return `lead_wa_${cleanJid}${suffix}`;
+}
+
+function parseNumericQuantity(rawQty?: string | number): number {
   if (typeof rawQty === 'number' && !isNaN(rawQty) && rawQty > 0) return rawQty;
-  if (!rawQty) return undefined;
+  if (!rawQty) return 0;
   const match = String(rawQty).match(/(\d{1,6})/);
-  if (!match) return undefined;
+  if (!match) return 0;
   const parsed = parseInt(match[1], 10);
-  return !isNaN(parsed) && parsed > 0 ? parsed : undefined;
+  return !isNaN(parsed) && parsed > 0 ? parsed : 0;
+}
+
+/** Recursively removes undefined fields so Firestore setDoc/updateDoc never fails */
+function stripUndefined<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(stripUndefined) as unknown as T;
+  }
+  if (typeof obj === 'object') {
+    if (
+      obj instanceof Date ||
+      typeof (obj as any)?.toMillis === 'function' ||
+      (obj as any)?._methodName !== undefined
+    ) {
+      return obj;
+    }
+    const clean: Record<string, any> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (v !== undefined) {
+        clean[k] = stripUndefined(v);
+      }
+    }
+    return clean as unknown as T;
+  }
+  return obj;
 }
 
 function parseNumericBudgetValue(rawBudget?: string): number {
@@ -388,6 +453,15 @@ async function findExistingLead(
 ): Promise<{ id: string; data: Lead } | null> {
   if (!db) return null;
 
+  // Fast direct lookup: If lead was created with canonical deterministic ID, resolve immediately
+  const directLeadId = getDeterministicWhatsAppLeadId(options?.canonicalPhone, options?.remoteJid);
+  if (directLeadId) {
+    const directSnap = await getDoc(doc(db, 'leads', directLeadId)).catch(() => null);
+    if (directSnap && directSnap.exists()) {
+      return { id: directSnap.id, data: directSnap.data() as Lead };
+    }
+  }
+
   const collected: Array<{ id: string; data: Lead }> = [];
 
   if (phoneVariants.length > 0) {
@@ -429,10 +503,18 @@ async function findExistingLead(
 
   // Fallback normalized scan across cached leads (catches "+91 98765 43210" formatted strings & saved WhatsApp names)
   const index = await getLeadIndex();
-  const incoming10 = extractLast10Digits(options?.canonicalPhone);
+  const candidate10s = new Set<string>();
+  if (options?.canonicalPhone) {
+    const d = extractLast10Digits(options.canonicalPhone);
+    if (d.length >= 7) candidate10s.add(d);
+  }
+  phoneVariants.forEach((v) => {
+    const d = extractLast10Digits(v);
+    if (d.length >= 7) candidate10s.add(d);
+  });
 
-  if (incoming10.length >= 7) {
-    const phoneMatches = index.filter((e) => e.phones10.includes(incoming10));
+  if (candidate10s.size > 0) {
+    const phoneMatches = index.filter((e) => e.phones10.some((p) => candidate10s.has(p)));
     const best = pickPreferredLeadMatch(phoneMatches.map((m) => ({ id: m.id, data: m.data })));
     if (best) return best;
   }
@@ -451,7 +533,7 @@ async function findExistingLead(
     const nameMatches = index.filter((e) => {
       if (!nameCandidates.includes(e.normName)) return false;
       // Only merge by name if neither has conflicting different phone numbers
-      if (incoming10.length >= 7 && e.phones10.length > 0 && !e.phones10.includes(incoming10)) {
+      if (candidate10s.size > 0 && e.phones10.length > 0 && !e.phones10.some((p) => candidate10s.has(p))) {
         return false;
       }
       return true;
@@ -461,6 +543,54 @@ async function findExistingLead(
   }
 
   return null;
+}
+
+/**
+ * Checks whether this contact is already saved in the CRM `customers` collection.
+ */
+export async function findExistingCustomer(phoneVariants: string[]): Promise<{
+  id: string;
+  name?: string;
+  company?: string;
+  phone?: string;
+} | null> {
+  if (!db || !phoneVariants || phoneVariants.length === 0) return null;
+  try {
+    const [byPhoneSnap, byWaSnap] = await Promise.all([
+      getDocs(query(collection(db, 'customers'), where('phone', 'in', phoneVariants), limit(5))).catch(() => null),
+      getDocs(query(collection(db, 'customers'), where('whatsapp_number', 'in', phoneVariants), limit(5))).catch(() => null)
+    ]);
+    const docItem = byPhoneSnap?.docs[0] || byWaSnap?.docs[0];
+    if (docItem) {
+      const d = docItem.data();
+      return {
+        id: docItem.id,
+        name: d.name,
+        company: d.company || d.organization,
+        phone: d.phone || d.whatsapp_number
+      };
+    }
+  } catch (err) {
+    console.warn('[SyncService] Error finding existing customer:', err);
+  }
+  return null;
+}
+
+export async function findLeadForWhatsAppContact(contact: {
+  phone?: string;
+  remoteJid?: string;
+  name?: string;
+  email?: string;
+}): Promise<{ id: string; data: Lead } | null> {
+  const rawPhone = String(contact.phone || '').trim();
+  const phoneVariants = rawPhone ? buildPhoneVariants(rawPhone).variants : [];
+  const threadEventKey = contact.remoteJid ? `wa_${contact.remoteJid.replace(/[^a-zA-Z0-9_-]/g, '_')}` : '';
+  return findExistingLead(phoneVariants, threadEventKey, {
+    canonicalPhone: rawPhone,
+    remoteJid: contact.remoteJid,
+    candidateNames: contact.name ? [contact.name] : [],
+    email: contact.email
+  });
 }
 
 function resolveStageRank(stageId: string): number {
@@ -491,10 +621,10 @@ async function syncConversationAndMessageToCrm(params: {
 
   await setDoc(
     doc(db, 'conversations', convId),
-    {
-      leadId: params.leadId,
-      participantPhone: fullPhone,
-      participantName: params.leadName,
+    stripUndefined({
+      leadId: params.leadId || '',
+      participantPhone: fullPhone || '',
+      participantName: params.leadName || '',
       platform: 'whatsapp',
       status: 'open',
       sessionLabel: params.sessionLabel || 'WhatsApp Web',
@@ -510,7 +640,7 @@ async function syncConversationAndMessageToCrm(params: {
             : 'Needs Follow-up',
       ai_suggested_reply: params.insight.suggestedReply || '',
       updated_at: serverTimestamp()
-    },
+    }),
     { merge: true }
   ).catch(() => { });
 
@@ -520,11 +650,11 @@ async function syncConversationAndMessageToCrm(params: {
     const msgHash = `${convId}_${msgText.slice(0, 80).replace(/[^a-zA-Z0-9]/g, '_')}_${dateKey}`;
     await setDoc(
       doc(db, 'messages', msgHash),
-      {
+      stripUndefined({
         conversationId: convId,
-        leadId: params.leadId,
-        senderPhone: fullPhone,
-        senderName: params.leadName,
+        leadId: params.leadId || '',
+        senderPhone: fullPhone || '',
+        senderName: params.leadName || '',
         direction: 'inbound',
         type: 'text',
         content: msgText,
@@ -533,7 +663,7 @@ async function syncConversationAndMessageToCrm(params: {
         sourceAccount: params.sessionLabel || 'WhatsApp Web',
         aiProcessed: true,
         created_at: historicalDate || serverTimestamp()
-      },
+      }),
       { merge: true }
     ).catch(() => { });
   }
@@ -546,6 +676,7 @@ export async function syncWhatsAppLeadToCrm(params: {
   remoteJid: string;
   phone?: string;
   name?: string;
+  pushname?: string;
   messageText?: string;
   insight: AiLeadInsight;
   forceCreate?: boolean;
@@ -573,11 +704,12 @@ export async function syncWhatsAppLeadToCrm(params: {
 
   const runPromise = (async (): Promise<CrmSyncOutcome> => {
     const resolved = await previewCrmPipelineAndStage(params.insight, params.messageText || '');
+    // Prioritize customer's own details (pushname or self-introduction/AI details) over sales-team entered contact name
     const leadDisplayName =
+      (params.pushname && isSpecificContactName(params.pushname) ? params.pushname : '') ||
       (isSpecificContactName(params.insight.leadName) ? params.insight.leadName : '') ||
-      (isSpecificContactName(params.name) ? params.name : '') ||
+      (params.pushname ? params.pushname : '') ||
       params.insight.leadName ||
-      params.name ||
       (canonical ? `+${canonical}` : 'WhatsApp Lead');
 
     if (!db) {
@@ -627,47 +759,52 @@ export async function syncWhatsAppLeadToCrm(params: {
       const nextRank = resolveStageRank(resolved.stageId);
       const maxAutoAdvanceRank = resolveStageRank('design_approval');
 
-      const existingReplyMs = Math.max(
-        getTimestampMillis((currentData as any).lastCustomerReplyAt),
-        getTimestampMillis(currentData.created_at)
-      );
-      if (
-        !params.forceCreate &&
-        historicalDate &&
-        existingReplyMs > historicalDate.getTime() + 60_000
-      ) {
-        return {
-          action: 'skipped',
-          leadId: existing.id,
-          leadName: currentData.name || leadDisplayName,
-          pipelineId: currentPipelineId,
-          pipelineName:
-            DEFAULT_QUANTITY_PIPELINES.find((p) => p.id === currentPipelineId)?.name || resolved.pipelineName,
-          stageId: currentStageId,
-          stageLabel: STANDARD_CRM_STAGES.find((s) => s.id === currentStageId)?.label || currentStageId,
-          reason: 'Newer activity already exists in CRM'
-        };
-      }
-
       const isSameDuplicateText = Boolean(incomingText && prevLastMsg === incomingText);
-      const wantsNewOrderCard =
-        !params.forceCreate &&
-        !isSameDuplicateText &&
+
+      // OPTION A: If the customer's previous order is completed/delivered/closed, OR if they explicitly
+      // request a new / separate / repeat order, treat this as a NEW requirement and create a new lead card!
+      const isClosedStage = CLOSED_ORDER_STAGES.has(currentStageId);
+      const isExplicitNewOrder = EXPLICIT_NEW_ORDER_RE.test(incomingText);
+      const hasCommercialRequirement =
+        hasCommercialEnquirySignal(incomingText, { quantity: params.insight.quantity, budget: params.insight.budget }) ||
         hasRepeatOrderIntent({
           incomingText,
           insight: params.insight,
           requiredQuantity: resolved.requiredQuantity,
           numericBudget,
           extractedTrophyType: resolved.extracted.trophy_type
-        }) &&
-        (CLOSED_ORDER_STAGES.has(currentStageId) ||
-          (POST_COMMITMENT_STAGES.has(currentStageId) && EXPLICIT_NEW_ORDER_RE.test(incomingText)));
+        });
+
+      const wantsNewOrderCard =
+        !params.forceCreate &&
+        !isSameDuplicateText &&
+        hasCommercialRequirement &&
+        (isClosedStage || isExplicitNewOrder);
 
       if (wantsNewOrderCard) {
         repeatOrderSourceLead = existing;
-      }
-
-      if (!wantsNewOrderCard) {
+      } else {
+        const existingReplyMs = Math.max(
+          getTimestampMillis((currentData as any).lastCustomerReplyAt),
+          getTimestampMillis(currentData.created_at)
+        );
+        if (
+          !params.forceCreate &&
+          historicalDate &&
+          existingReplyMs > historicalDate.getTime() + 60_000
+        ) {
+          return {
+            action: 'skipped',
+            leadId: existing.id,
+            leadName: currentData.name || leadDisplayName,
+            pipelineId: currentPipelineId,
+            pipelineName:
+              DEFAULT_QUANTITY_PIPELINES.find((p) => p.id === currentPipelineId)?.name || resolved.pipelineName,
+            stageId: currentStageId,
+            stageLabel: STANDARD_CRM_STAGES.find((s) => s.id === currentStageId)?.label || currentStageId,
+            reason: 'Newer activity already exists in CRM'
+          };
+        }
 
         // Check if this exact message was already synced and no new fields arrived
         const hasNewField = Boolean(
@@ -694,6 +831,17 @@ export async function syncWhatsAppLeadToCrm(params: {
           };
         }
 
+        // Extract real contact name and organization name to replace raw phone numbers
+        const extractedContact = extractCustomerAndCompanyInfo({
+          text: incomingText,
+          senderName: params.name,
+          phone: canonical || currentData.phone,
+          aiName: params.insight.leadName,
+          aiCompany: params.insight.company,
+          existingName: currentData.name,
+          existingCompany: currentData.company
+        });
+
         const updatePayload: Record<string, any> = {
           updated_at: serverTimestamp(),
           lastCustomerReplyAt: historicalDate || serverTimestamp(),
@@ -711,6 +859,15 @@ export async function syncWhatsAppLeadToCrm(params: {
           suggested_reply: params.insight.suggestedReply || currentData.suggested_reply || '',
           next_action: params.insight.suggestedAction || currentData.next_action || ''
         };
+
+        // Save extracted real name instead of raw phone number
+        if (extractedContact.hasSpecificName && (!isRealContactName(currentData.name) || !currentData.name)) {
+          updatePayload.name = extractedContact.name;
+        }
+        // Save extracted company/school/organization name
+        if (extractedContact.hasSpecificCompany && (!isRealContactName(currentData.company) || !currentData.company)) {
+          updatePayload.company = extractedContact.company;
+        }
 
         // Preserve the original business WhatsApp number the lead first came through; backfill if empty
         if (sourceWhatsappDigits && !(currentData as any).source_whatsapp_number) {
@@ -732,7 +889,6 @@ export async function syncWhatsAppLeadToCrm(params: {
           updatePayload.whatsapp_number = canonical;
         }
         if (params.insight.email && !currentData.email) updatePayload.email = params.insight.email.trim().toLowerCase();
-        if (params.insight.company && !currentData.company) updatePayload.company = params.insight.company;
         if ((params.insight.location || resolved.extracted.location) && !currentData.location) {
           updatePayload.location = params.insight.location || resolved.extracted.location;
         }
@@ -826,9 +982,63 @@ export async function syncWhatsAppLeadToCrm(params: {
           updatePayload.stage_history = stageHistory;
         }
 
+        // Strict Assignment Preservation: If lead is already assigned to a team member, KEEP THEM!
+        const existingOwnerId = currentData.owner_id || (currentData as any).ownerId;
+        if (!existingOwnerId && !currentData.sales_person) {
+          // Only assign if completely unassigned
+          const autoAssignment = await resolveLeadAssignment({
+            source: 'WhatsApp',
+            platform: 'meta',
+            pipelineId: finalPipelineId,
+            whatsappAccountLabel: effectiveSessionLabel,
+            whatsappPhone: sourceWhatsappDigits || '',
+            phone: canonical || currentData.phone || '',
+            requiredQuantity: resolved.requiredQuantity,
+            value: numericBudget,
+            location: params.insight.location || resolved.extracted.location || currentData.location || '',
+            name: updatePayload.name || currentData.name || leadDisplayName,
+            company: updatePayload.company || currentData.company || '',
+            requirement: incomingText,
+            eventName: params.insight.eventName || resolved.extracted.event_name || ''
+          }).catch(() => null);
+
+          if (autoAssignment?.assigned) {
+            updatePayload.owner_id = autoAssignment.ownerId;
+            updatePayload.ownerId = autoAssignment.ownerId;
+            updatePayload.sales_person = autoAssignment.ownerName;
+            updatePayload.assigned_at = historicalDate || serverTimestamp();
+            updatePayload.assigned_by = 'auto_assignment';
+            updatePayload.assignment_rule_name = autoAssignment.ruleName || autoAssignment.mode;
+          }
+        }
+
+        // Refresh EcoTrophy Intent, PROSPER and Audit on message update
+        const updatedIntent = classifyLeadIntent({
+          text: incomingText || currentData.requirement || '',
+          quantity: updatePayload.required_quantity || currentData.required_quantity,
+          budget: updatePayload.value || currentData.value,
+          eventName: updatePayload.event_name || currentData.event_name,
+          eventDate: updatePayload.event_date || currentData.event_date,
+          company: updatePayload.company || currentData.company,
+          isRepeatCustomer: currentData.is_repeat_customer,
+        });
+        updatePayload.intent_tier = updatedIntent.tier;
+        updatePayload.intent_score = updatedIntent.score;
+        updatePayload.intent_reasons = updatedIntent.reasons;
+
+        const updatedProsper = evaluateProsperSkills(
+          `${currentData.last_message || ''}\n${incomingText || ''}`,
+          currentData.reason || ''
+        );
+        updatePayload.prosper_breakdown = updatedProsper;
+        updatePayload.sales_audit = computeSalesQualityAudit(
+          { ...currentData, ...updatePayload } as Lead,
+          incomingText || ''
+        );
+
         let deletedStaleCacheHit = false;
         try {
-          await updateDoc(doc(db, 'leads', existing.id), updatePayload);
+          await updateDoc(doc(db, 'leads', existing.id), stripUndefined(updatePayload));
         } catch (err: any) {
           const msg = String(err?.message || '');
           if (err?.code === 'not-found' || /no document to update/i.test(msg)) {
@@ -845,7 +1055,7 @@ export async function syncWhatsAppLeadToCrm(params: {
 
           await syncConversationAndMessageToCrm({
             leadId: existing.id,
-            leadName: currentData.name || leadDisplayName,
+            leadName: updatePayload.name || currentData.name || leadDisplayName,
             phone: canonical || currentData.phone || '',
             sessionLabel: params.sessionLabel,
             messageText: incomingText,
@@ -868,7 +1078,7 @@ export async function syncWhatsAppLeadToCrm(params: {
           return {
             action: 'updated',
             leadId: existing.id,
-            leadName: currentData.name || leadDisplayName,
+            leadName: updatePayload.name || currentData.name || leadDisplayName,
             pipelineId: finalPipelineId,
             pipelineName: finalPipelineName,
             stageId: finalStageId,
@@ -878,39 +1088,170 @@ export async function syncWhatsAppLeadToCrm(params: {
       }
     }
 
-    // Re-evaluate pipeline classification when creating a repeat order card so custom repeat-customer rules apply cleanly
-    const isRepeatCustomer = Boolean(repeatOrderSourceLead);
-    const finalResolved = isRepeatCustomer
-      ? await previewCrmPipelineAndStage(params.insight, params.messageText || '', { isRepeatCustomer: true })
-      : resolved;
+    // 1. Check if this contact is already saved in customers collection
+    const existingCustomer = await findExistingCustomer(variants);
+    const isContactSaved = Boolean(existingCustomer);
 
-    const priorData = repeatOrderSourceLead?.data;
-    const inheritedPhone = canonical || normalizeWhatsAppDigits(priorData?.phone || (priorData as any)?.whatsapp_number || '');
-    const effectivePhone = canonical || inheritedPhone;
-    const effectiveVariants = effectivePhone ? buildPhoneVariants(effectivePhone).variants : variants;
-    const effectiveLeadName =
-      (isSpecificContactName(leadDisplayName) ? leadDisplayName : '') ||
-      priorData?.name ||
-      leadDisplayName;
-    const prevStageLabel = priorData?.status
-      ? STANDARD_CRM_STAGES.find((s) => s.id === priorData.status)?.label || priorData.status
-      : '';
+    const candidateIncomingText = (params.messageText || params.insight.requirement || '').trim();
 
-    // Do not create brand-new CRM leads for personal/regular/media/promo messages unless forced manually
-    const candidateIncomingText = params.messageText || params.insight.requirement || '';
-    if (
-      !params.forceCreate &&
-      (params.insight.isBusinessLead !== true || isMediaOrSystemNoise(candidateIncomingText))
-    ) {
+    // 2. Extract real customer personal name and company/organization name from chat text and AI signals
+    const extractedContact = extractCustomerAndCompanyInfo({
+      text: candidateIncomingText,
+      senderName: params.pushname || '',
+      pushname: params.pushname,
+      phone: canonical,
+      aiName: params.insight.leadName,
+      aiCompany: params.insight.company,
+      existingName: existingCustomer?.name || repeatOrderSourceLead?.data?.name,
+      existingCompany: existingCustomer?.company || repeatOrderSourceLead?.data?.company
+    });
+
+    const hasIntroducedName = Boolean(extractedContact.hasSpecificName && isRealContactName(extractedContact.name));
+    const hasIntroducedCompany = Boolean(extractedContact.hasSpecificCompany && isRealContactName(extractedContact.company));
+    const hasIntroducedNameOrCompany = hasIntroducedName || hasIntroducedCompany || Boolean(existingCustomer && isRealContactName(existingCustomer.name));
+
+    const hasExplicitRequirement =
+      hasCommercialEnquirySignal(candidateIncomingText, {
+        quantity: params.insight.quantity,
+        budget: params.insight.budget
+      }) ||
+      hasCommercialEnquirySignal(params.insight.requirement || '', {
+        quantity: params.insight.quantity,
+        budget: params.insight.budget
+      }) ||
+      Boolean(resolved.requiredQuantity && resolved.requiredQuantity > 0);
+
+    // 3. Filter out vendor pitches, IndiaMART broadcasts, spam, or media noise
+    const isSpamOrNoise =
+      WHATSAPP_VENDOR_OR_INDIAMART_RE.test(candidateIncomingText) ||
+      WHATSAPP_SPAM_OR_ALERT_RE.test(candidateIncomingText) ||
+      isMediaOrSystemNoise(candidateIncomingText);
+
+    if (!params.forceCreate && isSpamOrNoise) {
       return {
         action: 'skipped',
-        leadName: effectiveLeadName,
-        pipelineId: finalResolved.pipelineId,
-        pipelineName: finalResolved.pipelineName,
-        stageId: finalResolved.stageId,
-        stageLabel: finalResolved.stageLabel,
-        reason: 'Filtered out non-enquiry / regular chat / media placeholder'
+        leadName: leadDisplayName,
+        pipelineId: resolved.pipelineId,
+        pipelineName: resolved.pipelineName,
+        stageId: resolved.stageId,
+        stageLabel: resolved.stageLabel,
+        reason: 'Filtered out vendor pitch / IndiaMART broadcast / promotional message / noise'
       };
+    }
+
+    // 4. TROPHY ENQUIRY & AI QUALIFICATION GATE FOR NEW LEADS:
+    // Only add a new contact to the CRM as a lead when they enquire about a trophy/awards.
+    // - If AI is unsure (flag_for_review or confidence < 0.70) -> prompt rep: "Is this a lead?"
+    // - If non-trophy message from a new contact -> skip cleanly (no CRM lead entry)
+    const isTrophyEnquiry =
+      hasExplicitRequirement ||
+      params.insight.isBusinessLead === true ||
+      Boolean(params.insight.trophyType || resolved.extracted.trophy_type);
+
+    if (!params.forceCreate && !isContactSaved && !repeatOrderSourceLead) {
+      if (params.insight.flagForReview || (params.insight.confidenceScore && params.insight.confidenceScore < 0.7)) {
+        return {
+          action: 'skipped',
+          leadName: leadDisplayName,
+          pipelineId: resolved.pipelineId,
+          pipelineName: resolved.pipelineName,
+          stageId: resolved.stageId,
+          stageLabel: resolved.stageLabel,
+          reason: 'Waiting for user confirmation - Is this a lead?'
+        };
+      }
+
+      if (!isTrophyEnquiry) {
+        return {
+          action: 'skipped',
+          leadName: leadDisplayName,
+          pipelineId: resolved.pipelineId,
+          pipelineName: resolved.pipelineName,
+          stageId: resolved.stageId,
+          stageLabel: resolved.stageLabel,
+          reason: 'Non-trophy enquiry from new contact. CRM lead creation skipped.'
+        };
+      }
+    }
+
+    // 5. USER CONTACT SAVING RULE:
+    // If the contact is not saved and neither name, company, nor order specs are present:
+    // prompt user confirmation rather than creating an empty anonymous lead
+    if (!params.forceCreate && !isContactSaved && !hasIntroducedNameOrCompany && !hasExplicitRequirement) {
+      return {
+        action: 'skipped',
+        leadName: leadDisplayName,
+        pipelineId: resolved.pipelineId,
+        pipelineName: resolved.pipelineName,
+        stageId: resolved.stageId,
+        stageLabel: resolved.stageLabel,
+        reason: 'Waiting for user confirmation - Is this a lead?'
+      };
+    }
+
+    // Strict De-duplication: Double check that lead does not already exist before creating a new card
+    // (Skipped when repeatOrderSourceLead is active, since this is a verified new requirement for an existing customer)
+    if (!repeatOrderSourceLead) {
+      const duplicateCheck = await findExistingLead(variants, threadEventKey, {
+        canonicalPhone: canonical,
+        remoteJid: params.remoteJid,
+        candidateNames
+      });
+      if (duplicateCheck) {
+        return {
+          action: 'skipped',
+          leadId: duplicateCheck.id,
+          leadName: duplicateCheck.data.name || leadDisplayName,
+          pipelineId: duplicateCheck.data.pipeline_id || resolved.pipelineId,
+          pipelineName: resolved.pipelineName,
+          stageId: duplicateCheck.data.status || resolved.stageId,
+          stageLabel: resolved.stageLabel,
+          reason: 'Lead already exists in CRM'
+        };
+      }
+    }
+
+    const isRepeatCustomer = Boolean(repeatOrderSourceLead || (existingCustomer && existingCustomer.id));
+    const priorData = repeatOrderSourceLead?.data;
+
+    const effectiveLeadName =
+      (params.pushname && isSpecificContactName(params.pushname) ? params.pushname : '') ||
+      extractedContact.name ||
+      existingCustomer?.name ||
+      priorData?.name ||
+      leadDisplayName;
+    const effectiveCompany = extractedContact.company || existingCustomer?.company || params.insight.company || priorData?.company || resolved.extracted.organization || '';
+
+    // Assignment: If this is an existing customer, strictly retain their prior assigned team member!
+    const priorOwnerId = priorData?.owner_id || (priorData as any)?.ownerId;
+    const priorSalesPerson = priorData?.sales_person;
+
+    let finalOwnerId = priorOwnerId || '';
+    let finalSalesPerson = priorSalesPerson || '';
+    let assignmentMode = priorOwnerId ? 'Existing Team Member Retained' : '';
+
+    if (!finalOwnerId) {
+      const autoAssignment = await resolveLeadAssignment({
+        source: 'WhatsApp',
+        platform: 'meta',
+        pipelineId: resolved.pipelineId,
+        whatsappAccountLabel: effectiveSessionLabel,
+        whatsappPhone: sourceWhatsappDigits || '',
+        phone: canonical, // Preserves team member assignment if customer previously spoke to someone
+        requiredQuantity: resolved.requiredQuantity,
+        value: numericBudget,
+        location: params.insight.location || resolved.extracted.location || priorData?.location || '',
+        name: effectiveLeadName,
+        company: effectiveCompany,
+        requirement: params.insight.requirement || params.messageText || '',
+        eventName: params.insight.eventName || resolved.extracted.event_name || ''
+      }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
+
+      if (autoAssignment.assigned) {
+        finalOwnerId = autoAssignment.ownerId;
+        finalSalesPerson = autoAssignment.ownerName;
+        assignmentMode = autoAssignment.ruleName || autoAssignment.mode;
+      }
     }
 
     const qualificationStatus =
@@ -920,52 +1261,64 @@ export async function syncWhatsAppLeadToCrm(params: {
           ? 'Not Qualified'
           : 'Needs Follow-up';
 
-    const autoAssignment = await resolveLeadAssignment({
-      source: 'WhatsApp',
-      platform: 'meta',
-      pipelineId: finalResolved.pipelineId,
-      whatsappAccountLabel: effectiveSessionLabel,
-      whatsappPhone: sourceWhatsappDigits || '',
-      requiredQuantity: finalResolved.requiredQuantity,
-      value: numericBudget,
-      location: params.insight.location || finalResolved.extracted.location || priorData?.location || '',
-      name: effectiveLeadName,
-      company: params.insight.company || finalResolved.extracted.organization || priorData?.company || '',
-      requirement: params.insight.requirement || params.messageText || '',
-      eventName: params.insight.eventName || finalResolved.extracted.event_name || ''
-    }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
+    // EcoTrophy AI Sales Intelligence: compute Intent, FITS, PROSPER, and Audit
+    const intentResult = classifyLeadIntent({
+      text: params.messageText || params.insight.requirement || '',
+      quantity: resolved.requiredQuantity || params.insight.quantity,
+      budget: numericBudget,
+      eventName: params.insight.eventName || resolved.extracted.event_name,
+      eventDate: params.insight.eventDate || resolved.extracted.event_date,
+      deliveryDate: params.insight.deliveryDate || resolved.extracted.delivery_date,
+      company: effectiveCompany,
+      isRepeatCustomer,
+    });
+
+    const initialFits: FITSQualificationData = {
+      fit_status: 'fit',
+      intent_level: intentResult.tier.toLowerCase() as 'high' | 'medium' | 'low',
+      event_importance: params.insight.eventName || resolved.extracted.event_name || 'Standard Event',
+      timeline_date: params.insight.eventDate || resolved.extracted.event_date || '',
+      delivery_pincode: params.insight.location || resolved.extracted.location || '',
+      urgency_status: params.insight.urgency === 'high' ? 'urgent' : 'normal',
+      scope_quantity: parseNumericQuantity(resolved.requiredQuantity || params.insight.quantity) || 0,
+      scope_budget_limit: numericBudget || 0,
+      scope_material_preference: params.insight.trophyType || resolved.extracted.trophy_type || '',
+      completed_at: historicalDate || now,
+    };
+    const fitsEval = evaluateFitsQualification(initialFits);
+    const initialProsper = evaluateProsperSkills(params.messageText || '');
 
     const newLeadPayload = {
       name: effectiveLeadName,
-      company: params.insight.company || finalResolved.extracted.organization || priorData?.company || '',
-      phone: effectivePhone || '',
-      normalized_phone: effectivePhone || '',
-      whatsapp_number: effectivePhone || '',
+      company: effectiveCompany,
+      phone: canonical || '',
+      normalized_phone: canonical || '',
+      whatsapp_number: canonical || '',
       email: (params.insight.email || priorData?.email || '').trim().toLowerCase(),
-      location: params.insight.location || finalResolved.extracted.location || priorData?.location || '',
-      required_quantity: finalResolved.requiredQuantity || '',
+      location: params.insight.location || resolved.extracted.location || priorData?.location || '',
+      required_quantity: resolved.requiredQuantity || '',
       value: numericBudget,
       budget: budgetStr,
-      event_name: params.insight.eventName || finalResolved.extracted.event_name || '',
-      event_type: finalResolved.extracted.event_type || '',
-      event_date: params.insight.eventDate || finalResolved.extracted.event_date || '',
-      delivery_date: params.insight.deliveryDate || finalResolved.extracted.delivery_date || '',
-      trophy_type: params.insight.trophyType || finalResolved.extracted.trophy_type || '',
-      trophy_size: params.insight.trophySize || finalResolved.extracted.trophy_size || '',
-      customer_type: finalResolved.extracted.customer_type || priorData?.customer_type || '',
+      event_name: params.insight.eventName || resolved.extracted.event_name || '',
+      event_type: resolved.extracted.event_type || '',
+      event_date: params.insight.eventDate || resolved.extracted.event_date || '',
+      delivery_date: params.insight.deliveryDate || resolved.extracted.delivery_date || '',
+      trophy_type: params.insight.trophyType || resolved.extracted.trophy_type || '',
+      trophy_size: params.insight.trophySize || resolved.extracted.trophy_size || '',
+      customer_type: resolved.extracted.customer_type || '',
       requirement: params.insight.requirement || params.messageText || '',
-      urgency: params.insight.urgency || finalResolved.extracted.urgency || 'medium',
-      pipeline_id: finalResolved.pipelineId,
-      status: finalResolved.stageId,
-      owner_id: autoAssignment.assigned ? autoAssignment.ownerId : '',
-      ownerId: autoAssignment.assigned ? autoAssignment.ownerId : '',
-      sales_person: autoAssignment.assigned ? autoAssignment.ownerName : '',
-      ...(autoAssignment.assigned
+      urgency: params.insight.urgency || resolved.extracted.urgency || 'medium',
+      pipeline_id: resolved.pipelineId,
+      status: resolved.stageId,
+      owner_id: finalOwnerId,
+      ownerId: finalOwnerId,
+      sales_person: finalSalesPerson,
+      ...(finalOwnerId
         ? {
-            assigned_at: historicalDate || serverTimestamp(),
-            assigned_by: 'auto_assignment',
-            assignment_rule_name: autoAssignment.ruleName || autoAssignment.mode
-          }
+          assigned_at: historicalDate || serverTimestamp(),
+          assigned_by: isRepeatCustomer ? 'repeat_customer_retention' : 'auto_assignment',
+          assignment_rule_name: assignmentMode
+        }
         : {}),
       source: 'WhatsApp',
       platform: 'meta',
@@ -977,20 +1330,38 @@ export async function syncWhatsAppLeadToCrm(params: {
       last_message_channel: 'whatsapp',
       last_event_id: threadEventKey,
       qualification_status: qualificationStatus,
-      qualification_reason: `${finalResolved.matchedRuleName} • ${params.insight.suggestedAction}`,
+      qualification_reason: `${resolved.matchedRuleName} • ${params.insight.suggestedAction}`,
       suggested_reply: params.insight.suggestedReply || '',
       next_action: params.insight.suggestedAction || '',
-      notes: `${isRepeatCustomer ? `Repeat Order (previous card: ${prevStageLabel || 'Closed'})\n` : ''}Account: ${params.sessionLabel || 'WhatsApp Web'}\nRequirement: ${params.insight.requirement || params.messageText || ''}\nQuantity: ${finalResolved.requiredQuantity || params.insight.quantity || 'Not specified'}\nBudget: ${budgetStr || 'Not specified'}\nAI Action: ${params.insight.suggestedAction}`,
+      notes: `${isRepeatCustomer ? `New requirement from existing customer (Previous Order Status: ${STANDARD_CRM_STAGES.find((s) => s.id === priorData?.status)?.label || priorData?.status || 'Closed'})\n` : ''}Account: ${params.sessionLabel || 'WhatsApp Web'}\nRequirement: ${params.insight.requirement || params.messageText || ''}\nQuantity: ${resolved.requiredQuantity || params.insight.quantity || 'Not specified'}\nBudget: ${budgetStr || 'Not specified'}\nAI Action: ${params.insight.suggestedAction}`,
       is_repeat_customer: isRepeatCustomer,
       customer_lifecycle: isRepeatCustomer ? 'repeat_customer' : 'new_customer',
+      // EcoTrophy AI Sales Intelligence Fields
+      intent_tier: intentResult.tier,
+      intent_score: intentResult.score,
+      intent_reasons: intentResult.reasons,
+      fits_data: initialFits,
+      fits_score: fitsEval.score,
+      prosper_breakdown: initialProsper,
+      sales_audit: computeSalesQualityAudit(
+        {
+          name: effectiveLeadName,
+          status: resolved.stageId,
+          fits_data: initialFits,
+          fits_score: fitsEval.score,
+          prosper_breakdown: initialProsper,
+          created_at: historicalDate || now,
+        } as unknown as Lead,
+        params.messageText || ''
+      ),
       stage_history: [
         {
           from_stage: isRepeatCustomer ? 'Repeat WhatsApp Order' : 'WhatsApp Inbound',
-          to_stage: finalResolved.stageLabel,
+          to_stage: resolved.stageLabel,
           changed_by: actorId,
           changed_by_name: actorName,
           changed_at: historicalDate || now,
-          note: `${isRepeatCustomer ? 'Repeat order captured' : 'Captured'} from ${params.sessionLabel || 'WhatsApp Web'} → ${finalResolved.pipelineName} (${finalResolved.matchedRuleName})`,
+          note: `${isRepeatCustomer ? 'Repeat requirement captured' : 'Captured'} from ${params.sessionLabel || 'WhatsApp Web'} → ${resolved.pipelineName} (${resolved.matchedRuleName})`,
           notification_triggered: false
         }
       ],
@@ -1002,40 +1373,101 @@ export async function syncWhatsAppLeadToCrm(params: {
       updated_at: serverTimestamp()
     };
 
-    const leadRef = await addDoc(collection(db, 'leads'), newLeadPayload);
-    upsertCachedLeadIndex(leadRef.id, newLeadPayload as unknown as Lead);
+    // Multi-member concurrency protection: derive deterministic document ID so all logged-in team members resolve to the same doc
+    const targetLeadDocId = getDeterministicWhatsAppLeadId(
+      canonical,
+      params.remoteJid,
+      repeatOrderSourceLead
+        ? `repeat_${(historicalDate || now).toISOString().slice(0, 10).replace(/-/g, '')}`
+        : undefined
+    );
 
-    // Ensure matching Customer doc exists (deduplicated by phone) and mark repeat customers
-    if (effectiveVariants.length > 0) {
+    let finalAction: 'created' | 'updated' = 'created';
+    let leadRefId = targetLeadDocId;
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const leadDocRef = doc(db, 'leads', targetLeadDocId);
+        const existingSnap = await transaction.get(leadDocRef);
+
+        if (existingSnap.exists()) {
+          // Another team member logged into this WhatsApp number already committed the lead record!
+          finalAction = 'updated';
+          leadRefId = targetLeadDocId;
+          const serverLead = existingSnap.data() as Lead;
+
+          // Merge latest message without overwriting assigned owner or reverting stage
+          const updatePatch: Record<string, any> = {
+            updated_at: serverTimestamp(),
+            lastCustomerReplyAt: historicalDate || serverTimestamp(),
+            last_message: params.messageText || params.insight.requirement || serverLead.last_message || '',
+            last_message_channel: 'whatsapp',
+            last_event_id: threadEventKey,
+            whatsapp_session_label:
+              effectiveSessionLabel || (serverLead as any).whatsapp_session_label || 'WhatsApp Web'
+          };
+          if (resolved.requiredQuantity && !serverLead.required_quantity) {
+            updatePatch.required_quantity = resolved.requiredQuantity;
+          }
+          if (budgetStr && !serverLead.budget) {
+            updatePatch.budget = budgetStr;
+          }
+          if (numericBudget > 0 && !serverLead.value) {
+            updatePatch.value = numericBudget;
+          }
+          transaction.update(leadDocRef, stripUndefined(updatePatch));
+        } else {
+          // First team member to process this lead: atomic create
+          finalAction = 'created';
+          leadRefId = targetLeadDocId;
+          transaction.set(leadDocRef, stripUndefined(newLeadPayload));
+        }
+      });
+    } catch (txErr) {
+      console.warn('[SyncService] Transaction creation conflict, falling back to idempotent setDoc:', txErr);
+      const leadDocRef = doc(db, 'leads', targetLeadDocId);
+      await setDoc(leadDocRef, stripUndefined(newLeadPayload), { merge: true });
+      leadRefId = targetLeadDocId;
+    }
+
+    upsertCachedLeadIndex(leadRefId, newLeadPayload as unknown as Lead);
+
+    // Ensure matching Customer doc exists (deduplicated by phone)
+    if (variants.length > 0) {
       const custSnap = await getDocs(
-        query(collection(db, 'customers'), where('phone', 'in', effectiveVariants), limit(1))
+        query(collection(db, 'customers'), where('phone', 'in', variants), limit(1))
       ).catch(() => null);
       if (!custSnap || custSnap.empty) {
         await addDoc(collection(db, 'customers'), {
           name: effectiveLeadName,
-          phone: effectivePhone,
-          whatsapp_number: effectivePhone,
+          phone: canonical,
+          whatsapp_number: canonical,
           email: (params.insight.email || priorData?.email || '').trim().toLowerCase(),
-          company: params.insight.company || finalResolved.extracted.organization || priorData?.company || '',
-          billing_address: params.insight.location || finalResolved.extracted.location || priorData?.location || '',
-          type: (params.insight.company || priorData?.company) ? 'business' : 'individual',
+          company: effectiveCompany,
+          billing_address: params.insight.location || resolved.extracted.location || priorData?.location || '',
+          type: effectiveCompany ? 'business' : 'individual',
           customer_type: isRepeatCustomer ? 'repeat' : 'new',
-          notes: `Auto-added from WhatsApp (${finalResolved.pipelineName})`,
+          notes: hasIntroducedNameOrCompany
+            ? `Auto-saved contact from WhatsApp chat (${resolved.pipelineName})`
+            : `Added from WhatsApp (${resolved.pipelineName})`,
           created_at: serverTimestamp()
         }).catch(() => { });
-      } else if (isRepeatCustomer) {
+      } else {
         const custDoc = custSnap.docs[0];
-        await updateDoc(doc(db, 'customers', custDoc.id), {
-          customer_type: 'repeat',
-          updated_at: serverTimestamp()
-        }).catch(() => { });
+        const updateCustPayload: any = { updated_at: serverTimestamp() };
+        if (isRepeatCustomer) updateCustPayload.customer_type = 'repeat';
+        if (effectiveCompany && !custDoc.data().company) updateCustPayload.company = effectiveCompany;
+        if (isRealContactName(effectiveLeadName) && (!custDoc.data().name || !isRealContactName(custDoc.data().name))) {
+          updateCustPayload.name = effectiveLeadName;
+        }
+        await updateDoc(doc(db, 'customers', custDoc.id), updateCustPayload).catch(() => { });
       }
     }
 
     await syncConversationAndMessageToCrm({
-      leadId: leadRef.id,
+      leadId: leadRefId,
       leadName: effectiveLeadName,
-      phone: effectivePhone,
+      phone: canonical,
       sessionLabel: params.sessionLabel,
       messageText: params.messageText,
       insight: params.insight,
@@ -1043,11 +1475,11 @@ export async function syncWhatsAppLeadToCrm(params: {
     });
 
     await addDoc(collection(db, 'activities'), {
-      lead_id: leadRef.id,
-      leadId: leadRef.id,
+      lead_id: leadRefId,
+      leadId: leadRefId,
       type: 'whatsapp_ai_qualification',
-      title: `${isRepeatCustomer ? 'Repeat Order Lead' : 'New WhatsApp Lead'} → ${finalResolved.pipelineName}`,
-      message: `Added at stage "${finalResolved.stageLabel}". Requirement: ${params.insight.requirement || params.messageText || ''}`,
+      title: `${isRepeatCustomer ? 'Repeat Order Lead' : 'New WhatsApp Lead'} → ${resolved.pipelineName}`,
+      message: `Added at stage "${resolved.stageLabel}". Requirement: ${params.insight.requirement || params.messageText || ''}`,
       actor: actorName,
       sourceAccount: params.sessionLabel || 'WhatsApp Web',
       created_at: historicalDate || serverTimestamp(),
@@ -1055,15 +1487,15 @@ export async function syncWhatsAppLeadToCrm(params: {
     }).catch(() => { });
 
     return {
-      action: 'created',
-      leadId: leadRef.id,
+      action: finalAction,
+      leadId: leadRefId,
       leadName: effectiveLeadName,
-      pipelineId: finalResolved.pipelineId,
-      pipelineName: finalResolved.pipelineName,
-      stageId: finalResolved.stageId,
-      stageLabel: finalResolved.stageLabel,
-      assignedToId: autoAssignment.assigned ? autoAssignment.ownerId : undefined,
-      assignedToName: autoAssignment.assigned ? autoAssignment.ownerName : undefined
+      pipelineId: resolved.pipelineId,
+      pipelineName: resolved.pipelineName,
+      stageId: resolved.stageId,
+      stageLabel: resolved.stageLabel,
+      assignedToId: finalOwnerId || undefined,
+      assignedToName: finalSalesPerson || undefined
     };
   })();
 

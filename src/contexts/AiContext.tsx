@@ -7,16 +7,16 @@ import { collection, addDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { BillProSpeechEngine } from '../services/billProSpeechEngine';
 import { BillProInputEngine } from '../services/billProInputEngine';
-import { 
-    type AiChatMessage, 
-    type AiChatSession, 
-    generateChatTitle, 
-    loadLocalSessions, 
-    saveLocalSessions, 
-    syncSessionToFirestore, 
-    loadFirestoreSessions, 
-    deleteFirestoreSession, 
-    clearAllFirestoreSessions 
+import {
+    type AiChatMessage,
+    type AiChatSession,
+    generateChatTitle,
+    loadLocalSessions,
+    saveLocalSessions,
+    syncSessionToFirestore,
+    loadFirestoreSessions,
+    deleteFirestoreSession,
+    clearAllFirestoreSessions
 } from '../services/aiChatHistoryService';
 import { getLiveBusinessSnapshot, askBillProAi, executeClientSideAction } from '../services/billProAiBrain';
 
@@ -41,7 +41,7 @@ interface AiContextType {
     isOpen: boolean;
     setIsOpen: (isOpen: boolean) => void;
     toggleAi: () => void;
-    
+
     // UI/UX Mode
     interactionMode: InteractionMode;
     setInteractionMode: (mode: InteractionMode) => void;
@@ -49,7 +49,7 @@ interface AiContextType {
     // Core states
     status: 'disconnected' | 'connecting' | 'idle' | 'listening' | 'understanding' | 'working' | 'waiting_for_confirmation' | 'speaking' | 'error';
     setStatus: (status: AiContextType['status']) => void;
-    
+
     // Rive Avatar states
     avatarState: 'idle' | 'thinking' | 'warning' | 'celebrating';
     severity: 'LOW' | 'MEDIUM' | 'HIGH';
@@ -61,11 +61,11 @@ interface AiContextType {
     aiResponse: string;
     setAiResponse: (text: string) => void;
     pendingAction: PendingAction | null;
-    
+
     // Device & Architecture hooks
     capabilities: DeviceCapabilities | null;
     activeAuditThread: any | null;
-    
+
     // Methods
     confirmAction: () => void;
     cancelAction: () => void;
@@ -73,7 +73,7 @@ interface AiContextType {
     stopSession: () => void;
     sendText: (text: string) => void;
     dispatchAudit: (fieldId: string, payload: any) => Promise<void>;
-    
+
     // Message & Session History (ChatGPT-style)
     messages: AiChatMessage[];
     sessions: AiChatSession[];
@@ -95,7 +95,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     const [isOpen, setIsOpen] = useState(false);
     const [interactionMode, setInteractionMode] = useState<InteractionMode>('both');
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-    
+
     // Unified State Management
     const [status, setStatus] = useState<AiContextType['status']>('disconnected');
     const [avatarState, setAvatarState] = useState<AiContextType['avatarState']>('idle');
@@ -136,7 +136,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             const hasDisplay = window.matchMedia('(min-width: 320px)').matches;
             let hasAudioInput = false;
             let hasAudioOutput = !!(window.AudioContext || (window as any).webkitAudioContext);
-            
+
             try {
                 const devices = await navigator.mediaDevices.enumerateDevices();
                 hasAudioInput = devices.some(device => device.kind === 'audioinput');
@@ -146,9 +146,9 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
             let deviceClass: DeviceClass = 'Class_C';
             if (hasDisplay && hasAudioInput && hasAudioOutput) {
-                deviceClass = 'Class_A'; 
+                deviceClass = 'Class_A';
             } else if (!hasDisplay && hasAudioInput && hasAudioOutput) {
-                deviceClass = 'Class_B'; 
+                deviceClass = 'Class_B';
             }
 
             setCapabilities({ deviceClass, hasAudioInput, hasAudioOutput, hasDisplay });
@@ -251,7 +251,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const existing = prevSessions[sessionIndex];
                 const updatedMessages = [...existing.messages, chatMsg];
                 const isFirstUser = existing.messages.filter(m => m.type === 'user').length === 0 && msg.type === 'user';
-                
+
                 targetSession = {
                     ...existing,
                     title: (isFirstUser || existing.title === 'New Conversation') ? generateChatTitle(msg.text) : existing.title,
@@ -264,7 +264,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 const newId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
                 activeSessionIdRef.current = newId;
                 setActiveSessionId(newId);
-                
+
                 targetSession = {
                     id: newId,
                     title: msg.type === 'user' ? generateChatTitle(msg.text) : 'Bill Pro Conversation',
@@ -371,7 +371,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     // 3. Local STT & TTS Initialization
     const startSession = async () => {
         if (!user || !dbUser || !capabilities) return;
-        
+
         setStatus('idle');
         setAvatarState('idle');
 
@@ -380,9 +380,9 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         }
         if (!inputEngineRef.current) {
             inputEngineRef.current = new BillProInputEngine();
-            inputEngineRef.current.setLanguage('en-IN'); 
+            inputEngineRef.current.setLanguage('en-IN');
         }
-        
+
         startListeningLoop();
     };
 
@@ -399,7 +399,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         if (!capabilities) return;
         setStatus('working');
         setAvatarState('thinking');
-        
+
         // Stop listening while thinking
         inputEngineRef.current?.stop();
 
@@ -415,7 +415,7 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
             try {
                 const functions = getFunctions(app, 'us-central1');
                 const gateway = httpsCallable(functions, 'executeBillProAgentTask');
-                
+
                 const promptPayload = JSON.stringify({
                     meta: {
                         deviceClass: capabilities.deviceClass,
@@ -438,11 +438,17 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 if (data?.success && data?.text) {
                     try {
                         parsedObj = JSON.parse(data.text);
-                    } catch(e) {}
+                    } catch (e) { }
 
                     const msg = (parsedObj?.message || data.text || '').toLowerCase();
-                    // If cloud function replied with an excuse like "don't have a way" or "can't tell you the total count", let client AI Brain handle it with exact live data!
-                    if (!msg.includes("don't have a way") && !msg.includes("can't tell you the total count")) {
+                    // If cloud function replied with an excuse or disclaimer like "doesn't currently support", let client AI Brain handle it with exact live financial data!
+                    if (
+                        !msg.includes("don't have a way") &&
+                        !msg.includes("can't tell you the total count") &&
+                        !msg.includes("doesn't currently support") &&
+                        !msg.includes("does not support") &&
+                        !msg.includes("not currently support")
+                    ) {
                         responseText = parsedObj?.message || data.text;
                         gatewaySucceeded = true;
                     }
@@ -458,7 +464,8 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     action: aiRes.action,
                     payload: aiRes.payload,
                     target: aiRes.target,
-                    message: aiRes.message
+                    message: aiRes.message,
+                    spokenText: aiRes.spokenText
                 };
                 responseText = aiRes.message;
             }
@@ -480,6 +487,9 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                 } else if (parsedObj.action === "ADD_EXPENSE" && parsedObj.payload) {
                     const res = await executeClientSideAction('ADD_EXPENSE', parsedObj.payload, navigate);
                     responseText = parsedObj.message || res.message;
+                } else if (parsedObj.action === "SAVE_BUDGET" && parsedObj.payload) {
+                    const res = await executeClientSideAction('SAVE_BUDGET', parsedObj.payload, navigate);
+                    responseText = parsedObj.message || res.message;
                 } else if ((parsedObj.action === "PREFILL_DOCUMENT" || parsedObj.action === "CREATE_QUOTATION" || parsedObj.action === "CREATE_INVOICE") && (parsedObj.target || parsedObj.payload)) {
                     const target = parsedObj.target || (parsedObj.payload?.documentType === 'invoice' ? '/invoices/new' : '/quotations/new');
                     navigate(target, { state: { prefillData: parsedObj.payload } });
@@ -489,8 +499,8 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     const { getDocs, updateDoc, doc, Timestamp } = await import('firebase/firestore');
                     try {
                         const invSnap = await getDocs(collection(db, 'invoices'));
-                        const invoice = invSnap.docs.map(d=>({id: d.id, ...(d.data() as any)})).find((i: any) => i.number?.toString().includes(invoiceNumber) || i.invoice_number?.toString().includes(invoiceNumber));
-                        
+                        const invoice = invSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).find((i: any) => i.number?.toString().includes(invoiceNumber) || i.invoice_number?.toString().includes(invoiceNumber));
+
                         if (invoice) {
                             await updateDoc(doc(db, 'invoices', invoice.id), {
                                 payment_status: 'paid',
@@ -517,8 +527,8 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     const { getDocs, updateDoc, doc } = await import('firebase/firestore');
                     try {
                         const prodSnap = await getDocs(collection(db, 'products'));
-                        const product = prodSnap.docs.map(d=>({id: d.id, ...(d.data() as any)})).find((p: any) => p.name?.toLowerCase().includes(productSearch?.toLowerCase()));
-                        
+                        const product = prodSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).find((p: any) => p.name?.toLowerCase().includes(productSearch?.toLowerCase()));
+
                         if (product) {
                             const newQuantity = (product.stockQuantity || 0) + (parseInt(quantityToAdd) || 0);
                             await updateDoc(doc(db, 'products', product.id), {
@@ -536,15 +546,15 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
                     const { getDocs } = await import('firebase/firestore');
                     try {
                         const customersSnap = await getDocs(collection(db, 'customers'));
-                        const customer = customersSnap.docs.map(d=>({id: d.id, ...(d.data() as any)})).find((c: any) => c.name.toLowerCase().includes((customerSearch || '').toLowerCase()));
-                        
+                        const customer = customersSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).find((c: any) => c.name.toLowerCase().includes((customerSearch || '').toLowerCase()));
+
                         if (customer) {
                             const collectionName = (documentType === 'invoice' || documentType === 'invoices') ? 'invoices' : 'quotations';
                             const docsSnap = await getDocs(collection(db, collectionName));
-                            const docsList = docsSnap.docs.map(d=>({id: d.id, ...(d.data() as any)})).filter((d:any) => d.customer_id === customer.id);
-                            
+                            const docsList = docsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })).filter((d: any) => d.customer_id === customer.id);
+
                             if (docsList.length > 0) {
-                                const latestDoc = docsList.sort((a:any, b:any) => b.created_at.toMillis() - a.created_at.toMillis())[0];
+                                const latestDoc = docsList.sort((a: any, b: any) => b.created_at.toMillis() - a.created_at.toMillis())[0];
                                 const { downloadPDF } = await import('../utils/pdfGenerator');
                                 const settingsSnap = await getDocs(collection(db, 'settings'));
                                 const settings = settingsSnap.docs[0]?.data() as any;
@@ -564,7 +574,8 @@ export const AiProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
             setAiResponse(responseText);
             appendMessage({ type: 'ai', text: responseText });
-            conditionalSpeak(responseText);
+            const speechText = parsedObj?.spokenText || responseText;
+            conditionalSpeak(speechText);
 
         } catch (error) {
             console.error("Audit dispatch failed:", error);

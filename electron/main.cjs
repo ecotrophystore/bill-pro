@@ -130,6 +130,17 @@ function startWindowControlServer() {
       setTimeout(() => app.quit(), 50);
       return;
     }
+    if (req.method === 'POST' && reqPath === '/reload') {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.reloadIgnoringCache();
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, reloaded: true }));
+        return;
+      }
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: false, error: 'Window not open' }));
+      return;
+    }
     if (req.method === 'POST' && reqPath === '/send-whatsapp') {
       let body = '';
       req.on('data', (chunk) => {
@@ -308,6 +319,17 @@ async function createMainWindow() {
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
     mainWindow?.focus();
+  });
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if ((input.control || input.meta) && input.key.toLowerCase() === 'r') {
+      mainWindow?.webContents?.reloadIgnoringCache();
+      event.preventDefault();
+    }
+    if (input.key === 'F5') {
+      mainWindow?.webContents?.reloadIgnoringCache();
+      event.preventDefault();
+    }
   });
 
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {

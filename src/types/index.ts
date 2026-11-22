@@ -14,7 +14,7 @@ export interface PaymentRecord {
   created_by: string;
 }
 
-export type UserRole = 'admin' | 'hr' | 'sales' | 'user' | 'accounts';
+export type UserRole = 'admin' | 'hr' | 'sales' | 'user' | 'accounts' | 'design' | 'production';
 
 export interface User {
   id: string;
@@ -89,6 +89,31 @@ export interface LineItem {
   unit?: string;
 }
 
+export interface DocumentVersion {
+  versionNumber: number;
+  versionLabel?: string;
+  createdAt?: any;
+  createdBy?: string;
+  notes?: string;
+  data: {
+    items: LineItem[];
+    subtotal: number;
+    tax_total: number;
+    grand_total: number;
+    discount_percent?: number;
+    discount_amount?: number;
+    charge_amount?: number;
+    advance_amount?: number;
+    advance_payment_method?: string;
+    advance_payment_date?: any;
+    advance_reference_number?: string;
+    notes?: string;
+    terms?: string;
+    custom_date?: string;
+    [key: string]: any;
+  };
+}
+
 export interface Quotation {
   id: string;
   number: string;
@@ -110,6 +135,8 @@ export interface Quotation {
   terms?: string;
   notes?: string;
   validity_days?: number;
+  version?: number;
+  versions?: DocumentVersion[];
   conversion_status?: 'converted';
   convertedToProforma?: boolean;
   linked_proforma_id?: string;
@@ -163,6 +190,8 @@ export interface ProformaInvoice extends Omit<Invoice, 'number' | 'status'> {
   sourceDocumentType?: string;
   sourceQuotationId?: string;
   sourceQuotationNumber?: string;
+  version?: number;
+  versions?: DocumentVersion[];
 }
 
 export interface PurchaseItem {
@@ -408,6 +437,40 @@ export interface StageMessageConfig {
   move_prompt_mode?: StageMovePromptMode;
 }
 
+export interface LeadMockup {
+  id: string;
+  version: number;
+  url: string;
+  filename: string;
+  uploaded_by: string;
+  uploaded_at: string;
+  notes?: string;
+  status: 'draft' | 'shared_with_client' | 'approved' | 'rejected';
+}
+
+export interface ProductionBatchStage {
+  id: string;
+  name: string;
+  target_quantity: number;
+  completed_quantity: number;
+  unit?: string;
+  notes?: string;
+  order: number;
+}
+
+export interface ProductionProgressLog {
+  id: string;
+  stage_id: string;
+  stage_name: string;
+  quantity: number;
+  cumulative_after: number;
+  operator_name: string;
+  operator_id?: string;
+  shift?: string;
+  timestamp: string;
+  notes?: string;
+}
+
 export interface Lead {
   id: string;
   name: string;
@@ -423,7 +486,48 @@ export interface Lead {
   trophy_size?: string;
   sales_person?: string;
   design_person?: string;
+  production_person?: string;
+  artwork_url?: string;
+  design_notes?: string;
+  vector_file_url?: string;
+  design_status?: 'pending_brief' | 'in_progress' | 'proof_sent' | 'revisions_requested' | 'approved';
+  design_stage_id?: string;
+  mockups?: LeadMockup[];
+  // Creative / Design Brief Specifications
+  concept?: string;
+  concept_notes?: string;
+  brand_colors?: string;
+  reference_designs?: string[];
+  shapes?: string;
+  theme?: string;
+  material?: string;
+  model_variants?: string;
+  design_deadline?: string;
+  production_deadline?: string;
+  production_stage_id?: string;
+  production_status?: 'pending' | 'in_production' | 'qc_passed' | 'qc_failed' | 'packed' | 'dispatched';
+  qc_photo_url?: string;
+  qc_notes?: string;
+  dispatch_date?: string;
+  dispatch_courier?: string;
+  dispatch_awb?: string;
   tracking_number?: string;
+  // Dedicated Production & Manufacturing Specifications
+  materials_stock_status?: 'in_stock' | 'need_to_buy' | 'partially_available' | 'ordered';
+  materials_to_buy?: string;
+  trophy_materials_used?: string;
+  single_box_size?: string;
+  master_box_size?: string;
+  delivery_mode?: 'courier' | 'bus' | 'flight' | 'train' | 'local_hand_delivery' | 'customer_pickup';
+  delivery_details?: string;
+  delivery_location?: string;
+  prototype_status?: 'not_required' | 'needed' | 'sample_in_progress' | 'sample_ready' | 'client_approved';
+  prototype_notes?: string;
+  prototype_photo_url?: string;
+  // Project-based Quantity Production Tracking
+  production_batch_stages?: ProductionBatchStage[];
+  production_batch_logs?: ProductionProgressLog[];
+  production_overall_progress?: number;
   source: string;
   platform: LeadPlatform;
   campaign?: string;
@@ -483,6 +587,8 @@ export interface Lead {
   last_message_channel?: 'whatsapp' | 'facebook_messenger' | 'facebook_lead_ad' | 'instagram' | 'email';
   last_message_time?: any;
   // Notes & Reminder metadata
+  notes?: string;
+  summary?: string;
   notes_count?: number;
   active_reminder?: {
     note_id?: string;
@@ -502,6 +608,11 @@ export interface Lead {
   prosper_breakdown?: PROSPERBreakdown;
   lost_intelligence?: LostLeadIntelligence;
   contextual_guide_dismissed?: boolean;
+  contextual_probing_questions?: Array<{
+    english: string;
+    tanglish: string;
+    purpose: string;
+  }>;
 }
 
 export interface FITSQualificationData {
@@ -716,6 +827,7 @@ export interface Pipeline {
   name: string;
   scenario?: string;
   is_default?: boolean;
+  pipeline_type?: 'sales' | 'design' | 'production';
   stages: PipelineStage[];
   created_at: Timestamp;
   updated_at?: Timestamp;
@@ -723,6 +835,42 @@ export interface Pipeline {
   welcome_stage_id?: string;
   welcome_template_id?: string;
 }
+
+export const DEFAULT_DESIGN_STAGES: PipelineStage[] = [
+  { id: 'concept_creation', label: '1. Concept Creation' },
+  { id: 'mockup_drafting', label: '2. Mockup Drafting (v1)' },
+  { id: 'client_proofing', label: '3. Client Proofing' },
+  { id: 'revision_needed', label: '4. Revision Needed' },
+  { id: 'final_artwork_ready', label: '5. Final Artwork / Vector Ready' },
+];
+
+export const DEFAULT_DESIGN_PIPELINE: Pipeline = {
+  id: 'design_pipeline',
+  name: '🎨 Design Team Pipeline',
+  scenario: 'Artwork, Concepts & Mockups',
+  is_default: false,
+  pipeline_type: 'design',
+  stages: DEFAULT_DESIGN_STAGES,
+  created_at: new Date() as any,
+};
+
+export const DEFAULT_PRODUCTION_STAGES: PipelineStage[] = [
+  { id: 'material_prep', label: '1. Material Prep & Cutting' },
+  { id: 'uv_laser_engraving', label: '2. UV Print & Laser Engraving' },
+  { id: 'assembly_polish', label: '3. Assembly & Polishing' },
+  { id: 'quality_check', label: '4. Quality Inspection (QC)' },
+  { id: 'ready_for_dispatch', label: '5. Packing & Ready for Dispatch' },
+];
+
+export const DEFAULT_PRODUCTION_PIPELINE: Pipeline = {
+  id: 'production_pipeline',
+  name: '🏭 Production Team Pipeline',
+  scenario: 'Cutting, Engraving, Assembly & QC',
+  is_default: false,
+  pipeline_type: 'production',
+  stages: DEFAULT_PRODUCTION_STAGES,
+  created_at: new Date() as any,
+};
 
 export const ECOTROPHY_SALES_STAGES: PipelineStage[] = [
   { id: 'new_enquiry', label: '1. New Enquiry' },
@@ -787,6 +935,8 @@ export const DEFAULT_QUANTITY_PIPELINES: Pipeline[] = [
     stages: STANDARD_CRM_STAGES,
     created_at: new Date() as any,
   },
+  DEFAULT_DESIGN_PIPELINE,
+  DEFAULT_PRODUCTION_PIPELINE,
 ];
 
 export interface Contact {
@@ -898,6 +1048,17 @@ export const CRM_ROLE_PERMISSIONS: Record<UserRole, CRMPermissionAction[]> = {
     'assign_lead',
     'move_stage',
     'send_message',
+  ],
+  design: [
+    'view_lead',
+    'edit_lead',
+    'move_stage',
+    'send_message',
+  ],
+  production: [
+    'view_lead',
+    'edit_lead',
+    'move_stage',
   ],
   user: [],
 };

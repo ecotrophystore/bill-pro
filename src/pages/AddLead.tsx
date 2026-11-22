@@ -27,6 +27,9 @@ export default function AddLead() {
   const [selectedOwnerId, setSelectedOwnerId] = useState<string>('auto');
   const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [designPerson, setDesignPerson] = useState('');
+  const [productionPerson, setProductionPerson] = useState('');
+  const [artworkUrl, setArtworkUrl] = useState('');
+  const [designNotes, setDesignNotes] = useState('');
   const [campaign, setCampaign] = useState('');
   const [source, setSource] = useState('Manual');
   const [platform, setPlatform] = useState<LeadPlatform>('manual');
@@ -41,11 +44,10 @@ export default function AddLead() {
   const isAdmin = isAdminUser(dbUser);
 
   useEffect(() => {
-    if (!isAdmin) return;
     fetchTeamUsersForAssignment()
       .then(setTeamUsers)
-      .catch(() => {});
-  }, [isAdmin]);
+      .catch(() => { });
+  }, []);
 
   useEffect(() => {
     if (!db) return;
@@ -174,6 +176,9 @@ export default function AddLead() {
         sales_person: resolvedOwnerName,
         ...(resolvedOwnerId ? { assigned_at: serverTimestamp(), assignment_rule_name: assignmentRuleUsed } : {}),
         design_person: designPerson.trim(),
+        production_person: productionPerson.trim(),
+        artwork_url: artworkUrl.trim(),
+        design_notes: designNotes.trim(),
         source: source.trim() || 'Manual',
         platform: platform || 'manual',
         campaign: campaign.trim(),
@@ -235,6 +240,9 @@ export default function AddLead() {
       setSalesPerson('');
       setSelectedOwnerId('auto');
       setDesignPerson('');
+      setProductionPerson('');
+      setArtworkUrl('');
+      setDesignNotes('');
       setCampaign('');
       setMessage('');
       setManualPipelineOverridden(false);
@@ -427,12 +435,67 @@ export default function AddLead() {
           )}
 
           <div className="space-y-1.5">
-            <label className="block font-bold text-primary-dark">Assigned Design Person</label>
-            <input
-              className="neo-input w-full"
+            <label className="block font-bold text-primary-dark">Assigned Designer</label>
+            <select
+              className="neo-input w-full font-semibold"
               value={designPerson}
               onChange={(e) => setDesignPerson(e.target.value)}
-              placeholder="e.g. Karthik"
+            >
+              <option value="">-- Unassigned (Select Designer) --</option>
+              {teamUsers
+                .filter((u) => u.role === 'design' && u.is_active !== false)
+                .map((u) => (
+                  <option key={u.id} value={u.name || u.email}>
+                    🎨 {u.name || u.email}
+                  </option>
+                ))}
+              {designPerson &&
+                !teamUsers.some(
+                  (u) => u.role === 'design' && (u.name === designPerson || u.email === designPerson)
+                ) && <option value={designPerson}>{designPerson} (Manual)</option>}
+            </select>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block font-bold text-primary-dark">Assigned Production Staff</label>
+            <select
+              className="neo-input w-full font-semibold"
+              value={productionPerson}
+              onChange={(e) => setProductionPerson(e.target.value)}
+            >
+              <option value="">-- Unassigned (Select Production) --</option>
+              {teamUsers
+                .filter((u) => u.role === 'production' && u.is_active !== false)
+                .map((u) => (
+                  <option key={u.id} value={u.name || u.email}>
+                    ⚙️ {u.name || u.email}
+                  </option>
+                ))}
+              {productionPerson &&
+                !teamUsers.some(
+                  (u) => u.role === 'production' && (u.name === productionPerson || u.email === productionPerson)
+                ) && <option value={productionPerson}>{productionPerson} (Manual)</option>}
+            </select>
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="block font-bold text-primary-dark">Customer Logo / Artwork Link (Optional)</label>
+            <input
+              type="url"
+              className="neo-input w-full font-mono text-xs"
+              value={artworkUrl}
+              onChange={(e) => setArtworkUrl(e.target.value)}
+              placeholder="e.g. Google Drive folder or vector file link"
+            />
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="block font-bold text-primary-dark">Engraving Text / Design Notes (Optional)</label>
+            <textarea
+              className="neo-input w-full min-h-[60px] resize-y text-xs"
+              value={designNotes}
+              onChange={(e) => setDesignNotes(e.target.value)}
+              placeholder="Customer award wording, recipient names, or special fabrication instructions..."
             />
           </div>
 

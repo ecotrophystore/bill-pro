@@ -96,6 +96,7 @@ export default function PipelineSettingsTab() {
             if (def.id === 'small_order' && pName.includes('small')) return true;
             if (def.id === 'regular_order' && pName.includes('regular')) return true;
             if (def.id === 'bulk_order' && pName.includes('bulk')) return true;
+            if (def.id === 'design_pipeline' && (pName.includes('design') || p.id === 'design_pipeline')) return true;
             return pName === def.name.toLowerCase().trim();
           });
           if (!hasMatch) {

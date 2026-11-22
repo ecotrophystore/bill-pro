@@ -7,7 +7,8 @@ import { processInboundWhatsAppMessage } from '../lib/whatsappInboundProcessor';
 import {
   fetchAllSessions,
   subscribeToWhatsAppEvents,
-  type SessionInfo
+  type SessionInfo,
+  type AiLeadInsight
 } from '../services/whatsappMultiSessionService';
 import {
   getAutoCrmSyncEnabled,
@@ -48,9 +49,7 @@ export function useWhatsAppAutoProcessor() {
       insight: any;
     }) => {
       const { sessionId, remoteJid, insight } = payload;
-      if (!insight || insight.isBusinessLead !== true) return;
-
-      const dedupeKey = `${sessionId}:${remoteJid}:${insight.analyzedAt || ''}`;
+      const dedupeKey = `${sessionId}:${remoteJid}:${insight?.analyzedAt || ''}:${(payload.messageText || '').slice(0, 30)}`;
       if (syncedSseKeys.has(dedupeKey)) return;
       syncedSseKeys.add(dedupeKey);
 
@@ -64,28 +63,61 @@ export function useWhatsAppAutoProcessor() {
           matchedSession = sessionsByIdRef.current[sessionId];
         }
 
+        const fallbackInsight: AiLeadInsight = {
+          leadName: payload.name || payload.phone || 'WhatsApp Contact',
+          company: '',
+          phone: payload.phone || '',
+          requirement: payload.messageText || '',
+          quantity: '',
+          budget: '',
+          urgency: 'medium',
+          stage: 'new',
+          isBusinessLead: false,
+          suggestedAction: 'Collect requirements from contact',
+          suggestedReply: '',
+          analyzedAt: Date.now()
+        };
+
+        const effectiveInsight = insight || fallbackInsight;
+
         const outcome = await syncWhatsAppLeadToCrm({
           sessionId,
           sessionLabel: payload.sessionLabel || matchedSession?.label,
           sourceWhatsappNumber: matchedSession?.phoneNumber || '',
           remoteJid,
-          phone: payload.phone || insight.phone,
-          name: payload.name || insight.leadName,
-          messageText: payload.messageText || insight.requirement,
-          insight,
+          phone: payload.phone || effectiveInsight.phone,
+          name: payload.name || effectiveInsight.leadName,
+          messageText: payload.messageText || effectiveInsight.requirement,
+          insight: effectiveInsight,
           forceCreate: false,
           triggeredBy: 'auto'
         });
 
         if (outcome.action === 'created') {
           toast.success(
-            `New WhatsApp Lead added: ${outcome.leadName} → ${outcome.pipelineName} (${outcome.stageLabel})`,
+            `New WhatsApp Contact & Lead saved: ${outcome.leadName} → ${outcome.pipelineName} (${outcome.stageLabel})`,
             { duration: 5000 }
           );
         } else if (outcome.action === 'updated') {
           toast.success(
             `WhatsApp Lead updated: ${outcome.leadName} (${outcome.pipelineName} • ${outcome.stageLabel})`,
             { duration: 4000 }
+          );
+        } else if (outcome.action === 'skipped' && outcome.reason?.includes('Waiting for user')) {
+          // Trigger the interactive approval modal across all active screens to save contact
+          window.dispatchEvent(
+            new CustomEvent('ecobill:whatsapp-confirm-lead', {
+              detail: {
+                sessionId,
+                remoteJid,
+                phone: payload.phone || effectiveInsight.phone,
+                name: payload.name || effectiveInsight.leadName || outcome.leadName,
+                messageText: payload.messageText || effectiveInsight.requirement,
+                sessionLabel: payload.sessionLabel || matchedSession?.label,
+                insight: effectiveInsight,
+                messageTimestamp: Date.now()
+              }
+            })
           );
         }
       } catch (err) {
@@ -123,6 +155,38 @@ export function useWhatsAppAutoProcessor() {
           },
           onSessionUpdate: (session) => {
             sessionsByIdRef.current[session.id] = session;
+          },
+          onIncomingMessage: (data) => {
+            const { message, sessionId, remoteJid, conversation } = data;
+            // Ignore messages sent by ourselves or group/newsletter messages
+            if (message.fromMe || remoteJid.endsWith('@g.us') || remoteJid.includes('status') || remoteJid.includes('newsletter')) return;
+
+            const text = (message.text || '').trim();
+            if (!text) return;
+
+            // Trigger lead evaluation and prompt approval if non-requirement chat
+            handleDetectedLead({
+              sessionId,
+              remoteJid,
+              phone: message.senderPhone || conversation?.phone,
+              name: message.senderName || conversation?.name,
+              sessionLabel: conversation?.sessionLabel,
+              messageText: text,
+              insight: conversation?.insight || {
+                leadName: message.senderName || conversation?.name || 'Customer',
+                company: '',
+                phone: message.senderPhone || conversation?.phone || '',
+                requirement: text,
+                quantity: '',
+                budget: '',
+                urgency: 'medium',
+                stage: 'new',
+                isBusinessLead: false,
+                suggestedAction: 'Collect requirements from contact',
+                suggestedReply: '',
+                analyzedAt: Date.now()
+              }
+            });
           },
           onLeadDetected: (data) => {
             handleDetectedLead(data);

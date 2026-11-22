@@ -23,7 +23,9 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
+import { ManagerSalesIntelligenceView } from "../components/CRM/ManagerSalesIntelligenceView";
 import { db } from "../lib/firebase";
 import type { Lead, LeadActivity, Pipeline } from "../types";
 import { STANDARD_CRM_STAGES, DEFAULT_QUANTITY_PIPELINES } from "../types";
@@ -57,6 +59,7 @@ export default function CRMDashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>("all");
+  const [viewMode, setViewMode] = useState<'analytics' | 'ai_sales_intelligence'>('analytics');
   const [recentActivities, setRecentActivities] = useState<LeadActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -276,7 +279,38 @@ export default function CRMDashboard() {
         </div>
       </div>
 
-      {/* Pipeline Selector Tab Bar */}
+      {/* Main View Mode Selector (Standard Analytics vs AI Sales Intelligence) */}
+      <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-2">
+        <button
+          type="button"
+          onClick={() => setViewMode('analytics')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            viewMode === 'analytics'
+              ? 'bg-primary text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+          }`}
+        >
+          <BarChart3 size={14} /> CRM Overview & Pipeline Analytics
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setViewMode('ai_sales_intelligence')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+            viewMode === 'ai_sales_intelligence'
+              ? 'bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-sm'
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+          }`}
+        >
+          <Sparkles size={14} /> AI Sales Intelligence & Audit (EcoTrophy)
+        </button>
+      </div>
+
+      {viewMode === 'ai_sales_intelligence' ? (
+        <ManagerSalesIntelligenceView leads={filteredLeads} />
+      ) : (
+        <>
+          {/* Pipeline Selector Tab Bar */}
       <div className="flex items-center gap-2 overflow-x-auto p-1.5 bg-transparent rounded-2xl border border-shadow-darker/10">
         <button
           type="button"
@@ -584,6 +618,8 @@ export default function CRMDashboard() {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

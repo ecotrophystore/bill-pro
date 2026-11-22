@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
-import { X, Upload, FileText, Loader2, Calendar } from 'lucide-react';
+import { X, Upload, FileText, Loader2, Calendar, Key, Save } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { db, auth } from '../../lib/firebase';
 import { collection, addDoc, getDocs, query, where, Timestamp, writeBatch, doc } from 'firebase/firestore';
-import { extractDataFromDocument } from '../../services/ai';
+import { extractDataFromDocument, getApiKey, setApiKey } from '../../services/ai';
 import { parseAnyDate, toMonthKey } from '../../utils/reconciliationEngine';
 
 export interface StatementUploadResult {
@@ -92,6 +92,8 @@ export default function StatementUploadModal({
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -272,7 +274,7 @@ export default function StatementUploadModal({
             setPeriodFrom(fmtIso(parsed[0].date));
             setPeriodTo(fmtIso(parsed[parsed.length - 1].date));
           }
-        } catch {}
+        } catch { }
       };
       reader.readAsArrayBuffer(selectedFile);
     }
@@ -328,16 +330,55 @@ export default function StatementUploadModal({
         };
         reader.readAsArrayBuffer(file);
       } else if (ext === 'pdf') {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+
+          // 1. Attempt instant offline text extraction directly from electronic PDF (HDFC, ICICI, SBI, Axis, etc.)
+          const { extractLinesFromPdf, parseBankStatementTextLines } = await import('../../utils/pdfStatementParser');
+          const lines = await extractLinesFromPdf(arrayBuffer);
+          const directRows = parseBankStatementTextLines(lines);
+
+          if (directRows.length > 0) {
+            console.log(`[StatementUpload] Successfully parsed ${directRows.length} transactions directly from PDF text streams without external AI call!`);
+            await processAndSaveTransactions(directRows);
+            return;
+          }
+        } catch (pdfErr) {
+          console.warn('[StatementUpload] Native PDF text parsing fell back to AI OCR:', pdfErr);
+        }
+
+        // 2. If PDF has no digital text (e.g. scanned image / photo), fall back to Gemini AI OCR
         const reader = new FileReader();
         reader.onload = async (e) => {
           try {
             const base64Url = e.target?.result as string;
             const base64Data = base64Url.split(',')[1];
             const data = await extractDataFromDocument(base64Data, file.type || 'application/pdf', 'statement');
-            if (!data?.transactions) throw new Error('Failed to extract transactions from PDF.');
-            const validRows = (data.transactions as any[])
+
+            const rawList = Array.isArray(data)
+              ? data
+              : Array.isArray(data?.transactions)
+                ? data.transactions
+                : Array.isArray(data?.statement)
+                  ? data.statement
+                  : Array.isArray(data?.data)
+                    ? data.data
+                    : Array.isArray(data?.items)
+                      ? data.items
+                      : null;
+
+            if (!rawList || rawList.length === 0) {
+              throw new Error('Failed to extract transactions from PDF. Gemini returned no transaction list.');
+            }
+
+            const validRows = rawList
               .map(normalizeParsedRow)
               .filter(Boolean) as NonNullable<ReturnType<typeof normalizeParsedRow>>[];
+
+            if (validRows.length === 0) {
+              throw new Error('Parsed 0 valid transactions from the PDF. Please verify that the statement contains date, narration/description, and credit/debit amounts.');
+            }
+
             await processAndSaveTransactions(validRows);
           } catch (err: any) {
             setError(err.message);
@@ -365,15 +406,41 @@ export default function StatementUploadModal({
               Imports all transactions and automatically compares them against bills.
             </p>
           </div>
-          <button onClick={onClose} className="text-secondary hover:text-primary-dark transition-colors">
-            <X size={22} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setApiKeyInput(getApiKey() || '');
+                setShowApiKeyModal(true);
+              }}
+              className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-primary/10 transition-colors"
+              title="Configure Gemini API Key for PDF extraction"
+            >
+              <Key size={18} />
+            </button>
+            <button onClick={onClose} className="text-secondary hover:text-primary-dark transition-colors">
+              <X size={22} />
+            </button>
+          </div>
         </div>
 
         <div className="p-6 space-y-4">
           {error && (
-            <div className="p-3.5 bg-surface shadow-neo-surface text-error rounded-card text-xs font-semibold border border-error/20">
-              {error}
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-800 rounded-xl text-xs space-y-2">
+              <div className="font-semibold">{error}</div>
+              {/gemini|api key|ai error/i.test(error) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApiKeyInput(getApiKey() || '');
+                    setShowApiKeyModal(true);
+                  }}
+                  className="neo-btn text-xs px-3 py-1.5 font-bold inline-flex items-center gap-1.5 bg-primary text-white hover:bg-primary-dark shadow-sm transition-colors"
+                >
+                  <Key size={13} />
+                  Configure Working Gemini API Key
+                </button>
+              )}
             </div>
           )}
 
@@ -473,6 +540,86 @@ export default function StatementUploadModal({
           </div>
         </div>
       </div>
+
+      {/* GEMINI API KEY MODAL */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-md bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-primary/10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary-dark">
+                  <Key size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary-dark">Configure Gemini API Key</h3>
+                  <p className="text-[11px] text-secondary">Required for bank statement PDF extraction</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-amber-500/10 rounded-xl text-xs text-secondary leading-relaxed border border-amber-500/20">
+                A valid Google Gemini API key is needed to parse statement PDFs.
+                <br />
+                Get a free API key at{' '}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary font-bold underline"
+                >
+                  aistudio.google.com
+                </a>{' '}
+                and paste it below. It is saved in your browser and used automatically.
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Gemini API Key</label>
+                <input
+                  type="password"
+                  placeholder="AIzaSy..."
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="neo-input w-full font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-shadow-dark/20 bg-surface flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="neo-btn text-xs py-2 px-4 font-semibold text-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!apiKeyInput.trim()) {
+                    alert('Please enter a valid Gemini API key.');
+                    return;
+                  }
+                  setApiKey(apiKeyInput.trim());
+                  setShowApiKeyModal(false);
+                  setError(null);
+                  alert('Gemini API key saved! Please click "Upload & Process" again.');
+                }}
+                className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-5 font-bold shadow-md"
+              >
+                <Save size={15} /> Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

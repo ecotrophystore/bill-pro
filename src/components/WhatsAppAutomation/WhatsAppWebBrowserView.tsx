@@ -102,6 +102,7 @@ interface ActiveWebChatSnapshot {
   contactName: string;
   headerSubtitle: string;
   phone: string;
+  pushname?: string;
   aboutText?: string;
   isGroup?: boolean;
   isSystemBot?: boolean;
@@ -110,6 +111,7 @@ interface ActiveWebChatSnapshot {
 
 interface UnreadSidebarEvent {
   contactName: string;
+  pushname?: string;
   phone: string;
   previewText: string;
   timeHint?: string;
@@ -133,6 +135,7 @@ interface CrmSyncFeedItem {
 interface BulkScannedChat {
   key: string;
   contactName: string;
+  pushname?: string;
   phone: string;
   latestText: string;
   inboundHistory: Array<{ direction: 'inbound' | 'outbound'; content: string }>;
@@ -351,6 +354,7 @@ export function WhatsAppWebBrowserView({
   const ipcMessageHandlerRef = useRef<(tab: BrowserTab, event: Event) => void>(() => { });
   const syncedMsgKeysRef = useRef<Set<string>>(loadPersistedSyncKeys());
   const syncQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingOfflineQueueRef = useRef<Array<() => Promise<void>>>([]);
   const activeTabIdRef = useRef(activeTabId);
   const autoCrmRef = useRef(autoCrmEnabled);
   const welcomeKitConfigRef = useRef(welcomeKitConfig);
@@ -390,10 +394,10 @@ export function WhatsAppWebBrowserView({
 
   useEffect(() => {
     const initialTimer = setTimeout(() => {
-      noReplySweepFnRef.current().catch(() => {});
+      noReplySweepFnRef.current().catch(() => { });
     }, 15000);
     const interval = setInterval(() => {
-      noReplySweepFnRef.current().catch(() => {});
+      noReplySweepFnRef.current().catch(() => { });
     }, 5 * 60 * 1000);
     return () => {
       clearTimeout(initialTimer);
@@ -453,7 +457,7 @@ export function WhatsAppWebBrowserView({
 
       // Serialize outbound sends per WhatsApp Web tab so concurrent automations & stage drags never collide
       const nextQueue = prevQueue
-        .catch(() => {})
+        .catch(() => { })
         .then(
           () =>
             new Promise<void>((releaseTabQueue) => {
@@ -673,7 +677,13 @@ export function WhatsAppWebBrowserView({
     });
   };
 
-  const enqueueAutoSync = (task: () => Promise<void>) => {
+  const enqueueAutoSync = (task: () => Promise<void>, tabId?: string) => {
+    // If WhatsApp Web is currently offline or disconnected, queue task to re-run automatically when reconnected
+    const isOffline = tabId ? tabStatesRef.current[tabId]?.isConnected === false : false;
+    if (isOffline) {
+      pendingOfflineQueueRef.current.push(task);
+      return;
+    }
     syncQueueRef.current = syncQueueRef.current
       .then(task)
       .catch((err) => {
@@ -762,6 +772,9 @@ export function WhatsAppWebBrowserView({
       }
     }
 
+    // Acquire lock synchronously right away so concurrent unread/active-chat events never double-send
+    welcomeKitInFlightRef.current.add(lockKey);
+
     const activeItems: WelcomeKitItem[] = [];
     if (cfg.includeStageNewEnquiry) {
       const stageNewText = await resolveStageNewEnquiryText();
@@ -784,10 +797,10 @@ export function WhatsAppWebBrowserView({
     }
 
     if (activeItems.length === 0) {
+      welcomeKitInFlightRef.current.delete(lockKey);
       return { sentCount: 0, failedCount: 0 };
     }
 
-    welcomeKitInFlightRef.current.add(lockKey);
     const sentTitles: string[] = [];
     let failedCount = 0;
 
@@ -864,6 +877,43 @@ export function WhatsAppWebBrowserView({
     }
   };
 
+  /**
+   * Fast-track trigger: Instantly dispatches welcome message to genuine trophy enquiries
+   * within ~1s without blocking on remote Gemini LLM calls or Firestore transaction queues.
+   */
+  const triggerFastWelcomeKitIfEnquiry = (params: {
+    tab: BrowserTab;
+    contactName: string;
+    phone: string;
+    messageText: string;
+  }) => {
+    const cfg = welcomeKitConfigRef.current;
+    if (!cfg || !cfg.enabled) return;
+
+    const text = (params.messageText || '').trim();
+    if (!text || isMediaOrSystemNoise(text)) return;
+
+    // Instant qualification: trophy product keywords, commercial intent, quantity, or award event signals
+    const isEnquiry = hasCommercialEnquirySignal(text) || isCustomerEnquiryLead({ latestText: text });
+    if (!isEnquiry) return;
+
+    const lockKey = (params.phone || params.contactName || '').toLowerCase().trim();
+    if (!lockKey) return;
+
+    if (welcomeKitInFlightRef.current.has(lockKey)) return;
+    if (hasWelcomeKitBeenSent({ phone: params.phone, contactName: params.contactName })) return;
+
+    // Fast-track immediate dispatch without waiting for AI analysis or CRM cloud DB writes
+    sendWelcomeKitToLead({
+      tab: params.tab,
+      contactName: params.contactName,
+      phone: params.phone,
+      requirement: text
+    }).catch((err) => {
+      console.warn('[WelcomeKit] Fast-track auto-send failed:', err);
+    });
+  };
+
   const runNoReplyTestimonialSweep = async (
     configOverride?: WelcomeKitConfig,
     isManualTrigger = false
@@ -886,19 +936,19 @@ export function WhatsAppWebBrowserView({
     const kitTestimonialItem = (cfg.items || []).find((it) => it.kind === 'testimonial_video');
     const videoSource = followCfg.useTestimonialKitItem && kitTestimonialItem
       ? {
-          localFilePath: kitTestimonialItem.localFilePath,
-          fileUrl: kitTestimonialItem.fileUrl,
-          fileName: kitTestimonialItem.fileName,
-          mimeType: kitTestimonialItem.mimeType,
-          attachmentType: kitTestimonialItem.attachmentType
-        }
+        localFilePath: kitTestimonialItem.localFilePath,
+        fileUrl: kitTestimonialItem.fileUrl,
+        fileName: kitTestimonialItem.fileName,
+        mimeType: kitTestimonialItem.mimeType,
+        attachmentType: kitTestimonialItem.attachmentType
+      }
       : {
-          localFilePath: followCfg.localFilePath,
-          fileUrl: followCfg.fileUrl,
-          fileName: followCfg.fileName,
-          mimeType: followCfg.mimeType,
-          attachmentType: followCfg.attachmentType
-        };
+        localFilePath: followCfg.localFilePath,
+        fileUrl: followCfg.fileUrl,
+        fileName: followCfg.fileName,
+        mimeType: followCfg.mimeType,
+        attachmentType: followCfg.attachmentType
+      };
 
     const hasVideoSource = Boolean(videoSource.localFilePath || videoSource.fileUrl);
     if (!hasVideoSource && !followCfg.messageText?.trim()) {
@@ -924,11 +974,11 @@ export function WhatsAppWebBrowserView({
       // Read testimonial video bytes once for all overdue leads in this sweep
       const { mediaPayload, fallbackUrl: fallbackMediaUrl } = hasVideoSource
         ? await resolveMediaAttachment({
-            ...videoSource,
-            fileName: videoSource.fileName || 'testimonial-video.mp4',
-            mimeType: videoSource.mimeType || 'video/mp4',
-            attachmentType: videoSource.attachmentType || 'video'
-          })
+          ...videoSource,
+          fileName: videoSource.fileName || 'testimonial-video.mp4',
+          mimeType: videoSource.mimeType || 'video/mp4',
+          attachmentType: videoSource.attachmentType || 'video'
+        })
         : { mediaPayload: null, fallbackUrl: '' };
 
       for (const lead of dueLeads) {
@@ -1009,6 +1059,7 @@ export function WhatsAppWebBrowserView({
   const processExtractedTextToCrm = async (params: {
     tab: BrowserTab;
     contactName: string;
+    pushname?: string;
     phone: string;
     latestText: string;
     history: Array<{ direction: 'inbound' | 'outbound'; content: string }>;
@@ -1052,7 +1103,7 @@ export function WhatsAppWebBrowserView({
     });
 
     const insight: AiLeadInsight = {
-      leadName: aiRes.extracted_details.name || params.contactName || 'WhatsApp Lead',
+      leadName: params.pushname || aiRes.extracted_details.name || (params.phone ? `+${params.phone}` : 'WhatsApp Lead'),
       company: aiRes.extracted_details.company || '',
       phone: params.phone || aiRes.extracted_details.phone || '',
       email: aiRes.extracted_details.email || '',
@@ -1060,12 +1111,19 @@ export function WhatsAppWebBrowserView({
       requirement: aiRes.extracted_details.requirement || params.latestText,
       quantity: qty,
       budget: aiRes.extracted_details.budget || '',
+      trophyType: (aiRes.extracted_details as any)?.trophy_type || '',
+      trophySize: (aiRes.extracted_details as any)?.trophy_size || '',
+      eventName: (aiRes.extracted_details as any)?.event_name || '',
+      eventDate: (aiRes.extracted_details as any)?.event_date || '',
+      deliveryDate: (aiRes.extracted_details as any)?.delivery_date || '',
       urgency: aiRes.extracted_details.urgency || 'medium',
       stage: mapStageToInsightStage(aiRes.recommended_pipeline_stage),
       pipelineStage: mapped.pipelineStage,
       isBusinessLead,
       suggestedAction: aiRes.extracted_details.recommended_next_action || 'Follow up with lead',
       suggestedReply: aiRes.suggested_reply || '',
+      flagForReview: Boolean(aiRes.flag_for_review || (aiRes.confidence_score && aiRes.confidence_score < 0.7)),
+      confidenceScore: aiRes.confidence_score,
       analyzedAt: Date.now()
     };
 
@@ -1097,6 +1155,7 @@ export function WhatsAppWebBrowserView({
         remoteJid: remoteKey,
         phone: params.phone,
         name: params.contactName,
+        pushname: params.pushname,
         messageText: params.latestText,
         insight,
         forceCreate: false,
@@ -1125,20 +1184,37 @@ export function WhatsAppWebBrowserView({
           );
         }
         if (params.triggerWelcomeKit && welcomeKitConfigRef.current.enabled) {
-          sendWelcomeKitToLead({
-            tab: params.tab,
-            leadId: outcome.leadId,
-            contactName: outcome.leadName || params.contactName,
-            phone: params.phone || insight.phone,
-            company: insight.company,
-            quantity: insight.quantity,
-            eventName: insight.eventName,
-            requirement: insight.requirement,
-            stageLabel: outcome.stageLabel,
-            pipelineName: outcome.pipelineName
-          }).catch((err) => {
-            console.warn('[WelcomeKit] Auto-send failed:', err);
-          });
+          const lockKey = (outcome.leadId || params.phone || params.contactName || '').toLowerCase().trim();
+          const phoneKey = params.phone || insight.phone;
+          const nameKey = outcome.leadName || params.contactName;
+
+          if (
+            hasWelcomeKitBeenSent({ leadId: outcome.leadId, phone: phoneKey, contactName: nameKey }) ||
+            welcomeKitInFlightRef.current.has(lockKey)
+          ) {
+            recordWelcomeKitDeliveryToCrm({
+              leadId: outcome.leadId,
+              phone: phoneKey,
+              contactName: nameKey,
+              sourceWhatsappNumber: tabStatesRef.current[params.tab.id]?.ownPhone || '',
+              sentSummary: ['Welcome Kit (Fast-Track)']
+            }).catch(() => { });
+          } else {
+            sendWelcomeKitToLead({
+              tab: params.tab,
+              leadId: outcome.leadId,
+              contactName: nameKey,
+              phone: phoneKey,
+              company: insight.company,
+              quantity: insight.quantity,
+              eventName: insight.eventName,
+              requirement: insight.requirement,
+              stageLabel: outcome.stageLabel,
+              pipelineName: outcome.pipelineName
+            }).catch((err) => {
+              console.warn('[WelcomeKit] Auto-send failed:', err);
+            });
+          }
         }
       } else if (outcome.action === 'updated') {
         setGrabbedCount((c) => c + 1);
@@ -1156,6 +1232,27 @@ export function WhatsAppWebBrowserView({
           toast.success(
             `Updated Existing Lead: ${outcome.leadName} (${outcome.pipelineName} • ${outcome.stageLabel})`,
             { duration: 4000 }
+          );
+        }
+      } else if (outcome.action === 'skipped' && outcome.reason?.includes('Waiting for user confirmation')) {
+        window.dispatchEvent(
+          new CustomEvent('ecobill:whatsapp-confirm-lead', {
+            detail: {
+              sessionId: params.tab.id,
+              sessionLabel: params.tab.isCustomLabel ? params.tab.label : formattedOwn || params.tab.label,
+              remoteJid: remoteKey,
+              phone: params.phone,
+              name: params.pushname || params.contactName,
+              messageText: params.latestText,
+              insight,
+              messageTimestamp: params.messageTimestamp || Date.now()
+            }
+          })
+        );
+        if (!params.suppressToast) {
+          toast(
+            `Is this a lead? Confirmation requested for ${params.pushname || params.contactName || params.phone}`,
+            { icon: '❓', duration: 6000 }
           );
         }
       }
@@ -1199,6 +1296,7 @@ export function WhatsAppWebBrowserView({
           processExtractedTextToCrm({
             tab,
             contactName: chat.contactName,
+            pushname: chat.pushname,
             phone: chat.phone,
             latestText: chat.latestText,
             history:
@@ -1331,6 +1429,10 @@ export function WhatsAppWebBrowserView({
         | { isConnected: boolean; inChatsView?: boolean; unreadCount: number; ownPhone?: string; ownName?: string }
         | undefined;
       if (statusPayload) {
+        if (statusPayload.isConnected && pendingOfflineQueueRef.current.length > 0) {
+          const backlog = pendingOfflineQueueRef.current.splice(0);
+          backlog.forEach((t) => enqueueAutoSync(t, tab.id));
+        }
         setTabStates((prev) => ({
           ...prev,
           [tab.id]: {
@@ -1372,6 +1474,15 @@ export function WhatsAppWebBrowserView({
       const inbound = snapshot.messages.filter((m) => !m.fromMe);
       const lastInbound = inbound[inbound.length - 1];
       if (!lastInbound?.text || isMediaOrSystemNoise(lastInbound.text)) return;
+
+      // FAST-TRACK: Instantly dispatch welcome message to new customer enquiry within ~1s
+      triggerFastWelcomeKitIfEnquiry({
+        tab,
+        contactName: snapshot.contactName,
+        phone: snapshot.phone,
+        messageText: lastInbound.text
+      });
+
       if (!autoCrmRef.current) return;
 
       const contactIdentity = (snapshot.phone || snapshot.contactName).toLowerCase().trim();
@@ -1384,6 +1495,7 @@ export function WhatsAppWebBrowserView({
             await processExtractedTextToCrm({
               tab,
               contactName: snapshot.contactName,
+              pushname: snapshot.pushname,
               phone: snapshot.phone,
               latestText: lastInbound.text,
               history: snapshot.messages.slice(-6).map((m) => ({
@@ -1399,11 +1511,20 @@ export function WhatsAppWebBrowserView({
             syncedMsgKeysRef.current.delete(syncKey);
             throw err;
           }
-        });
+        }, tab.id);
       }
     } else if (ipcEv.channel === 'wa:unread-event') {
       const unreadEv = ipcEv.args?.[0] as UnreadSidebarEvent | undefined;
       if (!unreadEv?.contactName || !unreadEv.previewText || isMediaOrSystemNoise(unreadEv.previewText)) return;
+
+      // FAST-TRACK: Instantly dispatch welcome message to new customer enquiry within ~1s
+      triggerFastWelcomeKitIfEnquiry({
+        tab,
+        contactName: unreadEv.contactName,
+        phone: unreadEv.phone,
+        messageText: unreadEv.previewText
+      });
+
       if (!autoCrmRef.current) return;
 
       const contactIdentity = (unreadEv.phone || unreadEv.contactName).toLowerCase().trim();
@@ -1417,6 +1538,7 @@ export function WhatsAppWebBrowserView({
           await processExtractedTextToCrm({
             tab,
             contactName: unreadEv.contactName,
+            pushname: unreadEv.pushname,
             phone: unreadEv.phone,
             latestText: unreadEv.previewText,
             history: [{ direction: 'inbound', content: unreadEv.previewText }],
@@ -1429,7 +1551,7 @@ export function WhatsAppWebBrowserView({
           syncedMsgKeysRef.current.delete(syncKey);
           throw err;
         }
-      });
+      }, tab.id);
     } else if (ipcEv.channel === 'wa:bulk-scan-started') {
       const startPayload = ipcEv.args?.[0] as { trigger?: string } | undefined;
       if (startPayload?.trigger === 'qr_scan') {
@@ -1657,6 +1779,7 @@ export function WhatsAppWebBrowserView({
       await processExtractedTextToCrm({
         tab: activeTab,
         contactName: activeChat.contactName,
+        pushname: activeChat.pushname,
         phone: activeChat.phone,
         latestText: targetMsg.text,
         history: activeChat.messages.slice(-6).map((m) => ({
@@ -1671,13 +1794,16 @@ export function WhatsAppWebBrowserView({
     }
   };
 
-  const handleSaveToCrm = async () => {
+  const handleSaveToCrm = async (override?: { name?: string; company?: string }) => {
     if (!activeTab || !activeInsight) return;
     const lastText =
       activeChat?.messages[activeChat.messages.length - 1]?.text || activeInsight.requirement;
     const remoteKey = activeChat?.phone
       ? `${activeChat.phone}@s.whatsapp.net`
       : activeChat?.contactName || activeInsight.leadName;
+
+    const contactName = override?.name?.trim() || activeChat?.pushname || activeChat?.contactName || activeInsight.leadName;
+    const contactCompany = override?.company?.trim() || activeInsight.company || '';
 
     try {
       const tabState = tabStatesRef.current[activeTab.id];
@@ -1689,9 +1815,15 @@ export function WhatsAppWebBrowserView({
         sourceWhatsappNumber: ownPhone,
         remoteJid: remoteKey,
         phone: activeChat?.phone || activeInsight.phone,
-        name: activeChat?.contactName || activeInsight.leadName,
+        name: contactName,
+        pushname: activeChat?.pushname,
         messageText: lastText,
-        insight: activeInsight,
+        insight: {
+          ...activeInsight,
+          leadName: contactName,
+          company: contactCompany,
+          isBusinessLead: true
+        },
         forceCreate: true,
         triggeredBy: 'manual'
       });
@@ -1779,8 +1911,8 @@ export function WhatsAppWebBrowserView({
                       : 'Click to switch tab, double-click to rename'
                   }
                   className={`group px-3 py-1.5 rounded-t-card rounded-b-input text-xs font-bold shrink-0 flex items-center gap-1.5 cursor-pointer transition-all ${isSelected
-                      ? 'bg-surface shadow-neo-pressed text-primary-dark border-b-2 border-primary'
-                      : 'bg-surface text-secondary shadow-neo-surface hover:text-primary-dark'
+                    ? 'bg-surface shadow-neo-pressed text-primary-dark border-b-2 border-primary'
+                    : 'bg-surface text-secondary shadow-neo-surface hover:text-primary-dark'
                     }`}
                 >
                   {isWaPartition ? (
@@ -1845,8 +1977,8 @@ export function WhatsAppWebBrowserView({
                 );
               }}
               className={`min-h-[34px] px-2.5 py-1 rounded-btn text-[11px] font-bold flex items-center gap-1 transition-all ${autoCrmEnabled
-                  ? 'bg-primary text-surface shadow-neo-surface'
-                  : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
+                ? 'bg-primary text-surface shadow-neo-surface'
+                : 'bg-surface shadow-neo-surface text-secondary hover:text-primary-dark'
                 }`}
               title="Continuously monitor all logged-in WhatsApp tabs & auto-sync leads to Pipeline"
             >
@@ -1869,8 +2001,8 @@ export function WhatsAppWebBrowserView({
             <button
               onClick={() => setShowWelcomeKitModal(true)}
               className={`min-h-[34px] px-2.5 py-1 rounded-btn text-[11px] font-bold flex items-center gap-1 transition-all ${welcomeKitConfig.enabled || welcomeKitConfig.noReplyFollowUp?.enabled
-                  ? 'bg-primary text-surface shadow-neo-surface'
-                  : 'bg-surface shadow-neo-surface text-primary-dark hover:text-primary'
+                ? 'bg-primary text-surface shadow-neo-surface'
+                : 'bg-surface shadow-neo-surface text-primary-dark hover:text-primary'
                 }`}
               title="Configure & auto-send NFF, Brochure, Testimonial Video & 1-2 day no-reply follow-up"
             >
@@ -1903,8 +2035,8 @@ export function WhatsAppWebBrowserView({
                 });
               }}
               className={`min-h-[34px] px-2.5 py-1 rounded-btn text-[11px] font-bold flex items-center gap-1 transition-all ${showSyncFeed
-                  ? 'bg-primary text-surface shadow-neo-surface'
-                  : 'bg-surface shadow-neo-surface text-primary-dark hover:text-primary'
+                ? 'bg-primary text-surface shadow-neo-surface'
+                : 'bg-surface shadow-neo-surface text-primary-dark hover:text-primary'
                 }`}
               title="View today's captured & updated WhatsApp leads"
             >
@@ -1951,8 +2083,8 @@ export function WhatsAppWebBrowserView({
                 }
               }}
               className={`min-h-[34px] px-2.5 py-1 rounded-btn text-[11px] font-bold flex items-center gap-1 transition-all ${isCopilotOpen
-                  ? 'bg-primary text-surface shadow-neo-surface'
-                  : 'bg-surface shadow-neo-surface text-primary hover:shadow-neo-hover'
+                ? 'bg-primary text-surface shadow-neo-surface'
+                : 'bg-surface shadow-neo-surface text-primary hover:shadow-neo-hover'
                 }`}
               title="Extract open WhatsApp chat to Lead / Quotation"
             >
@@ -2138,27 +2270,27 @@ export function WhatsAppWebBrowserView({
             </div>
           )}
           <div className="flex-1 relative min-w-0 min-h-0 overflow-hidden">
-          {tabs.map((tab) => {
-            const isReady = Boolean(readyPartitions[tab.partition]);
-            const isActive = tab.id === activeTab?.id;
-            if (!isReady) return null;
+            {tabs.map((tab) => {
+              const isReady = Boolean(readyPartitions[tab.partition]);
+              const isActive = tab.id === activeTab?.id;
+              if (!isReady) return null;
 
-            return (
-              <webview
-                key={tab.id}
-                ref={(el) => attachWebviewListeners(tab, el)}
-                src={tab.initialUrl}
-                partition={tab.partition}
-                useragent={cleanChromeUa}
-                allowpopups={true}
-                className={
-                  isActive
-                    ? 'w-full h-full flex-1 relative z-10'
-                    : 'absolute inset-0 w-full h-full opacity-0 pointer-events-none -z-10'
-                }
-              />
-            );
-          })}
+              return (
+                <webview
+                  key={tab.id}
+                  ref={(el) => attachWebviewListeners(tab, el)}
+                  src={tab.initialUrl}
+                  partition={tab.partition}
+                  useragent={cleanChromeUa}
+                  allowpopups={true}
+                  className={
+                    isActive
+                      ? 'w-full h-full flex-1 relative z-10'
+                      : 'absolute inset-0 w-full h-full opacity-0 pointer-events-none -z-10'
+                  }
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -2213,40 +2345,40 @@ export function WhatsAppWebBrowserView({
                 syncFeed
                   .filter((i) => isAdmin || !i.assignedToId || i.assignedToId === dbUser?.id)
                   .map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      setIsFullScreen(false);
-                      navigate(item.leadId ? `/leads/${item.leadId}` : '/pipeline');
-                    }}
-                    className="w-full text-left p-3 rounded-card bg-surface shadow-neo-surface hover:shadow-neo-hover transition-all space-y-1"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-extrabold text-primary-dark truncate">{item.leadName}</span>
-                      <span
-                        className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${item.action === 'created'
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setIsFullScreen(false);
+                        navigate(item.leadId ? `/leads/${item.leadId}` : '/pipeline');
+                      }}
+                      className="w-full text-left p-3 rounded-card bg-surface shadow-neo-surface hover:shadow-neo-hover transition-all space-y-1"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-extrabold text-primary-dark truncate">{item.leadName}</span>
+                        <span
+                          className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full shrink-0 ${item.action === 'created'
                             ? 'bg-primary text-surface'
                             : 'bg-surface shadow-neo-inset text-primary'
-                          }`}
-                      >
-                        {item.action === 'created' ? 'New Lead' : 'Updated'}
-                      </span>
-                    </div>
-                    <p className="text-[11px] font-semibold text-primary truncate">
-                      {item.pipelineName} &bull; {item.stageLabel}
-                    </p>
-                    {isAdmin && item.assignedToName && (
-                      <p className="text-[10px] font-bold text-emerald-700 truncate">
-                        Assigned → {item.assignedToName}
+                            }`}
+                        >
+                          {item.action === 'created' ? 'New Lead' : 'Updated'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] font-semibold text-primary truncate">
+                        {item.pipelineName} &bull; {item.stageLabel}
                       </p>
-                    )}
-                    <div className="flex items-center justify-between text-[10px] text-secondary">
-                      <span className="truncate">{item.accountLabel}</span>
-                      <span>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </button>
-                ))
+                      {isAdmin && item.assignedToName && (
+                        <p className="text-[10px] font-bold text-emerald-700 truncate">
+                          Assigned → {item.assignedToName}
+                        </p>
+                      )}
+                      <div className="flex items-center justify-between text-[10px] text-secondary">
+                        <span className="truncate">{item.accountLabel}</span>
+                        <span>{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </button>
+                  ))
               )}
             </div>
 
@@ -2358,7 +2490,7 @@ export function WhatsAppWebBrowserView({
         onSaved={(next) => {
           setWelcomeKitConfig(next);
           if (next.noReplyFollowUp?.enabled) {
-            runNoReplyTestimonialSweep(next, false).catch(() => {});
+            runNoReplyTestimonialSweep(next, false).catch(() => { });
           }
         }}
         onRunNoReplySweepNow={async (draftConfig) => {

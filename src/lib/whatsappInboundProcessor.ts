@@ -9,6 +9,8 @@ export interface InboundMessagePayload {
   messageText: string;
   metaMessageId?: string;
   timestamp?: any;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'document' | 'audio' | 'video';
 }
 
 export interface InboundProcessingOutcome {
@@ -116,64 +118,84 @@ export async function processInboundWhatsAppMessage(
       requirement: aiAnalysis.extracted_details.requirement || messageText,
     }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
 
-    const leadRef = await addDoc(collection(db, 'leads'), {
-      name: leadName,
-      phone: formattedPhone,
-      email: aiAnalysis.extracted_details.email || '',
-      company: aiAnalysis.extracted_details.company || '',
-      location: aiAnalysis.extracted_details.location || '',
-      requirement: aiAnalysis.extracted_details.requirement || messageText,
-      required_quantity: aiAnalysis.extracted_details.quantity || '',
-      budget: aiAnalysis.extracted_details.budget || '',
-      timeline: aiAnalysis.extracted_details.timeline || '',
-      priority: aiAnalysis.extracted_details.urgency || 'medium',
-      urgency: aiAnalysis.extracted_details.urgency || 'medium',
-      pipeline_id: initialPipelineId,
-      status: initialStage,
-      owner_id: autoAssignment.assigned ? autoAssignment.ownerId : '',
-      ownerId: autoAssignment.assigned ? autoAssignment.ownerId : '',
-      sales_person: autoAssignment.assigned ? autoAssignment.ownerName : '',
-      ...(autoAssignment.assigned
-        ? {
-            assigned_at: serverTimestamp(),
-            assigned_by: 'auto_assignment',
-            assignment_rule_name: autoAssignment.ruleName || autoAssignment.mode,
-          }
-        : {}),
-      source: 'whatsapp_inbound',
-      sourceType: 'whatsapp',
-      platform: 'meta',
-      notes: `[AI Qualification] ${aiAnalysis.qualification_reason}\nRecommended Action: ${aiAnalysis.extracted_details.recommended_next_action}`,
-      qualification_status: aiAnalysis.qualification_status,
-      qualification_reason: aiAnalysis.qualification_reason,
-      confidence_score: aiAnalysis.confidence_score,
-      suggested_reply: aiAnalysis.suggested_reply,
-      next_action: aiAnalysis.extracted_details.recommended_next_action,
-      flag_for_review: aiAnalysis.flag_for_review,
-      ai_qualification: aiAnalysis.qualification_status,
-      ai_confidence: aiAnalysis.confidence_score,
-      ai_classification: aiAnalysis.classification,
-      ai_summary: aiAnalysis.internal_audit_log,
-      ai_suggested_reply: aiAnalysis.suggested_reply,
-      ai_flag_for_review: aiAnalysis.flag_for_review,
-      stage_history: [
-        {
-          from_stage: 'Inbound Inquiry',
-          to_stage: 'New Enquiry',
-          changed_by: 'system',
-          changed_by_name: 'WhatsApp AI Inbound',
-          changed_at: new Date(),
-          note: `Inbound WhatsApp message captured from ${formattedPhone}`,
-          notification_triggered: false,
-        },
-      ],
-      notification_history: [],
-      notifications_sent: {},
-      last_contacted_at: serverTimestamp(),
-      created_at: serverTimestamp(),
-      updated_at: serverTimestamp(),
-    });
-    leadId = leadRef.id;
+    const phone10 = formattedPhone.replace(/\D/g, '').slice(-10);
+    const deterministicLeadId = phone10 ? `lead_wa_${phone10}` : `lead_wa_${formattedPhone.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+    const leadDocRef = doc(db, 'leads', deterministicLeadId);
+
+    // Concurrency check: if another team member created this lead milliseconds ago, merge instead of duplicating
+    const existingSnap = await getDoc(leadDocRef).catch(() => null);
+    if (existingSnap && existingSnap.exists()) {
+      isNewLead = false;
+      leadId = deterministicLeadId;
+      await updateDoc(leadDocRef, {
+        updated_at: serverTimestamp(),
+        last_message: messageText,
+        lastCustomerReplyAt: serverTimestamp()
+      }).catch(() => {});
+    } else {
+      const newLeadData = {
+        name: leadName,
+        phone: formattedPhone,
+        normalized_phone: formattedPhone,
+        whatsapp_number: formattedPhone,
+        email: aiAnalysis.extracted_details.email || '',
+        company: aiAnalysis.extracted_details.company || '',
+        location: aiAnalysis.extracted_details.location || '',
+        requirement: aiAnalysis.extracted_details.requirement || messageText,
+        required_quantity: aiAnalysis.extracted_details.quantity || '',
+        budget: aiAnalysis.extracted_details.budget || '',
+        timeline: aiAnalysis.extracted_details.timeline || '',
+        priority: aiAnalysis.extracted_details.urgency || 'medium',
+        urgency: aiAnalysis.extracted_details.urgency || 'medium',
+        pipeline_id: initialPipelineId,
+        status: initialStage,
+        owner_id: autoAssignment.assigned ? autoAssignment.ownerId : '',
+        ownerId: autoAssignment.assigned ? autoAssignment.ownerId : '',
+        sales_person: autoAssignment.assigned ? autoAssignment.ownerName : '',
+        ...(autoAssignment.assigned
+          ? {
+              assigned_at: serverTimestamp(),
+              assigned_by: 'auto_assignment',
+              assignment_rule_name: autoAssignment.ruleName || autoAssignment.mode,
+            }
+          : {}),
+        source: 'whatsapp_inbound',
+        sourceType: 'whatsapp',
+        platform: 'meta',
+        notes: `[AI Qualification] ${aiAnalysis.qualification_reason}\nRecommended Action: ${aiAnalysis.extracted_details.recommended_next_action}`,
+        qualification_status: aiAnalysis.qualification_status,
+        qualification_reason: aiAnalysis.qualification_reason,
+        confidence_score: aiAnalysis.confidence_score,
+        suggested_reply: aiAnalysis.suggested_reply,
+        next_action: aiAnalysis.extracted_details.recommended_next_action,
+        flag_for_review: aiAnalysis.flag_for_review,
+        ai_qualification: aiAnalysis.qualification_status,
+        ai_confidence: aiAnalysis.confidence_score,
+        ai_classification: aiAnalysis.classification,
+        ai_summary: aiAnalysis.internal_audit_log,
+        ai_suggested_reply: aiAnalysis.suggested_reply,
+        ai_flag_for_review: aiAnalysis.flag_for_review,
+        stage_history: [
+          {
+            from_stage: 'Inbound Inquiry',
+            to_stage: 'New Enquiry',
+            changed_by: 'system',
+            changed_by_name: 'WhatsApp AI Inbound',
+            changed_at: new Date(),
+            note: `Inbound WhatsApp message captured from ${formattedPhone}`,
+            notification_triggered: false,
+          },
+        ],
+        notification_history: [],
+        notifications_sent: {},
+        last_contacted_at: serverTimestamp(),
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+      };
+
+      await setDoc(leadDocRef, newLeadData, { merge: true });
+      leadId = deterministicLeadId;
+    }
 
     // Create corresponding Customer record
     try {
@@ -232,6 +254,21 @@ export async function processInboundWhatsAppMessage(
       updatePayload.urgency = aiAnalysis.extracted_details.urgency;
     }
 
+    // Auto-grab artwork/logo links from message text or mediaUrl
+    const urlRegex = /(https?:\/\/[^\s]+(?:drive\.google\.com|dropbox\.com|canva\.com|wetransfer\.com|onedrive\.live\.com)[^\s]*)/i;
+    const detectedUrl = messageText.match(urlRegex)?.[0] || payload.mediaUrl;
+    if (detectedUrl && !existingLeadData?.artwork_url) {
+      updatePayload.artwork_url = detectedUrl;
+    }
+
+    // Auto-grab citation/engraving text if client shared award wording
+    if (
+      !existingLeadData?.design_notes &&
+      /(presented to|awardee|award|citation|engrav|in honor of|appreciation|winner|runner|trophy for)/i.test(messageText)
+    ) {
+      updatePayload.design_notes = messageText.trim();
+    }
+
     await updateDoc(doc(db, 'leads', leadId), updatePayload);
   }
 
@@ -241,7 +278,8 @@ export async function processInboundWhatsAppMessage(
     senderPhone: formattedPhone,
     senderName: leadName,
     direction: 'inbound',
-    type: 'text',
+    type: payload.mediaType || (payload.mediaUrl ? 'image' : 'text'),
+    mediaUrl: payload.mediaUrl || null,
     content: messageText,
     metaMessageId: metaMessageId || `local_${Date.now()}`,
     platform: 'whatsapp',

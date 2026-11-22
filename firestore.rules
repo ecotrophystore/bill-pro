@@ -29,6 +29,14 @@ service cloud.firestore {
       return getUserRole() == 'hr';
     }
 
+    function isDesign() {
+      return getUserRole() == 'design';
+    }
+
+    function isProduction() {
+      return getUserRole() == 'production';
+    }
+
     function isStandardUser() {
       return getUserRole() == 'user';
     }
@@ -89,7 +97,13 @@ service cloud.firestore {
     // SETTINGS COLLECTION
     match /settings/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin(); 
+      allow write: if isAuthenticated(); 
+    }
+
+    // SYSTEM SETTINGS & AUTOMATIONS
+    match /system_settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
     // QUOTATIONS COLLECTION
@@ -223,16 +237,10 @@ service cloud.firestore {
     }
     
     match /leads/{leadId} {
-      allow read: if isAdmin() || (
-        isAuthenticated() && (
-          resource.data.owner_id == request.auth.uid ||
-          resource.data.ownerId == request.auth.uid
-        )
-      );
+      allow read: if isAuthenticated();
       allow create: if isAdmin() || isAccounts() || isSales();
       allow update: if isAdmin() || (
-        (isAccounts() || isSales()) &&
-        (resource.data.owner_id == request.auth.uid || resource.data.ownerId == request.auth.uid) &&
+        (isAccounts() || isSales() || isDesign() || isProduction()) &&
         isUnchanged('owner_id') &&
         isUnchanged('ownerId') &&
         isUnchanged('sales_person')
@@ -250,7 +258,7 @@ service cloud.firestore {
 
     match /pipelines/{pipelineId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow write: if isAdmin() || isAccounts() || isSales() || isDesign() || isProduction();
     }
 
     match /stage_messages/{stageId} {
@@ -283,7 +291,7 @@ service cloud.firestore {
 
     match /activities/{activityId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow write: if isAdmin() || isAccounts() || isSales() || isDesign() || isProduction();
     }
 
     match /whatsapp_automations/{docId} {
@@ -319,6 +327,17 @@ service cloud.firestore {
       allow read: if isAdmin() || isAccounts() || isHR();
       allow create: if isAuthenticated();
       allow update, delete: if false;
+    }
+    
+    // TROPHY STUDIO & DESIGN BRAIN
+    match /trophy_brain_knowledge/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /trophy_generated_designs/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
   }

@@ -202,10 +202,10 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
         .item-title { font-weight: 600; font-size: 12px; color: #000; }
         .item-desc { font-size: 11px; color: #666; margin-top: 2px; display: block; line-height: 1.2; }
         .totals-container { display: flex; justify-content: flex-end; margin-bottom: 15px; }
-        .totals-table { width: 220px; border-collapse: collapse; }
+        .totals-table { width: 300px; border-collapse: collapse; }
         .totals-table td { padding: 4px 8px; text-align: right; font-size: 12px; }
-        .total-label { color: ${theme.muted}; }
-        .total-value { font-weight: 600; }
+        .total-label { color: ${theme.muted}; white-space: nowrap; }
+        .total-value { font-weight: 600; white-space: nowrap; }
         .grand-total-row { background: ${theme.primary}; color: white; }
         .grand-total-row td { padding: 8px; font-size: 13px; font-weight: bold; }
         .amount-words { border-top: 1px solid #ddd; padding-top: 8px; font-size: 12px; margin-bottom: 20px; font-style: italic; color: #555; }
@@ -276,7 +276,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
                   <tr>
                       <td class="total-label">
                         Discount (${(docData as any).discount_percent || 0}%)
-                        <span style="display:inline-block;margin-left:6px;background:#dcfce7;color:#15803d;font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;vertical-align:middle;">You save ${formatCurrency(discountAmt)}</span>
+                        <span style="display:inline-block;margin-left:6px;background:#dcfce7;color:#15803d;font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;vertical-align:middle;white-space:nowrap;">You save ${formatCurrency(discountAmt)}</span>
                       </td>
                       <td class="total-value">-${formatCurrency(discountAmt)}</td>
                   </tr>
@@ -367,7 +367,7 @@ export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, 
     });
     return;
   }
-  
+
   if (action === 'blob') {
     return new Promise<Blob>((resolve) => {
       html2pdf().set(opt).from(element as HTMLElement).output('blob').then((blob: Blob) => {

@@ -345,7 +345,36 @@ export default function ProformaInvoices() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
               ) : displayInvoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
-                  <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
+                  <td className="p-4 font-medium text-primary-dark">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>{inv.number}</span>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold" title={`Active version: v${inv.version || 1}`}>
+                        v{inv.version || 1}
+                      </span>
+                    </div>
+                    {inv.versions && inv.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {inv.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/proforma-invoices/edit/${inv.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (inv.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary hover:bg-shadow-darker/20 hover:text-primary-dark'
+                            }`}
+                            title={`Click to edit Version ${v.versionNumber}`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
@@ -400,7 +429,33 @@ export default function ProformaInvoices() {
               <div key={inv.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold">
+                        v{inv.version || 1}
+                      </span>
+                    </div>
+                    {inv.versions && inv.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {inv.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/proforma-invoices/edit/${inv.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (inv.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary'
+                            }`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <p className="text-secondary font-medium mt-0.5">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</p>
                     <p className="text-xs text-secondary/70 mt-1">
                       {inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}

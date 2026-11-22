@@ -1,0 +1,46 @@
+name: Build macOS Desktop App
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Build web application
+        run: npm run build
+
+      - name: Build backend server bundle
+        run: npm run build:server
+
+      - name: Build macOS Electron App (.dmg & .zip)
+        run: npx electron-builder --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload macOS Artifacts (.dmg)
+        uses: actions/upload-artifact@v4
+        with:
+          name: EcoBill-MacOS-Installer
+          path: |
+            release/*.dmg
+            release/*.zip

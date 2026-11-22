@@ -32,8 +32,8 @@ import { useAuth } from '../contexts/AuthContext';
 import type { User, UserRole } from '../types';
 import { ROLE_META, normalizeRole } from '../config/roleAccess';
 
-const ASSIGNABLE_ROLES_BY_ADMIN: UserRole[] = ['admin', 'hr', 'sales', 'user', 'accounts'];
-const ASSIGNABLE_ROLES_BY_HR: UserRole[] = ['hr', 'sales', 'user', 'accounts'];
+const ASSIGNABLE_ROLES_BY_ADMIN: UserRole[] = ['admin', 'hr', 'sales', 'user', 'accounts', 'design', 'production'];
+const ASSIGNABLE_ROLES_BY_HR: UserRole[] = ['hr', 'sales', 'user', 'accounts', 'design', 'production'];
 
 export default function HRManagement() {
   const { dbUser } = useAuth();
@@ -93,7 +93,7 @@ export default function HRManagement() {
         })) as User[];
         setInvitedUsers(list);
       },
-      () => {}
+      () => { }
     );
 
     return () => {
@@ -109,6 +109,9 @@ export default function HRManagement() {
       admin: users.filter((u) => u.role === 'admin').length,
       hr: users.filter((u) => u.role === 'hr').length,
       sales: users.filter((u) => u.role === 'sales').length,
+      design: users.filter((u) => u.role === 'design').length,
+      production: users.filter((u) => u.role === 'production').length,
+      accounts: users.filter((u) => u.role === 'accounts').length,
       user: users.filter((u) => u.role === 'user').length,
     };
   }, [users]);
@@ -317,24 +320,25 @@ export default function HRManagement() {
       </div>
 
       {/* Role Filter Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
         {[
           { key: 'all', label: 'All Staff', count: stats.total },
           { key: 'admin', label: 'Admins', count: stats.admin },
           { key: 'hr', label: 'HR Team', count: stats.hr },
           { key: 'sales', label: 'Sales Team', count: stats.sales },
-          { key: 'user', label: 'Standard Users', count: stats.user },
+          { key: 'design', label: 'Designers', count: stats.design },
+          { key: 'production', label: 'Production', count: stats.production },
+          { key: 'accounts', label: 'Accounts', count: stats.accounts },
         ].map((card) => {
           const active = roleFilter === card.key;
           return (
             <button
               key={card.key}
               onClick={() => setRoleFilter(card.key)}
-              className={`p-4 rounded-card text-left transition-all ${
-                active
-                  ? 'bg-surface shadow-neo-pressed border border-primary/30'
-                  : 'bg-surface shadow-neo-raised hover:shadow-neo-hover'
-              }`}
+              className={`p-4 rounded-card text-left transition-all ${active
+                ? 'bg-surface shadow-neo-pressed border border-primary/30'
+                : 'bg-surface shadow-neo-raised hover:shadow-neo-hover'
+                }`}
             >
               <span className="text-xs font-bold text-secondary uppercase tracking-wider block">
                 {card.label}
@@ -390,9 +394,8 @@ export default function HRManagement() {
             return (
               <div
                 key={u.id}
-                className={`neo-card !p-5 flex flex-col justify-between gap-4 transition-all ${
-                  !isActive ? 'opacity-70' : ''
-                }`}
+                className={`neo-card !p-5 flex flex-col justify-between gap-4 transition-all ${!isActive ? 'opacity-70' : ''
+                  }`}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3.5 min-w-0">
@@ -486,11 +489,10 @@ export default function HRManagement() {
                     type="button"
                     disabled={!canEditThisUser || isSelf || updatingId === u.id}
                     onClick={() => handleToggleActive(u)}
-                    className={`px-3 py-1.5 rounded-btn text-xs font-bold flex items-center gap-1.5 transition-all ${
-                      isActive
-                        ? 'bg-surface shadow-neo-surface text-primary'
-                        : 'bg-surface shadow-neo-pressed text-error'
-                    } ${!canEditThisUser || isSelf ? 'opacity-60 cursor-not-allowed' : 'hover:shadow-neo-hover'}`}
+                    className={`px-3 py-1.5 rounded-btn text-xs font-bold flex items-center gap-1.5 transition-all ${isActive
+                      ? 'bg-surface shadow-neo-surface text-primary'
+                      : 'bg-surface shadow-neo-pressed text-error'
+                      } ${!canEditThisUser || isSelf ? 'opacity-60 cursor-not-allowed' : 'hover:shadow-neo-hover'}`}
                   >
                     {updatingId === u.id ? (
                       <Loader2 size={13} className="animate-spin" />
@@ -513,8 +515,8 @@ export default function HRManagement() {
         <h3 className="text-sm font-bold text-primary-dark flex items-center gap-2">
           <Building2 size={16} className="text-primary" /> Separate Department Access Matrix
         </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(['admin', 'hr', 'sales', 'user'] as UserRole[]).map((r) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {(['admin', 'hr', 'sales', 'design', 'production', 'accounts', 'user'] as UserRole[]).map((r) => (
             <div key={r} className="p-3.5 rounded-card bg-surface shadow-neo-surface space-y-1">
               <div className="text-xs font-extrabold text-primary uppercase tracking-wider">
                 {ROLE_META[r].label}

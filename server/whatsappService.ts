@@ -110,6 +110,9 @@ export interface AiLeadInsight {
   stage: 'new' | 'contacted' | 'qualified' | 'lost';
   pipelineStage?: string;
   isBusinessLead?: boolean;
+  intentTier?: 'HIGH' | 'MEDIUM' | 'LOW';
+  fitsSummary?: string;
+  prosperCoachingTip?: string;
   suggestedAction: string;
   suggestedReply: string;
   analyzedAt: number;
@@ -932,6 +935,10 @@ const ALLOWED_CRM_STAGES = new Set([
 
 const NOISE_PATTERN =
   /^(\[new whatsapp message\]|photo|photos|video|videos|audio|voice\s*message|sticker|gif|document|image|contact\s*card|location|missed\s*(?:voice|video)\s*call|this message was deleted)$|\b(otp|verification code|debited|credited|a\/c|balance|lottery|win cash|work from home|unsubscribe|reminder: action needed)\b/i;
+
+const VENDOR_OR_SPAM_PATTERN =
+  /\b(indiamart|india\s*mart|tradeindia|trade\s*india|justdial|just\s*dial|exportersindia|exporters\s*india|udaan|sulekha|b2b\s*portal|buy\s*lead(?:s)?|view\s*enquir(?:y|ies)\s*on\s*indiamart|seller\s*on\s*indiamart|indiamart\.com|tradeindia\.com|justdial\.com|we\s*(?:are|r)\s*(?:a\s*)?(?:leading\s*)?(?:manufacturer|manufacturers|mfrs?|supplier|suppliers|dealer|dealers|wholesaler|wholesalers|distributor|distributors|stockist|stockists|importer|importers|trader|traders)\b|we\s*(?:deal|deals|specialize|supply|provide|offer|manufacture|fabricate)\s*(?:in|all\s*kinds\s*of|raw\s*materials?|laser|acrylic|sheets?|machines?|trophies|mementos)\b|raw\s*material(?:s)?\s*(?:supplier|available|price|for\s*sale)|acrylic\s*(?:sheet|sheets|offcut|board|scrap|raw\s*material)|mdf\s*(?:sheet|sheets|board|boards|cutouts?)|laser\s*(?:cutting|engraving|marking)?\s*machine(?:s)?|uv\s*(?:printer|flatbed|ink)|fiber\s*laser|co2\s*laser|cnc\s*router|sublimation\s*(?:machine|heat\s*press|paper|ink)|medal\s*ribbon\s*manufacturer|lanyard\s*manufacturer|digital\s*marketing|seo\s*services?|website\s*design|web\s*development|google\s*ads\s*service|bulk\s*sms|whatsapp\s*marketing\s*service|business\s*loan|msme\s*loan|unsecured\s*loan|packaging\s*box\s*manufacturer|corrugated\s*box(?:es)?\s*manufacturer|courier\s*(?:service|partner)|transport\s*(?:service|logistics)\s*(?:provider|pan\s*india)|catalogue\s*attached\s*for\s*your\s*reference.*dealership|dealer\s*price\s*list|wholesale\s*rate\s*for\s*dealers)\b/i;
+
 const BUSINESS_KEYWORD_PATTERN =
   /\b(troph(?:y|ies)|award(?:s)?|medal(?:s)?|memento(?:s)?|momento(?:s|es)?|shield(?:s)?|plaque(?:s)?|crystal|acrylic|wooden|corporate\s*gift(?:s)?|souvenir(?:s)?|ecotrophy|crest(?:s)?|badge(?:s)?|enquir(?:y|ies)|inquir(?:y|ies)|quot(?:e|ation)|pric(?:e|ing)|cost|rate(?:s)?|budget|estimat(?:e|ion)|catalog(?:ue)?|brochure|bulk\s*order|sample(?:s)?|mockup(?:s)?|engrav(?:e|ing)|proforma|invoice|moq|minimum\s*order|how\s*much|rate\s*enna|price\s*enna|evlo|evalavu|paid\s*advance|advance\s*paid|payment\s*done|payment|upi|gpay|utr|panniten|(?:place|new|want\s*to|need(?:\s*to)?|confirm)\s+(?:\w+\s+)?order)\b/i;
 
@@ -986,9 +993,35 @@ function heuristicAnalysis(text: string, phone: string, senderName: string, rece
   const sizeMatch = combined.match(/(\d{1,2}(?:\.\d)?)\s*(?:inch|inches|cm)\b/i);
   const trophySize = sizeMatch ? `${sizeMatch[1]} Inch` : '';
 
-  const isNoise = NOISE_PATTERN.test(text || '');
-  const hasBusinessSignal = BUSINESS_KEYWORD_PATTERN.test(lower) || Boolean(quantity) || Boolean(budget);
+  // Vendor / IndiaMART / Supplier Pitch Filter
+  const isVendorOrSpam = VENDOR_OR_SPAM_PATTERN.test(lower);
+  const isNoise = NOISE_PATTERN.test(text || '') || isVendorOrSpam;
+  const hasBusinessSignal = !isVendorOrSpam && (BUSINESS_KEYWORD_PATTERN.test(lower) || Boolean(quantity) || Boolean(budget));
   const isBusinessLead = !isNoise && hasBusinessSignal;
+
+  // Extract company or organization name if mentioned
+  let identifiedCompany = '';
+  const orgMatch =
+    combined.match(/\b(?:company|organization|institution|school|college|firm|academy|trust)\s*(?:name)?\s*[:=-]\s*([A-Za-z0-9\s&'\.,\-]{2,50})/i) ||
+    combined.match(/\b(?:from|for|at|representing)\s+([A-Z][A-Za-z0-9\s&'\.]+(?:school|college|academy|university|pvt\s+ltd|limited|corp|institute|club|trust|foundation|solutions|technologies|enterprises|group))\b/i);
+  if (orgMatch && orgMatch[1]) {
+    identifiedCompany = orgMatch[1].trim().replace(/[,\.;]+$/, '');
+  }
+
+  // Extract customer personal name from self-introduction
+  let identifiedName = '';
+  const nameMatch =
+    combined.match(/\b(?:i am|i'm|my name is|this is|myself)\s+([A-Z][a-zA-Z\.]+(?:\s+[A-Z][a-zA-Z\.]+){0,2})\b/i) ||
+    combined.match(/\b(?:name|contact person|poc)\s*[:=-]\s*([A-Za-z\s\.]{2,30})/i) ||
+    combined.match(/\b(?:regards|thanks & regards|warm regards)\s*,?\s*[\r\n]+\s*([A-Za-z\s\.]{2,30})/i);
+  if (nameMatch && nameMatch[1]) {
+    identifiedName = nameMatch[1].trim().replace(/[,\.;]+$/, '');
+  }
+
+  const resolvedLeadName =
+    identifiedName ||
+    (senderName && senderName !== 'Customer' && !senderName.startsWith('+') ? senderName : identifiedCompany) ||
+    (phone ? `+${phone}` : 'WhatsApp Lead');
 
   // Urgency detection
   let urgency: 'low' | 'medium' | 'high' = 'medium';
@@ -1004,19 +1037,21 @@ function heuristicAnalysis(text: string, phone: string, senderName: string, rece
         ? 'qualified'
         : 'new';
 
-  const suggestedAction = isBusinessLead
-    ? quantity
-      ? `Draft Quotation for ${quantity}`
-      : 'Collect Quantity & Event Requirements'
-    : 'No CRM Action Needed (Personal / Promo Chat)';
+  const suggestedAction = isVendorOrSpam
+    ? 'Vendor / IndiaMART Pitch (Ignored)'
+    : isBusinessLead
+      ? quantity
+        ? `Draft Quotation for ${quantity}`
+        : 'Collect Quantity & Event Requirements'
+      : 'No CRM Action Needed (Personal / Promo Chat)';
 
   const suggestedReply = isBusinessLead
-    ? `Hello ${senderName !== 'Customer' ? senderName : ''}! Thank you for reaching out to EcoTrophy. We have received your requirement${quantity ? ` for ${quantity}` : ''}. Our team is preparing details & pricing for you right away. Could you also share any preferred model or delivery date?`
-    : `Hello ${senderName !== 'Customer' ? senderName : ''}! Thank you for messaging EcoTrophy Innovations.`;
+    ? `Hello ${resolvedLeadName !== 'Customer' && !resolvedLeadName.startsWith('+') ? resolvedLeadName : ''}! Thank you for reaching out to EcoTrophy. We have received your requirement${quantity ? ` for ${quantity}` : ''}. Our team is preparing details & pricing for you right away. Could you also share any preferred model or delivery date?`
+    : `Hello! Thank you for messaging EcoTrophy Innovations.`;
 
   return {
-    leadName: senderName || (phone ? `+${phone}` : 'WhatsApp Lead'),
-    company: '',
+    leadName: resolvedLeadName,
+    company: identifiedCompany,
     phone: phone,
     requirement: (text || combined).slice(0, 140),
     quantity,
@@ -1062,9 +1097,17 @@ Sender Phone: ${cleanPhone || 'Unknown'}
 Sender Name: ${senderName}
 ${recentContext ? `Recent Chat Context:\n${recentContext}\n` : ''}Latest Message: "${text}"
 
-Determine:
-1. "isBusinessLead": boolean — TRUE only if this is a clear customer product enquiry, quote/price/catalog request, custom trophy/award/medal/memento/corporate-gift request, design/artwork discussion, or order/payment follow-up. FALSE for ALL regular/personal conversations ("hi", "hello", "call me", "where are you", friend/family/staff chats), greetings, media-only messages ("Photo", "Video"), spam, OTPs, bank alerts, or ambiguous chats without enquiry intent.
-2. "pipelineStage": exact CRM stage ID from this list ONLY:
+STRICT FILTERING & LEAD QUALIFICATION RULES:
+1. "isBusinessLead": boolean
+   - MUST BE FALSE for vendor/supplier sales pitches (e.g. vendors offering acrylic sheets, MDF boards, raw materials, trophy components, laser cutting machines, UV flatbed printers, inks, digital marketing, SEO, web design, courier/transport services, or business loans). EcoTrophy is the manufacturer and SELLER of trophies and awards; suppliers trying to sell raw materials or equipment to EcoTrophy are NOT customer leads!
+   - MUST BE FALSE for IndiaMART, TradeIndia, Justdial, B2B portal broadcasts, buy-lead alerts, or directory spam.
+   - MUST BE FALSE for personal greetings ("hi", "hello", "call me"), casual talk, family/friend messages, OTPs, bank transaction alerts, or media-only messages without enquiry intent.
+   - TRUE ONLY if this is a genuine prospective customer wishing to BUY or enquire about trophies, awards, mementos, medals, plaques, shields, or corporate gifts from EcoTrophy.
+
+2. "leadName": string — Customer person's name or company name if identified in text or senderName. NEVER output a raw phone number.
+3. "company": string — Customer's company, school, college, institution, or organization if mentioned, else empty.
+
+4. "pipelineStage": exact CRM stage ID from this list ONLY:
    - "new_enquiry" (initial inquiry with minimal details)
    - "requirement_collection" (asking prices/catalog/type without complete specs/quantity yet)
    - "requirement_confirmed" (gave quantity/product/event/budget details ready for quotation)
@@ -1073,6 +1116,16 @@ Determine:
    - "follow_up" (following up after quote)
    - "advance_payment" (explicitly confirming advance payment already paid)
    - "lost_cancelled" (cancelling order / not interested)
+
+5. "prosperStep": Which of EcoTrophy's exact 7 PROSPER steps should the salesperson execute next?
+   - "Pitch" (Hook with in-house craftsmanship & sustainable wood/crystal materials)
+   - "Rapport" (Connect warmly, language match in Tamil/English, congratulate event)
+   - "Open Questions" (Uncover ceremony format, audience prestige, past vendor pain points)
+   - "Story" (Share social proof, photos/videos of similar finished awards on stage)
+   - "Proposal" (Present Good-Better-Best options with 2D mockup proof & transparent quote)
+   - "Eliminate Objections" (Reframe price vs hollow plastic, handle sample or credit concerns)
+   - "Reserve & Close" (Create time-bound cutoff urgency tied to event date & request 50% advance token)
+6. "prosperCoachingTip": Targeted advice telling the salesperson what was missed or how to execute the step.
 
 Respond with ONLY raw JSON without markdown code fences in this schema:
 {
@@ -1090,10 +1143,14 @@ Respond with ONLY raw JSON without markdown code fences in this schema:
   "eventDate": "string (event date if mentioned, or '')",
   "deliveryDate": "string (delivery date if mentioned, or '')",
   "urgency": "low" | "medium" | "high",
+  "intentTier": "HIGH" | "MEDIUM" | "LOW",
+  "fitsSummary": "string (brief summary of product fit, quantity, event date & budget)",
+  "prosperStep": "Pitch" | "Rapport" | "Open Questions" | "Story" | "Proposal" | "Eliminate Objections" | "Reserve & Close",
+  "prosperCoachingTip": "string (practical advice for the salesperson for the next PROSPER step)",
   "stage": "new" | "contacted" | "qualified" | "lost",
   "pipelineStage": "new_enquiry" | "requirement_collection" | "requirement_confirmed" | "design_stage" | "design_approval" | "follow_up" | "advance_payment" | "lost_cancelled",
   "suggestedAction": "string",
-  "suggestedReply": "string"
+  "suggestedReply": "string (ready-to-use WhatsApp draft tailored to the customer)"
 }
 `;
 
@@ -1103,13 +1160,26 @@ Respond with ONLY raw JSON without markdown code fences in this schema:
     const parsed = JSON.parse(cleanJson);
     const heuristicFallback = heuristicAnalysis(text, cleanPhone, senderName, recentContext);
 
+    const isVendorSpam = VENDOR_OR_SPAM_PATTERN.test(text) || VENDOR_OR_SPAM_PATTERN.test(recentContext);
+
     const safeStage = ALLOWED_CRM_STAGES.has(parsed.pipelineStage)
       ? parsed.pipelineStage
       : inferPipelineStage(text, parsed.quantity || heuristicFallback.quantity, Boolean(parsed.isBusinessLead));
 
+    const finalIsBusinessLead = isVendorSpam
+      ? false
+      : typeof parsed.isBusinessLead === 'boolean'
+        ? parsed.isBusinessLead
+        : heuristicFallback.isBusinessLead;
+
+    const finalLeadName =
+      (parsed.leadName && !parsed.leadName.startsWith('+') && parsed.leadName !== 'Prospective Client' && parsed.leadName !== 'Customer' ? parsed.leadName : '') ||
+      heuristicFallback.leadName ||
+      (cleanPhone ? `+${cleanPhone}` : 'Prospective Client');
+
     return {
-      leadName: parsed.leadName || senderName || 'Prospective Client',
-      company: parsed.company || '',
+      leadName: finalLeadName,
+      company: parsed.company || heuristicFallback.company || '',
       phone: cleanPhone,
       email: parsed.email || '',
       location: parsed.location || '',
@@ -1122,10 +1192,13 @@ Respond with ONLY raw JSON without markdown code fences in this schema:
       eventDate: parsed.eventDate || '',
       deliveryDate: parsed.deliveryDate || '',
       urgency: parsed.urgency || 'medium',
+      intentTier: parsed.intentTier || (parsed.quantity && parseInt(parsed.quantity) >= 20 ? 'HIGH' : 'MEDIUM'),
+      fitsSummary: parsed.fitsSummary || '',
+      prosperCoachingTip: parsed.prosperCoachingTip || '',
       stage: parsed.stage || 'new',
       pipelineStage: safeStage,
-      isBusinessLead: typeof parsed.isBusinessLead === 'boolean' ? parsed.isBusinessLead : heuristicFallback.isBusinessLead,
-      suggestedAction: parsed.suggestedAction || 'Follow up with customer catalog',
+      isBusinessLead: finalIsBusinessLead,
+      suggestedAction: isVendorSpam ? 'Vendor / IndiaMART Pitch (Ignored)' : (parsed.suggestedAction || 'Follow up with customer catalog'),
       suggestedReply: parsed.suggestedReply || 'Thank you for contacting EcoTrophy. We would be delighted to assist with your requirement.',
       analyzedAt: Date.now()
     };
@@ -1141,6 +1214,7 @@ function isNonEnquiryNoiseOrCasual(latestText: string, combinedText: string): bo
   const trimmed = String(latestText || '').trim();
   if (!trimmed || trimmed.length < 2) return true;
   if (NOISE_PATTERN.test(trimmed)) return true;
+  if (VENDOR_OR_SPAM_PATTERN.test(trimmed) || VENDOR_OR_SPAM_PATTERN.test(combinedText)) return true;
   if (CASUAL_CHAT_ONLY_RE.test(trimmed) && !BUSINESS_KEYWORD_PATTERN.test(combinedText)) return true;
   return false;
 }

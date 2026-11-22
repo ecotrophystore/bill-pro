@@ -4,11 +4,14 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import type { Lead, User } from '../types';
@@ -73,6 +76,7 @@ export interface LeadAssignmentContext {
   pipelineId?: string;
   whatsappAccountLabel?: string;
   whatsappPhone?: string;
+  phone?: string;
   requiredQuantity?: string | number;
   value?: number;
   location?: string;
@@ -497,6 +501,63 @@ export async function resolveLeadAssignment(
   ctx: LeadAssignmentContext,
   overrideConfig?: LeadAssignmentConfig
 ): Promise<LeadAssignmentResult> {
+  // 0. Assignment Preservation: If this customer's phone already has an assigned team member, NEVER reassign to another member!
+  const rawCustomerPhone = (ctx.phone || '').replace(/\D/g, '');
+  if (rawCustomerPhone.length >= 7 && db) {
+    try {
+      const local10 = rawCustomerPhone.slice(-10);
+      const variants = Array.from(new Set([rawCustomerPhone, `91${local10}`, local10, `+91${local10}`, `0${local10}`]));
+
+      const leadsSnap = await getDocs(
+        query(collection(db, 'leads'), where('normalized_phone', 'in', variants), limit(5))
+      ).catch(() => null);
+
+      let foundRepId = '';
+      let foundRepName = '';
+
+      if (leadsSnap && !leadsSnap.empty) {
+        for (const docSnap of leadsSnap.docs) {
+          const ldata = docSnap.data() as Lead;
+          const ownerId = getLeadOwnerId(ldata);
+          if (ownerId) {
+            foundRepId = ownerId;
+            foundRepName = ldata.sales_person || '';
+            break;
+          }
+        }
+      }
+
+      if (!foundRepId) {
+        const leadsSnap2 = await getDocs(
+          query(collection(db, 'leads'), where('phone', 'in', variants), limit(5))
+        ).catch(() => null);
+        if (leadsSnap2 && !leadsSnap2.empty) {
+          for (const docSnap of leadsSnap2.docs) {
+            const ldata = docSnap.data() as Lead;
+            const ownerId = getLeadOwnerId(ldata);
+            if (ownerId) {
+              foundRepId = ownerId;
+              foundRepName = ldata.sales_person || '';
+              break;
+            }
+          }
+        }
+      }
+
+      if (foundRepId) {
+        return {
+          assigned: true,
+          ownerId: foundRepId,
+          ownerName: foundRepName || 'Assigned Rep',
+          ruleName: 'Existing Customer Assignment Preserved',
+          mode: 'rule_specific',
+        };
+      }
+    } catch {
+      // Fall through to normal rules
+    }
+  }
+
   const config = overrideConfig || (await loadLeadAssignmentConfig());
   if (!config.enabled) {
     return { assigned: false, ownerId: '', ownerName: '', mode: 'unassigned' };

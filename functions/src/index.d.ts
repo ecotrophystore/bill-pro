@@ -69,4 +69,10 @@ export declare const enrollLeadInAutomation: any;
 export declare const cancelAutomationEnrollment: any;
 export declare const pauseAutomation: any;
 export declare const processAutomationEnrollments: any;
+/**
+ * Daily Morning 7:30 AM Automated Follow-Up Dispatcher
+ * Automatically sends a "Hi" WhatsApp message to all leads in "follow_up" stage every morning at 7:30 AM IST.
+ * Governed by the toggle in system_settings/whatsapp_followup_automation.
+ */
+export declare const dailyMorningFollowupDispatch: any;
 //# sourceMappingURL=index.d.ts.map

@@ -32,7 +32,7 @@ export async function processWebhookPayload(eventId, data) {
             const senderPhone = message.from;
             const messageId = message.id;
             const businessPhoneId = value.metadata?.phone_number_id || "1263075550230396";
-            const businessDisplayPhone = value.metadata?.display_phone_number || "919344309369";
+            const businessDisplayPhone = value.metadata?.display_phone_number || "";
             // Prevent duplicate processing based on messageId
             const existingMsgDocs = await db.collection("messages").where("metaMessageId", "==", messageId).limit(1).get();
             if (!existingMsgDocs.empty) {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   addDoc,
   collection,
@@ -55,10 +55,18 @@ import {
   Flame,
   Crown,
   Zap,
+  Palette,
+  TrendingUp,
+  ArrowUp,
+  ArrowDown,
+  RotateCcw,
+  Factory,
+  Printer,
 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { isAdminUser, subscribeScopedLeads } from '../utils/leadVisibility';
+import { normalizeRole } from '../config/roleAccess';
 import { LeadAssignmentModal } from '../components/CRM/LeadAssignmentManager';
 import * as XLSX from 'xlsx';
 import {
@@ -68,8 +76,18 @@ import {
   type StageMovePromptMode,
   STANDARD_CRM_STAGES,
   DEFAULT_QUANTITY_PIPELINES,
+  DEFAULT_DESIGN_STAGES,
+  DEFAULT_DESIGN_PIPELINE,
+  DEFAULT_PRODUCTION_STAGES,
+  DEFAULT_PRODUCTION_PIPELINE,
 } from '../types';
 import toast from 'react-hot-toast';
+import { ProductionJobCardModal } from '../components/Production/ProductionJobCardModal';
+import { ProductionSpecsModal } from '../components/Production/ProductionSpecsModal';
+import { ProductionProgressModal } from '../components/Production/ProductionProgressModal';
+import { DesignBriefModal } from '../components/Design/DesignBriefModal';
+import { SubmitDesignRequestModal } from '../components/Pipeline/SubmitDesignRequestModal';
+import { printProductionTeamChecklist, printDesignTeamChecklist } from '../utils/printDesignProductionSheet';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { StageChangeConfirmModal } from '../components/CRM/StageChangeConfirmModal';
 import { LeadNotesDrawer } from '../components/CRM/LeadNotesDrawer';
@@ -84,7 +102,14 @@ import {
   stageRequiresReason,
 } from '../services/stageNotificationService';
 import { PipelineQuickChatModal } from '../components/Pipeline/PipelineQuickChatModal';
+import { FollowupAutomationModal } from '../components/Pipeline/FollowupAutomationModal';
+import {
+  subscribeFollowupAutomationConfig,
+  type WhatsAppFollowupAutomationConfig,
+  DEFAULT_FOLLOWUP_CONFIG
+} from '../services/whatsappFollowupAutomationService';
 import { formatWhatsAppNumberDisplay } from '../utils/whatsappNumberUtils';
+import { OrderTypeStageSummary } from '../components/Pipeline/OrderTypeStageSummary';
 
 function SourceWhatsappBadge({ lead, compact = false }: { lead: Lead; compact?: boolean }) {
   const displayValue =
@@ -263,6 +288,8 @@ function getReminderBadge(reminder: any): { text: string; tone: string; isOverdu
 }
 
 function normalizePipeline(pipeline: any): Pipeline {
+  const isDesign = pipeline?.id === 'design_pipeline' || pipeline?.pipeline_type === 'design';
+  const isProduction = pipeline?.id === 'production_pipeline' || pipeline?.pipeline_type === 'production';
   const stages: PipelineStage[] =
     Array.isArray(pipeline?.stages) && pipeline.stages.length > 0
       ? pipeline.stages.map((stage: any, index: number) => ({
@@ -270,14 +297,29 @@ function normalizePipeline(pipeline: any): Pipeline {
         label: String(stage?.label || `Stage ${index + 1}`),
         required_fields: Array.isArray(stage?.required_fields) ? stage.required_fields : [],
       }))
-      : STANDARD_CRM_STAGES.map((stage) => ({ ...stage }));
+      : isDesign
+        ? DEFAULT_DESIGN_STAGES.map((s) => ({ ...s }))
+        : isProduction
+          ? DEFAULT_PRODUCTION_STAGES.map((s) => ({ ...s }))
+          : STANDARD_CRM_STAGES.map((stage) => ({ ...stage }));
 
   return {
     id: String(pipeline?.id || 'pipeline_default'),
-    name: String(pipeline?.name || 'Untitled Pipeline'),
-    scenario: String(pipeline?.scenario || ''),
+    name: String(
+      pipeline?.name ||
+      (isDesign ? '🎨 Design Team Pipeline' : isProduction ? '🏭 Production Team Pipeline' : 'Untitled Pipeline')
+    ),
+    scenario: String(
+      pipeline?.scenario ||
+      (isDesign
+        ? 'Artwork, Concepts & Mockups'
+        : isProduction
+          ? 'Cutting, Engraving, Assembly & QC'
+          : '')
+    ),
     stages,
     is_default: Boolean(pipeline?.is_default),
+    pipeline_type: pipeline?.pipeline_type || (isDesign ? 'design' : isProduction ? 'production' : undefined),
     created_at: pipeline?.created_at || new Date(),
     updated_at: pipeline?.updated_at,
   };
@@ -285,10 +327,31 @@ function normalizePipeline(pipeline: any): Pipeline {
 
 export default function PipelineBoard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlPipeline = searchParams.get('pipeline');
+
   const [pipelines, setPipelines] = useState<Pipeline[]>(DEFAULT_QUANTITY_PIPELINES);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEY) || 'regular_order';
+    if (urlPipeline) return urlPipeline;
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) return stored;
+    return 'regular_order';
   });
+
+  // Manage Stages Modal state (for Design & Production pipelines)
+  const [showManageStagesModal, setShowManageStagesModal] = useState(false);
+  const [editingStages, setEditingStages] = useState<PipelineStage[]>([]);
+  const [newStageLabel, setNewStageLabel] = useState('');
+  const [isSavingStages, setIsSavingStages] = useState(false);
+  // Factory Production Job Card & Specs states
+  const [selectedJobCardLead, setSelectedJobCardLead] = useState<Lead | null>(null);
+  const [selectedProductionSpecsLead, setSelectedProductionSpecsLead] = useState<Lead | null>(null);
+  const [selectedProductionSpecsMode, setSelectedProductionSpecsMode] = useState<'view' | 'edit'>('view');
+  const [selectedProductionProgressLead, setSelectedProductionProgressLead] = useState<Lead | null>(null);
+  // Design Brief & Submission states
+  const [selectedDesignBriefLead, setSelectedDesignBriefLead] = useState<Lead | null>(null);
+  const [submitDesignModalLead, setSubmitDesignModalLead] = useState<Lead | null>(null);
+  const [submitDesignTargetStage, setSubmitDesignTargetStage] = useState<string>('');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
   const [loadingPipelines, setLoadingPipelines] = useState(true);
@@ -323,6 +386,16 @@ export default function PipelineBoard() {
 
   // Quick Chat State
   const [quickChatLead, setQuickChatLead] = useState<Lead | null>(null);
+  // Delete Lead Confirmation State
+  const [deleteConfirmLead, setDeleteConfirmLead] = useState<Lead | null>(null);
+  const [isDeletingLead, setIsDeletingLead] = useState(false);
+  // 7:30 AM Follow-Up Automation Modal & Config State
+  const [showFollowupModal, setShowFollowupModal] = useState(false);
+  const [followupConfig, setFollowupConfig] = useState<WhatsAppFollowupAutomationConfig>(DEFAULT_FOLLOWUP_CONFIG);
+
+  useEffect(() => {
+    return subscribeFollowupAutomationConfig(setFollowupConfig);
+  }, []);
   // Notes & Reminders Drawer State
   const [notesDrawerState, setNotesDrawerState] = useState<{
     isOpen: boolean;
@@ -443,18 +516,99 @@ export default function PipelineBoard() {
     };
   }, [dbUser?.id, dbUser?.role]);
 
-  const activePipeline = useMemo(() => {
-    const found = pipelines.find((p) => p.id === selectedPipelineId);
-    return found || pipelines[0] || DEFAULT_QUANTITY_PIPELINES[1];
-  }, [pipelines, selectedPipelineId]);
+  const userRole = normalizeRole(dbUser?.role);
 
-  const activeStages = useMemo(() => {
-    return activePipeline?.stages?.length ? activePipeline.stages : STANDARD_CRM_STAGES;
+  // Sync if URL search param changes with strict role boundary guards
+  useEffect(() => {
+    if (userRole === 'design') {
+      if (selectedPipelineId !== 'design_pipeline') {
+        setSelectedPipelineId('design_pipeline');
+      }
+      return;
+    }
+
+    if (userRole === 'production') {
+      if (selectedPipelineId !== 'production_pipeline') {
+        setSelectedPipelineId('production_pipeline');
+      }
+      return;
+    }
+
+    // Sales and non-admin roles cannot view design or production pipelines
+    if (userRole === 'sales' || !isAdmin) {
+      if (urlPipeline === 'design_pipeline' || urlPipeline === 'production_pipeline') {
+        setSelectedPipelineId('default_pipeline');
+        return;
+      }
+    }
+
+    if (urlPipeline && urlPipeline !== selectedPipelineId) {
+      setSelectedPipelineId(urlPipeline);
+    }
+  }, [urlPipeline, userRole, selectedPipelineId, isAdmin]);
+
+  // Role-filtered pipelines:
+  // - Admin: all pipelines
+  // - Design: ONLY design_pipeline
+  // - Production: ONLY production_pipeline
+  // - Sales & others: ONLY sales pipelines (never design or production)
+  const visiblePipelines = useMemo(() => {
+    if (isAdmin) return pipelines;
+
+    if (userRole === 'design') {
+      const designPipes = pipelines.filter(
+        (p) => p.id === 'design_pipeline' || p.pipeline_type === 'design'
+      );
+      return designPipes.length > 0 ? designPipes : [DEFAULT_DESIGN_PIPELINE];
+    }
+
+    if (userRole === 'production') {
+      const prodPipes = pipelines.filter(
+        (p) => p.id === 'production_pipeline' || p.pipeline_type === 'production'
+      );
+      return prodPipes.length > 0 ? prodPipes : [DEFAULT_PRODUCTION_PIPELINE];
+    }
+
+    // Sales & other non-admin roles: exclude design & production pipelines
+    return pipelines.filter(
+      (p) =>
+        p.id !== 'design_pipeline' &&
+        p.id !== 'production_pipeline' &&
+        p.pipeline_type !== 'design' &&
+        p.pipeline_type !== 'production'
+    );
+  }, [pipelines, userRole, isAdmin]);
+
+  const activePipeline = useMemo(() => {
+    const found = visiblePipelines.find((p) => p.id === selectedPipelineId);
+    return (
+      found ||
+      visiblePipelines[0] ||
+      (userRole === 'design'
+        ? DEFAULT_DESIGN_PIPELINE
+        : userRole === 'production'
+          ? DEFAULT_PRODUCTION_PIPELINE
+          : DEFAULT_QUANTITY_PIPELINES[1])
+    );
+  }, [visiblePipelines, selectedPipelineId, userRole]);
+
+  const isDesignPipeline = useMemo(() => {
+    return activePipeline?.id === 'design_pipeline' || activePipeline?.pipeline_type === 'design';
   }, [activePipeline]);
 
-  // Extract unique sales persons from leads (Admin only)
+  const isProductionPipeline = useMemo(() => {
+    return activePipeline?.id === 'production_pipeline' || activePipeline?.pipeline_type === 'production';
+  }, [activePipeline]);
+
+  const activeStages = useMemo(() => {
+    if (activePipeline?.stages?.length) return activePipeline.stages;
+    if (isDesignPipeline) return DEFAULT_DESIGN_STAGES;
+    if (isProductionPipeline) return DEFAULT_PRODUCTION_STAGES;
+    return STANDARD_CRM_STAGES;
+  }, [activePipeline, isDesignPipeline, isProductionPipeline]);
+
+  // Extract unique sales persons from leads
   const salesPersons = useMemo(() => {
-    if (!isAdmin) return [];
     const reps = new Set<string>();
     leads.forEach((l) => {
       if (l.sales_person && l.sales_person.trim()) {
@@ -462,7 +616,7 @@ export default function PipelineBoard() {
       }
     });
     return Array.from(reps).sort();
-  }, [leads, isAdmin]);
+  }, [leads]);
 
   // Filter and Group leads
   const { filteredLeadsList, groupedLeads } = useMemo(() => {
@@ -475,13 +629,46 @@ export default function PipelineBoard() {
     const list: Lead[] = [];
 
     leads.forEach((lead) => {
-      // Filter by pipeline matching
-      const leadPipeId = lead.pipeline_id || 'regular_order';
-      const matchesPipeline =
-        leadPipeId === activePipeline.id ||
-        (activePipeline.id === 'regular_order' && (leadPipeId === 'default' || !leadPipeId));
+      if (isDesignPipeline) {
+        // A lead qualifies for the Design Pipeline if:
+        // 1. lead.pipeline_id === 'design_pipeline' OR
+        // 2. lead.status is 'design_stage', 'design_approval', or 'requirement_design_finalization' OR
+        // 3. lead.design_stage_id is set OR
+        // 4. lead.design_person is assigned AND lead is not closed
+        const isDesignLead =
+          lead.pipeline_id === 'design_pipeline' ||
+          lead.status === 'design_stage' ||
+          lead.status === 'design_approval' ||
+          lead.status === 'requirement_design_finalization' ||
+          Boolean((lead as any).design_stage_id) ||
+          (Boolean((lead as any).design_person) && lead.status !== 'completed' && lead.status !== 'lost_cancelled');
 
-      if (!matchesPipeline) return;
+        if (!isDesignLead) return;
+      } else if (isProductionPipeline) {
+        // A lead qualifies for the Production Pipeline if:
+        // 1. lead.pipeline_id === 'production_pipeline' OR
+        // 2. lead.status is 'advance_payment', 'production', 'quality_check', or 'ready_for_dispatch' OR
+        // 3. lead.production_stage_id is set OR
+        // 4. lead.production_person is assigned AND lead is not closed
+        const isProdLead =
+          lead.pipeline_id === 'production_pipeline' ||
+          lead.status === 'advance_payment' ||
+          lead.status === 'production' ||
+          lead.status === 'quality_check' ||
+          lead.status === 'ready_for_dispatch' ||
+          Boolean((lead as any).production_stage_id) ||
+          (Boolean((lead as any).production_person) && lead.status !== 'completed' && lead.status !== 'lost_cancelled');
+
+        if (!isProdLead) return;
+      } else {
+        // Standard sales pipeline matching
+        const leadPipeId = lead.pipeline_id || 'regular_order';
+        const matchesPipeline =
+          leadPipeId === activePipeline.id ||
+          (activePipeline.id === 'regular_order' && (leadPipeId === 'default' || !leadPipeId));
+
+        if (!matchesPipeline) return;
+      }
 
       // Filter by Search Query
       if (searchQuery.trim()) {
@@ -491,7 +678,9 @@ export default function PipelineBoard() {
           (lead.phone || '').includes(q) ||
           (lead.company || '').toLowerCase().includes(q) ||
           (lead.event_name || '').toLowerCase().includes(q) ||
-          (isAdmin && (lead.sales_person || '').toLowerCase().includes(q));
+          ((lead.sales_person || '').toLowerCase().includes(q)) ||
+          (((lead as any).design_person || '').toLowerCase().includes(q)) ||
+          (((lead as any).production_person || '').toLowerCase().includes(q));
         if (!match) return;
       }
 
@@ -505,13 +694,33 @@ export default function PipelineBoard() {
         return;
       }
 
-      // Filter by Sales Person (Admin only)
-      if (isAdmin && salesPersonFilter !== 'all' && lead.sales_person !== salesPersonFilter) {
-        return;
+      // Filter by Sales Person / Assignee
+      if (salesPersonFilter !== 'all') {
+        if (salesPersonFilter === 'my_leads') {
+          const myName = (dbUser?.name || '').trim().toLowerCase();
+          const myEmail = (dbUser?.email || '').trim().toLowerCase();
+          const leadRep = (lead.sales_person || '').trim().toLowerCase();
+          const leadDesigner = ((lead as any).design_person || '').trim().toLowerCase();
+          const leadProduction = ((lead as any).production_person || '').trim().toLowerCase();
+          const leadOwnerId = (lead.owner_id || (lead as any).ownerId || '').trim();
+          const isMe = (leadOwnerId && leadOwnerId === dbUser?.id) ||
+            (leadRep && (leadRep === myName || leadRep === myEmail)) ||
+            (leadDesigner && (leadDesigner === myName || leadDesigner === myEmail)) ||
+            (leadProduction && (leadProduction === myName || leadProduction === myEmail));
+          if (!isMe) return;
+        } else if (salesPersonFilter === 'unassigned') {
+          if (lead.sales_person && lead.sales_person.trim()) return;
+        } else if (
+          lead.sales_person !== salesPersonFilter &&
+          (lead as any).design_person !== salesPersonFilter &&
+          (lead as any).production_person !== salesPersonFilter
+        ) {
+          return;
+        }
       }
 
-      // Filter by Stage Phase (if applicable)
-      if (phaseFilter !== 'all') {
+      // Filter by Stage Phase (only if NOT design or production pipeline, because sub-workflows have their own stages)
+      if (!isDesignPipeline && !isProductionPipeline && phaseFilter !== 'all') {
         const selectedPhase = STAGE_PHASES.find((p) => p.id === phaseFilter);
         const currentStage = lead.status || activeStages[0]?.id || 'new_enquiry';
         if (selectedPhase && !selectedPhase.stageIds.includes(currentStage)) {
@@ -521,7 +730,11 @@ export default function PipelineBoard() {
 
       list.push(lead);
 
-      const statusKey = lead.status || activeStages[0]?.id || 'new_enquiry';
+      const statusKey = isDesignPipeline
+        ? ((lead as any).design_stage_id || activeStages[0]?.id || 'concept_creation')
+        : isProductionPipeline
+          ? ((lead as any).production_stage_id || activeStages[0]?.id || 'material_prep')
+          : (lead.status || activeStages[0]?.id || 'new_enquiry');
       if (map[statusKey]) {
         map[statusKey].push(lead);
       } else {
@@ -533,6 +746,8 @@ export default function PipelineBoard() {
   }, [
     leads,
     activePipeline,
+    isDesignPipeline,
+    isProductionPipeline,
     activeStages,
     searchQuery,
     urgencyFilter,
@@ -543,11 +758,11 @@ export default function PipelineBoard() {
 
   // Displayed stages based on phase filter
   const displayedStages = useMemo(() => {
-    if (phaseFilter === 'all') return activeStages;
+    if (isDesignPipeline || isProductionPipeline || phaseFilter === 'all') return activeStages;
     const selectedPhase = STAGE_PHASES.find((p) => p.id === phaseFilter);
     if (!selectedPhase) return activeStages;
     return activeStages.filter((s) => selectedPhase.stageIds.includes(s.id));
-  }, [activeStages, phaseFilter]);
+  }, [activeStages, phaseFilter, isDesignPipeline, isProductionPipeline]);
 
   // Phase-level stats for Navigator ribbon
   const phaseStats = useMemo(() => {
@@ -572,11 +787,207 @@ export default function PipelineBoard() {
   const handleSelectPipeline = (id: string) => {
     setSelectedPipelineId(id);
     localStorage.setItem(STORAGE_KEY, id);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (id === 'regular_order') {
+        next.delete('pipeline');
+      } else {
+        next.set('pipeline', id);
+      }
+      return next;
+    }, { replace: true });
+  };
+
+  const handleAddCustomStage = () => {
+    if (!newStageLabel.trim()) return;
+    const cleanId = newStageLabel
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '') || `stage_${Date.now()}`;
+    const nextLabel = newStageLabel.trim();
+    if (editingStages.some((s) => s.id === cleanId)) {
+      toast.error('A stage with this ID already exists. Please choose a different name.');
+      return;
+    }
+    setEditingStages([...editingStages, { id: cleanId, label: nextLabel }]);
+    setNewStageLabel('');
+  };
+
+  const handleRemoveCustomStage = (stageId: string) => {
+    if (editingStages.length <= 2) {
+      toast.error('The pipeline must contain at least 2 stages.');
+      return;
+    }
+    setEditingStages(editingStages.filter((s) => s.id !== stageId));
+  };
+
+  const handleMoveStageOrder = (index: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= editingStages.length) return;
+    const copy = [...editingStages];
+    const [moved] = copy.splice(index, 1);
+    copy.splice(targetIndex, 0, moved);
+    setEditingStages(copy);
+  };
+
+  const handleSaveDesignStages = async () => {
+    if (editingStages.length < 2) {
+      toast.error('Pipeline must have at least 2 stages.');
+      return;
+    }
+    setIsSavingStages(true);
+    try {
+      const docRef = doc(db, 'pipelines', activePipeline.id);
+      await setDoc(
+        docRef,
+        {
+          id: activePipeline.id,
+          name: activePipeline.name,
+          scenario: activePipeline.scenario,
+          pipeline_type: activePipeline.pipeline_type || (isDesignPipeline ? 'design' : isProductionPipeline ? 'production' : undefined),
+          stages: editingStages,
+          updated_at: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      toast.success(`${activePipeline.name} stages saved successfully!`);
+      setShowManageStagesModal(false);
+    } catch (err: any) {
+      console.error('Failed to save pipeline stages:', err);
+      toast.error('Failed to save stages: ' + (err?.message || 'Permission denied'));
+    } finally {
+      setIsSavingStages(false);
+    }
   };
 
   const initiateStageMove = async (lead: Lead, targetStageId: string) => {
+    if (isDesignPipeline) {
+      const currentStageId = (lead as any).design_stage_id || activeStages[0]?.id || 'concept_creation';
+      if (currentStageId === targetStageId) return;
+
+      const fromStage = activeStages.find((s) => s.id === currentStageId) || {
+        id: currentStageId,
+        label: currentStageId,
+      };
+      const toStage = activeStages.find((s) => s.id === targetStageId) || {
+        id: targetStageId,
+        label: targetStageId,
+      };
+
+      try {
+        const updates: any = {
+          design_stage_id: targetStageId,
+          updated_at: serverTimestamp(),
+        };
+
+        if (targetStageId === 'client_proofing') {
+          updates.design_status = 'proof_sent';
+        } else if (targetStageId === 'revision_needed') {
+          updates.design_status = 'revisions_requested';
+        } else if (targetStageId === 'final_artwork_ready') {
+          updates.design_status = 'approved';
+          // Auto-advance sales lead if currently in design_stage or design_approval
+          if (!lead.status || lead.status === 'design_stage' || lead.status === 'design_approval') {
+            updates.status = 'quotation_sent';
+          }
+        } else {
+          updates.design_status = 'in_progress';
+        }
+
+        await updateDoc(doc(db, 'leads', lead.id), updates);
+
+        const autoAdvanceNote =
+          targetStageId === 'final_artwork_ready' && updates.status === 'quotation_sent'
+            ? ' Auto-advanced sales pipeline to "Quotation Sent".'
+            : '';
+
+        await addDoc(collection(db, 'activities'), {
+          lead_id: lead.id,
+          type: 'design_stage_changed',
+          content: `🎨 Design Stage changed: "${fromStage.label}" ➔ "${toStage.label}" by ${dbUser?.name || 'Designer'}.${autoAdvanceNote}`,
+          user_name: dbUser?.name || 'Designer',
+          user_id: dbUser?.id || '',
+          created_at: serverTimestamp(),
+        });
+
+        toast.success(`Design stage updated: ${toStage.label}${autoAdvanceNote ? ' (Sales Lead advanced to Quotation Sent)' : ''}`);
+      } catch (err: any) {
+        console.error('Failed to move design stage:', err);
+        toast.error('Failed to update design stage: ' + (err?.message || 'Unknown error'));
+      }
+      return;
+    }
+
+    if (isProductionPipeline) {
+      const currentStageId = (lead as any).production_stage_id || activeStages[0]?.id || 'material_prep';
+      if (currentStageId === targetStageId) return;
+
+      const fromStage = activeStages.find((s) => s.id === currentStageId) || {
+        id: currentStageId,
+        label: currentStageId,
+      };
+      const toStage = activeStages.find((s) => s.id === targetStageId) || {
+        id: targetStageId,
+        label: targetStageId,
+      };
+
+      try {
+        const updates: any = {
+          production_stage_id: targetStageId,
+          updated_at: serverTimestamp(),
+        };
+
+        if (targetStageId === 'quality_check') {
+          updates.production_status = 'qc_passed';
+          if (lead.status === 'production') updates.status = 'quality_check';
+        } else if (targetStageId === 'ready_for_dispatch') {
+          updates.production_status = 'packed';
+          if (lead.status === 'production' || lead.status === 'quality_check' || lead.status === 'advance_payment') {
+            updates.status = 'ready_for_dispatch';
+          }
+        } else {
+          updates.production_status = 'in_production';
+          if (lead.status === 'advance_payment') updates.status = 'production';
+        }
+
+        await updateDoc(doc(db, 'leads', lead.id), updates);
+
+        const autoAdvMsg =
+          targetStageId === 'ready_for_dispatch' && updates.status === 'ready_for_dispatch'
+            ? ' Auto-advanced sales pipeline to "Ready for Dispatch".'
+            : '';
+
+        await addDoc(collection(db, 'activities'), {
+          lead_id: lead.id,
+          type: 'production_stage_changed',
+          content: `🏭 Production Stage changed: "${fromStage.label}" ➔ "${toStage.label}" by ${dbUser?.name || 'Production'}.${autoAdvMsg}`,
+          user_name: dbUser?.name || 'Production',
+          user_id: dbUser?.id || '',
+          created_at: serverTimestamp(),
+        });
+
+        toast.success(`Production stage updated: ${toStage.label}${autoAdvMsg ? ' (Order ready for dispatch)' : ''}`);
+      } catch (err: any) {
+        console.error('Failed to move production stage:', err);
+        toast.error('Failed to update production stage: ' + (err?.message || 'Unknown error'));
+      }
+      return;
+    }
+
     const currentStageId = lead.status || activeStages[0]?.id || 'new_enquiry';
     if (currentStageId === targetStageId) return;
+
+    // Prompt Sales with Design Request form when moving to Design stage
+    if (
+      !isDesignPipeline &&
+      !isProductionPipeline &&
+      (targetStageId === 'requirement_design_finalization' || targetStageId === 'design_stage')
+    ) {
+      setSubmitDesignTargetStage(targetStageId);
+      setSubmitDesignModalLead(lead);
+      return;
+    }
 
     const fromStage = activeStages.find((s) => s.id === currentStageId) || {
       id: currentStageId,
@@ -649,6 +1060,31 @@ export default function PipelineBoard() {
     initiateStageMove(lead, targetStageId);
   };
 
+  const handleDeleteLead = async () => {
+    if (!deleteConfirmLead) return;
+    if (!hasPermission('edit_lead') && !isAdmin) {
+      toast.error('You do not have permission to delete leads.');
+      return;
+    }
+    setIsDeletingLead(true);
+    try {
+      await deleteDoc(doc(db, 'leads', deleteConfirmLead.id));
+      toast.success(`Lead "${deleteConfirmLead.name}" deleted successfully.`);
+      if (quickChatLead?.id === deleteConfirmLead.id) {
+        setQuickChatLead(null);
+      }
+      if (notesDrawerState.lead?.id === deleteConfirmLead.id) {
+        setNotesDrawerState({ isOpen: false, lead: null, stageName: '' });
+      }
+      setDeleteConfirmLead(null);
+    } catch (err: any) {
+      console.error('Failed to delete lead from pipeline', err);
+      toast.error('Failed to delete lead: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsDeletingLead(false);
+    }
+  };
+
   const handleExportExcel = () => {
     try {
       const rows: any[] = [];
@@ -665,7 +1101,7 @@ export default function PipelineBoard() {
             'Event Name': lead.event_name || '',
             'Event Date': lead.event_date || '',
             'Delivery Date': lead.delivery_date || '',
-            ...(isAdmin ? { 'Assigned To': lead.sales_person || '' } : {}),
+            'Aligned To': lead.sales_person || 'Unassigned',
             Stage: stage.label,
             Pipeline: activePipeline.name,
             Urgency: lead.urgency || '',
@@ -726,8 +1162,8 @@ export default function PipelineBoard() {
               type="button"
               onClick={() => setViewMode('kanban')}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all ${viewMode === 'kanban'
-                  ? 'bg-primary text-surface shadow-sm'
-                  : 'text-secondary hover:text-primary-dark'
+                ? 'bg-primary text-surface shadow-sm'
+                : 'text-secondary hover:text-primary-dark'
                 }`}
             >
               <Columns3 size={14} /> Kanban
@@ -736,8 +1172,8 @@ export default function PipelineBoard() {
               type="button"
               onClick={() => setViewMode('table')}
               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all ${viewMode === 'table'
-                  ? 'bg-primary text-surface shadow-sm'
-                  : 'text-secondary hover:text-primary-dark'
+                ? 'bg-primary text-surface shadow-sm'
+                : 'text-secondary hover:text-primary-dark'
                 }`}
             >
               <LayoutList size={14} /> Table
@@ -753,8 +1189,8 @@ export default function PipelineBoard() {
               type="button"
               onClick={() => setStageMoveMode('ask')}
               className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'ask'
-                  ? 'bg-primary text-white shadow-xs'
-                  : 'text-secondary hover:text-primary-dark'
+                ? 'bg-primary text-white shadow-xs'
+                : 'text-secondary hover:text-primary-dark'
                 }`}
               title="Ask 'With Message' or 'Without Message' whenever a lead is moved"
             >
@@ -765,8 +1201,8 @@ export default function PipelineBoard() {
               type="button"
               onClick={() => setStageMoveMode('auto_send')}
               className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'auto_send'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-secondary hover:text-primary-dark'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-secondary hover:text-primary-dark'
                 }`}
               title="Auto-send WhatsApp update and move stage immediately"
             >
@@ -777,8 +1213,8 @@ export default function PipelineBoard() {
               type="button"
               onClick={() => setStageMoveMode('without_message')}
               className={`px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${stageMoveMode === 'without_message'
-                  ? 'bg-slate-700 text-white shadow-xs'
-                  : 'text-secondary hover:text-primary-dark'
+                ? 'bg-slate-700 text-white shadow-xs'
+                : 'text-secondary hover:text-primary-dark'
                 }`}
               title="Move stage without sending any message"
             >
@@ -786,6 +1222,29 @@ export default function PipelineBoard() {
               <span>No Message</span>
             </button>
           </div>
+
+          {/* 7:30 AM Automated Follow-Up Toggle & Modal Opener */}
+          <button
+            type="button"
+            onClick={() => setShowFollowupModal(true)}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-xs ${followupConfig.enabled
+              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+              : 'bg-surface text-secondary border-shadow-darker/20 hover:text-primary-dark'
+              }`}
+            title="Configure or test 7:30 AM Automated WhatsApp Follow-up to leads in Follow-up stage"
+          >
+            <Clock size={13} className={followupConfig.enabled ? 'text-emerald-500 animate-pulse' : 'text-secondary'} />
+            <span className="hidden sm:inline">7:30 AM Follow-Up:</span>
+            <span className="sm:hidden">7:30 AM:</span>
+            <span
+              className={`font-extrabold px-1.5 py-0.2 rounded text-[10px] ${followupConfig.enabled
+                ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                }`}
+            >
+              {followupConfig.enabled ? 'ON' : 'OFF'}
+            </span>
+          </button>
 
           {isAdmin && (
             <button
@@ -812,20 +1271,24 @@ export default function PipelineBoard() {
         </div>
       </div>
 
-      {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom) */}
+      {/* Pipeline Tab Switcher (Small / Regular / Bulk / Custom / Design) */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-2 bg-surface rounded-2xl border border-shadow-darker/20 shadow-neo-surface w-full min-w-0">
         <div className="w-full sm:flex-1 flex items-center gap-2 overflow-x-auto py-0.5 custom-sidebar-scrollbar snap-x">
-          {pipelines.map((pipe) => {
+          {visiblePipelines.map((pipe) => {
             const isSelected = pipe.id === activePipeline.id;
+            const isDesign = pipe.id === 'design_pipeline' || pipe.pipeline_type === 'design';
+            const isProd = pipe.id === 'production_pipeline' || pipe.pipeline_type === 'production';
             return (
               <button
                 key={pipe.id}
                 onClick={() => handleSelectPipeline(pipe.id)}
                 className={`px-3.5 py-1.5 rounded-xl text-xs font-extrabold whitespace-nowrap transition-all flex items-center gap-2 shrink-0 snap-start ${isSelected
-                    ? 'bg-primary text-surface shadow-sm'
-                    : 'text-secondary hover:text-primary-dark hover:bg-shadow-darker/10'
+                  ? 'bg-primary text-surface shadow-sm'
+                  : 'text-secondary hover:text-primary-dark hover:bg-shadow-darker/10'
                   }`}
               >
+                {isDesign && <Palette size={13} className={isSelected ? 'text-white' : 'text-primary'} />}
+                {isProd && <Factory size={13} className={isSelected ? 'text-white' : 'text-primary'} />}
                 <span>{pipe.name}</span>
                 {pipe.scenario && (
                   <span
@@ -854,76 +1317,168 @@ export default function PipelineBoard() {
         </div>
       </div>
 
-      {/* Stage Jump Navigator Ribbon (Bird's-Eye View across 5 Phases) */}
-      <div className="p-3 bg-surface rounded-2xl border border-shadow-darker/20 shadow-neo-surface space-y-2">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 text-xs font-black text-primary-dark">
-            <Layers size={14} className="text-primary" />
-            <span>Phase Navigator</span>
+      {/* Bulk vs Regular Orders Stage Distribution Summary */}
+      <OrderTypeStageSummary
+        leads={leads}
+        stages={activeStages}
+        activePipelineId={selectedPipelineId}
+        onSelectPipeline={handleSelectPipeline}
+        onScrollToStage={scrollToStage}
+        isDesignPipeline={isDesignPipeline}
+        isProductionPipeline={isProductionPipeline}
+        searchQuery={searchQuery}
+        salesPersonFilter={salesPersonFilter}
+        dbUser={dbUser}
+      />
+
+      {/* Stage Jump Navigator Ribbon (or Design/Production Sub-Workflow Banner) */}
+      {isDesignPipeline ? (
+        <div className="p-3.5 bg-surface rounded-2xl border border-shadow-darker/30 shadow-neo-surface flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center font-black shadow-sm shrink-0">
+              <Palette size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-primary-dark uppercase tracking-wider">
+                  Dedicated Design Pipeline &amp; Sub-Workflow
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary-dark font-extrabold border border-primary/20">
+                  {filteredLeadsList.length} Active Leads in Design
+                </span>
+              </div>
+              <p className="text-xs text-secondary mt-0.5">
+                Moving a design card to <strong>Final Artwork / Vector Ready</strong> automatically marks artwork approved and advances the sales lead to Quotation Sent.
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <select
-              aria-label="Focus on specific phase"
-              className="neo-input !py-1 !px-2.5 !text-xs font-bold text-primary-dark"
-              value={phaseFilter}
-              onChange={(e) => setPhaseFilter(e.target.value)}
-            >
-              <option value="all">All Phases ({activeStages.length} Stages)</option>
-              {STAGE_PHASES.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            {(isAdmin || dbUser?.role === 'design') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingStages([...activeStages]);
+                  setShowManageStagesModal(true);
+                }}
+                className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold text-primary-dark hover:text-primary border border-shadow-darker/30 shadow-xs"
+                title="Add new stages, rename, or reorder design pipeline stages"
+              >
+                <Pencil size={13} className="text-primary" />
+                <span>Manage Design Stages</span>
+              </button>
+            )}
           </div>
         </div>
+      ) : isProductionPipeline ? (
+        <div className="p-3.5 bg-surface rounded-2xl border border-shadow-darker/30 shadow-neo-surface flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-600 to-orange-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
+              <Factory size={18} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-amber-950 uppercase tracking-wider">
+                  🏭 Dedicated Production &amp; Manufacturing Sub-Workflow
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-extrabold border border-amber-200">
+                  {filteredLeadsList.length} Orders in Production
+                </span>
+              </div>
+              <p className="text-xs text-secondary mt-0.5">
+                Manage material blanks, laser/UV engraving, assembly, QC, and box packing. Advancing to <strong>Ready for Dispatch</strong> updates the sales lead for dispatch hand-off.
+              </p>
+            </div>
+          </div>
 
-        <div className="flex sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-0.5 pb-0.5 overflow-x-auto custom-sidebar-scrollbar snap-x">
-          {phaseStats.map((phase) => {
-            const isPhaseActive = phaseFilter === 'all' || phaseFilter === phase.id;
-            return (
-              <div
-                key={phase.id}
-                className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between min-w-[200px] sm:min-w-0 shrink-0 snap-start ${isPhaseActive
+          <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
+            {(isAdmin || dbUser?.role === 'production') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingStages([...activeStages]);
+                  setShowManageStagesModal(true);
+                }}
+                className="neo-btn text-xs px-3.5 py-2 inline-flex items-center gap-1.5 font-bold text-amber-950 bg-white hover:bg-amber-50 border border-amber-200 shadow-xs"
+                title="Add new stages, rename, or reorder manufacturing stages"
+              >
+                <Pencil size={13} className="text-amber-600" />
+                <span>⚙️ Manage Production Stages</span>
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="p-3 bg-surface rounded-2xl border border-shadow-darker/20 shadow-neo-surface space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-black text-primary-dark">
+              <Layers size={14} className="text-primary" />
+              <span>Phase Navigator</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                aria-label="Focus on specific phase"
+                className="neo-input !py-1 !px-2.5 !text-xs font-bold text-primary-dark"
+                value={phaseFilter}
+                onChange={(e) => setPhaseFilter(e.target.value)}
+              >
+                <option value="all">All Phases ({activeStages.length} Stages)</option>
+                {STAGE_PHASES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="flex sm:grid sm:grid-cols-3 lg:grid-cols-5 gap-2 pt-0.5 pb-0.5 overflow-x-auto custom-sidebar-scrollbar snap-x">
+            {phaseStats.map((phase) => {
+              const isPhaseActive = phaseFilter === 'all' || phaseFilter === phase.id;
+              return (
+                <div
+                  key={phase.id}
+                  className={`p-2 rounded-xl border transition-all text-xs flex flex-col justify-between min-w-[200px] sm:min-w-0 shrink-0 snap-start ${isPhaseActive
                     ? 'bg-surface border-shadow-darker/30 shadow-neo-surface'
                     : 'bg-surface/50 border-dashed border-shadow-darker/15 opacity-60'
-                  }`}
-              >
-                <div className="flex items-center justify-between gap-1 mb-1">
-                  <span className="font-extrabold text-primary-dark truncate text-[11px]">{phase.shortLabel}</span>
-                  <span className="text-[10px] font-black px-1.5 py-0.2 rounded-full bg-primary/10 text-primary border border-primary/20">
-                    {phase.count}
-                  </span>
-                </div>
+                    }`}
+                >
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-extrabold text-primary-dark truncate text-[11px]">{phase.shortLabel}</span>
+                    <span className="text-[10px] font-black px-1.5 py-0.2 rounded-full bg-primary/10 text-primary border border-primary/20">
+                      {phase.count}
+                    </span>
+                  </div>
 
-                <div className="flex items-center gap-1 flex-wrap mt-1">
-                  {phase.stageIds.map((sId) => {
-                    const stageObj = activeStages.find((s) => s.id === sId);
-                    if (!stageObj) return null;
-                    const stageCount = groupedLeads[sId]?.length || 0;
-                    return (
-                      <button
-                        key={sId}
-                        type="button"
-                        onClick={() => scrollToStage(sId)}
-                        className={`text-[10px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${stageCount > 0
+                  <div className="flex items-center gap-1 flex-wrap mt-1">
+                    {phase.stageIds.map((sId) => {
+                      const stageObj = activeStages.find((s) => s.id === sId);
+                      if (!stageObj) return null;
+                      const stageCount = groupedLeads[sId]?.length || 0;
+                      return (
+                        <button
+                          key={sId}
+                          type="button"
+                          onClick={() => scrollToStage(sId)}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-md border flex items-center gap-1 transition-all ${stageCount > 0
                             ? 'bg-surface font-extrabold text-primary-dark border-primary/30 shadow-xs hover:border-primary hover:text-primary'
                             : 'bg-transparent text-secondary border-shadow-darker/15 hover:bg-shadow-darker/10'
-                          }`}
-                        title={`Jump to ${stageObj.label} (${stageCount})`}
-                      >
-                        <span className="truncate max-w-[75px]">{stageObj.label}</span>
-                        {stageCount > 0 && <span className="text-primary font-black">· {stageCount}</span>}
-                      </button>
-                    );
-                  })}
+                            }`}
+                          title={`Jump to ${stageObj.label} (${stageCount})`}
+                        >
+                          <span className="truncate max-w-[75px]">{stageObj.label}</span>
+                          {stageCount > 0 && <span className="text-primary font-black">· {stageCount}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Search & Advanced Filter Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center gap-3 w-full min-w-0">
@@ -947,25 +1502,25 @@ export default function PipelineBoard() {
         </div>
 
         <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-3 min-w-0 w-full lg:w-auto">
-          {/* Sales Rep Filter (Admin Only) */}
-          {isAdmin && (
-            <div className="flex items-center gap-1.5 text-xs shrink-0">
-              <span className="text-secondary font-bold">Assigned To:</span>
-              <select
-                aria-label="Filter by assigned team member"
-                className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
-                value={salesPersonFilter}
-                onChange={(e) => setSalesPersonFilter(e.target.value)}
-              >
-                <option value="all">All Team Members</option>
-                {salesPersons.map((rep) => (
-                  <option key={rep} value={rep}>
-                    {rep}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          {/* Sales Rep / Assignee Filter */}
+          <div className="flex items-center gap-1.5 text-xs shrink-0">
+            <span className="text-secondary font-bold">Aligned To:</span>
+            <select
+              aria-label="Filter by assigned team member"
+              className="neo-input !py-1.5 !text-xs cursor-pointer min-w-0"
+              value={salesPersonFilter}
+              onChange={(e) => setSalesPersonFilter(e.target.value)}
+            >
+              <option value="all">All Team Members</option>
+              <option value="my_leads">My Assigned Leads</option>
+              <option value="unassigned">Unassigned Only</option>
+              {salesPersons.map((rep) => (
+                <option key={rep} value={rep}>
+                  {rep}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* Urgency Filter */}
           <div className="flex items-center gap-1.5 text-xs shrink-0">
@@ -1062,16 +1617,21 @@ export default function PipelineBoard() {
                     <th className="py-3 px-3 font-bold">Contact</th>
                     <th className="py-3 px-3 font-bold">Order Specs</th>
                     <th className="py-3 px-3 font-bold">Event & Delivery</th>
-                    {isAdmin && <th className="py-3 px-3 font-bold">Assigned To</th>}
+                    <th className="py-3 px-3 font-bold">Aligned To</th>
                     <th className="py-3 px-3 font-bold">Pipeline Stage</th>
                     <th className="py-3 px-3 font-bold text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-shadow-darker/5">
                   {filteredLeadsList.map((lead) => {
-                    const currentStageObj = activeStages.find((s) => s.id === lead.status) || {
-                      id: lead.status || 'new_enquiry',
-                      label: lead.status || 'New Enquiry',
+                    const currentStageKey = isDesignPipeline
+                      ? ((lead as any).design_stage_id || 'concept_creation')
+                      : isProductionPipeline
+                        ? ((lead as any).production_stage_id || 'material_prep')
+                        : (lead.status || 'new_enquiry');
+                    const currentStageObj = activeStages.find((s) => s.id === currentStageKey) || {
+                      id: currentStageKey,
+                      label: currentStageKey,
                     };
 
                     return (
@@ -1138,6 +1698,22 @@ export default function PipelineBoard() {
                                 {lead.required_quantity} pcs
                               </div>
                             )}
+                            {isDesignPipeline && lead.design_notes && (
+                              <div className="text-[10px] text-primary-dark line-clamp-1 italic max-w-[140px]" title={`Citation / Requirements: ${lead.design_notes}`}>
+                                📝 {lead.design_notes}
+                              </div>
+                            )}
+                            {isDesignPipeline && lead.artwork_url && (
+                              <a
+                                href={lead.artwork_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[10px] font-bold text-primary hover:underline inline-flex items-center gap-0.5"
+                                title="Open customer raw artwork / logo"
+                              >
+                                <ExternalLink size={9} /> Raw Artwork
+                              </a>
+                            )}
                           </div>
                         </td>
 
@@ -1156,23 +1732,47 @@ export default function PipelineBoard() {
                           </div>
                         </td>
 
-                        {isAdmin && (
-                          <td className="py-3 px-3 text-secondary text-[11px] font-semibold">
+                        <td className="py-3 px-3 text-secondary text-[11px] font-semibold">
+                          <div className="space-y-1">
                             {lead.sales_person ? (
-                              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold text-[10px] border border-primary/20">
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary font-bold text-[10px] border border-primary/20"
+                                title={`Sales: ${lead.sales_person}`}
+                              >
+                                <span className="w-3.5 h-3.5 rounded-full bg-primary text-white text-[8px] font-black flex items-center justify-center uppercase shrink-0">
+                                  {lead.sales_person.charAt(0)}
+                                </span>
                                 {lead.sales_person}
                               </span>
                             ) : (
-                              <span className="text-secondary/50 text-[10px]">Unassigned</span>
+                              <span className="text-secondary/50 text-[10px] italic">Unassigned Sales</span>
                             )}
-                          </td>
-                        )}
+                            {(lead as any).design_person && (
+                              <div
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary-dark font-bold text-[10px] border border-primary/20"
+                                title={`Designer: ${(lead as any).design_person}`}
+                              >
+                                <Palette size={10} className="text-primary shrink-0" />
+                                <span>{(lead as any).design_person}</span>
+                              </div>
+                            )}
+                            {(lead as any).production_person && (
+                              <div
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 font-bold text-[10px] border border-amber-200"
+                                title={`Production: ${(lead as any).production_person}`}
+                              >
+                                <Factory size={10} className="text-amber-600 shrink-0" />
+                                <span>{(lead as any).production_person}</span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
 
                         <td className="py-3 px-3">
                           <select
                             aria-label={`Change stage for ${lead.name}`}
                             className="text-[11px] font-bold bg-surface rounded-input px-2 py-1 border border-shadow-darker/20 text-primary-dark hover:border-primary transition-colors"
-                            value={lead.status || currentStageObj.id}
+                            value={currentStageKey}
                             onChange={(e) => handleQuickMove(lead, e.target.value)}
                           >
                             {activeStages.map((s) => (
@@ -1185,6 +1785,37 @@ export default function PipelineBoard() {
 
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
+                            {isDesignPipeline && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDesignBriefLead(lead)}
+                                className="p-1.5 rounded-input border border-primary/25 hover:bg-primary/10 text-primary-dark transition-colors font-bold text-xs inline-flex items-center gap-1 shadow-2xs"
+                                title="Open Design Brief & Creative Requirements"
+                              >
+                                <Palette size={13} className="text-primary" />
+                                <span className="hidden sm:inline">Brief</span>
+                              </button>
+                            )}
+                            {isProductionPipeline && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedProductionSpecsLead(lead)}
+                                className="p-1.5 rounded-input border border-primary/25 hover:bg-primary/10 text-primary-dark transition-colors font-bold text-xs inline-flex items-center gap-1 shadow-2xs"
+                                title="Open Production Specifications"
+                              >
+                                <Factory size={13} className="text-primary" />
+                                <span className="hidden sm:inline">Specs</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedJobCardLead(lead)}
+                              className="p-1.5 rounded-input border border-shadow-darker/20 hover:border-primary/40 hover:bg-primary/10 text-secondary hover:text-primary-dark transition-colors"
+                              title="Print Factory Job Card"
+                            >
+                              <Printer size={13} />
+                            </button>
+
                             <button
                               type="button"
                               onClick={() =>
@@ -1209,6 +1840,15 @@ export default function PipelineBoard() {
                             >
                               <Eye size={11} className="text-primary" /> 360°
                             </Link>
+
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmLead(lead)}
+                              className="p-1.5 rounded-input border border-shadow-darker/20 hover:border-rose-500 hover:bg-rose-500/10 text-secondary hover:text-rose-600 transition-colors"
+                              title={`Delete lead: ${lead.name}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1220,9 +1860,14 @@ export default function PipelineBoard() {
               {/* Mobile Card View */}
               <div className="md:hidden divide-y divide-shadow-darker/10">
                 {filteredLeadsList.map((lead) => {
-                  const currentStageObj = activeStages.find((s) => s.id === lead.status) || {
-                    id: lead.status || 'new_enquiry',
-                    label: lead.status || 'New Enquiry',
+                  const currentStageKey = isDesignPipeline
+                    ? ((lead as any).design_stage_id || 'concept_creation')
+                    : isProductionPipeline
+                      ? ((lead as any).production_stage_id || 'material_prep')
+                      : (lead.status || 'new_enquiry');
+                  const currentStageObj = activeStages.find((s) => s.id === currentStageKey) || {
+                    id: currentStageKey,
+                    label: currentStageKey,
                   };
 
                   return (
@@ -1234,11 +1879,11 @@ export default function PipelineBoard() {
                               {lead.name}
                             </Link>
                             {lead.is_repeat_customer || lead.customer_lifecycle === 'repeat_customer' ? (
-                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-purple-100 text-purple-800 border border-purple-200">Repeat</span>
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-primary/10 text-primary-dark border border-primary/20">Repeat</span>
                             ) : lead.customer_lifecycle === 'existing_customer' ? (
-                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800 border border-indigo-200">Existing</span>
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-primary/10 text-primary-dark border border-primary/20">Existing</span>
                             ) : (
-                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">New</span>
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-primary/10 text-primary-dark border border-primary/20">New</span>
                             )}
                             <SourceWhatsappBadge lead={lead} compact />
                           </div>
@@ -1258,9 +1903,20 @@ export default function PipelineBoard() {
                               <button onClick={() => setQuickChatLead(lead)} className="text-emerald-600 hover:text-emerald-700 ml-1"><MessageSquare size={12} /></button>
                             </div>
                           ) : null}
-                          {isAdmin && (
-                            <div className="text-secondary text-[10px]">
-                              Assigned: {lead.sales_person || 'Unassigned'}
+                          <div className="text-secondary text-[10px] flex items-center gap-1">
+                            <span>Sales:</span>
+                            <span className="font-bold text-primary-dark">{lead.sales_person || 'Unassigned'}</span>
+                          </div>
+                          {(lead as any).design_person && (
+                            <div className="text-secondary text-[10px] flex items-center gap-1">
+                              <span>Designer:</span>
+                              <span className="font-bold text-primary-dark">{(lead as any).design_person}</span>
+                            </div>
+                          )}
+                          {(lead as any).production_person && (
+                            <div className="text-secondary text-[10px] flex items-center gap-1">
+                              <span>Production:</span>
+                              <span className="font-bold text-amber-800">{(lead as any).production_person}</span>
                             </div>
                           )}
                         </div>
@@ -1269,7 +1925,7 @@ export default function PipelineBoard() {
                           <select
                             aria-label={`Change stage for ${lead.name}`}
                             className="text-[10px] font-bold bg-transparent rounded-lg px-2 py-1 border border-shadow-darker/20 text-primary-dark focus:ring-1 focus:ring-primary w-32"
-                            value={lead.status || currentStageObj.id}
+                            value={currentStageKey}
                             onChange={(e) => handleQuickMove(lead, e.target.value)}
                           >
                             {activeStages.map((s) => (
@@ -1282,12 +1938,42 @@ export default function PipelineBoard() {
                       </div>
 
                       <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                        {isDesignPipeline && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDesignBriefLead(lead)}
+                            className="neo-btn flex justify-center items-center px-3 py-2 text-primary-dark hover:text-primary bg-primary/10 hover:bg-primary/20 transition-colors font-bold text-xs gap-1 border border-primary/20"
+                            title="View Design Brief"
+                          >
+                            <Palette size={14} className="text-primary" />
+                            <span>Brief</span>
+                          </button>
+                        )}
+                        {isProductionPipeline && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProductionSpecsLead(lead)}
+                            className="neo-btn flex justify-center items-center px-3 py-2 text-primary-dark hover:text-primary bg-primary/10 hover:bg-primary/20 transition-colors font-bold text-xs gap-1 border border-primary/20"
+                            title="View Production Specifications"
+                          >
+                            <Factory size={14} className="text-primary" />
+                            <span>Specs</span>
+                          </button>
+                        )}
                         <Link
                           to={`/leads/${lead.id}`}
                           className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-primary-dark font-bold text-xs"
                         >
                           <Eye size={14} /> 360° Profile
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedJobCardLead(lead)}
+                          className="neo-btn flex justify-center items-center p-2.5 text-secondary hover:text-primary-dark transition-colors"
+                          title="Print Factory Job Card"
+                        >
+                          <Printer size={16} />
+                        </button>
                         <button
                           type="button"
                           onClick={() =>
@@ -1301,6 +1987,14 @@ export default function PipelineBoard() {
                           title="Notes & Alarms"
                         >
                           <StickyNote size={16} className={lead.notes_count ? 'text-primary fill-primary/20' : ''} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmLead(lead)}
+                          className="neo-btn flex justify-center items-center p-2.5 text-secondary hover:text-rose-600 hover:bg-rose-500/10 transition-colors"
+                          title={`Delete lead: ${lead.name}`}
+                        >
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -1446,6 +2140,32 @@ export default function PipelineBoard() {
                         </button>
                       </div>
                     </div>
+
+                    {/* Quick 7:30 AM Follow-Up Dispatch Pill for Follow-Up stage */}
+                    {stage.id === 'follow_up' && (
+                      <button
+                        type="button"
+                        onClick={() => setShowFollowupModal(true)}
+                        className={`w-full mt-2 px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center justify-between border transition-all ${followupConfig.enabled
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                          : 'bg-surface border-shadow-darker/20 text-secondary hover:text-primary-dark'
+                          }`}
+                        title="Configure or test 7:30 AM Automated Follow-Up"
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <Clock size={11} className={followupConfig.enabled ? 'text-emerald-500 animate-pulse' : 'text-secondary'} />
+                          <span>7:30 AM "Hi" Dispatch:</span>
+                        </span>
+                        <span
+                          className={`px-1.5 py-0.2 rounded font-extrabold ${followupConfig.enabled
+                            ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-slate-200 dark:bg-slate-800 text-slate-500'
+                            }`}
+                        >
+                          {followupConfig.enabled ? 'ON' : 'OFF'}
+                        </span>
+                      </button>
+                    )}
                   </div>
 
                   {/* Customer Cards List */}
@@ -1471,10 +2191,10 @@ export default function PipelineBoard() {
                             }}
                             onDragEnd={() => setDragId('')}
                             className={`rounded-card bg-surface border border-shadow-darker/20 shadow-neo-surface p-3.5 cursor-grab active:cursor-grabbing hover:shadow-neo-hover transition-all relative overflow-hidden group space-y-2 border-l-4 ${isHigh
-                                ? 'border-l-primary'
-                                : isMed
-                                  ? 'border-l-tertiary'
-                                  : 'border-l-secondary/40'
+                              ? 'border-l-primary'
+                              : isMed
+                                ? 'border-l-tertiary'
+                                : 'border-l-secondary/40'
                               }`}
                           >
                             {/* Card Top: Client Name + Crown + Micro Badges */}
@@ -1509,16 +2229,27 @@ export default function PipelineBoard() {
                                 {lead.intent_tier && (
                                   <span
                                     className={`px-1.5 py-0.2 rounded-input text-[9px] font-black uppercase border ${isHigh
-                                        ? 'bg-primary text-surface border-primary'
-                                        : isMed
-                                          ? 'bg-tertiary/15 text-tertiary border-tertiary/30'
-                                          : 'bg-surface text-secondary border-shadow-darker/20'
+                                      ? 'bg-primary text-surface border-primary'
+                                      : isMed
+                                        ? 'bg-tertiary/15 text-tertiary border-tertiary/30'
+                                        : 'bg-surface text-secondary border-shadow-darker/20'
                                       }`}
                                     title={`Intent: ${lead.intent_tier} (${lead.intent_score ?? 50}/100)`}
                                   >
                                     ⚡ {lead.intent_score ?? lead.intent_tier}
                                   </span>
                                 )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirmLead(lead);
+                                  }}
+                                  className="p-1 rounded-md text-rose-500/70 hover:text-rose-700 hover:bg-rose-500/15 transition-colors"
+                                  title={`Delete lead: ${lead.name}`}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                                 <GripVertical
                                   size={14}
                                   className="text-secondary/40 group-hover:text-primary shrink-0 transition-colors"
@@ -1568,6 +2299,263 @@ export default function PipelineBoard() {
                               </div>
                             )}
 
+                            {/* Design Pipeline Micro Spec & Proofs */}
+                            {isDesignPipeline && (
+                              <div className="space-y-1 pt-0.5">
+                                <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                                  {(lead as any).design_status && (
+                                    <span
+                                      className={`px-1.5 py-0.2 rounded font-black uppercase text-[9px] border ${(lead as any).design_status === 'approved'
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                        : (lead as any).design_status === 'revisions_requested'
+                                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                          : (lead as any).design_status === 'proof_sent'
+                                            ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                            : 'bg-primary/10 text-primary-dark border-primary/20'
+                                        }`}
+                                    >
+                                      {((lead as any).design_status || '').replace(/_/g, ' ')}
+                                    </span>
+                                  )}
+                                  {Boolean((lead as any).mockups?.length) && (
+                                    <span className="px-1.5 py-0.2 rounded bg-surface text-secondary font-bold border border-shadow-darker/30 text-[9px]">
+                                      🖼️ {(lead as any).mockups.length} {(lead as any).mockups.length === 1 ? 'proof' : 'proofs'}
+                                    </span>
+                                  )}
+                                  {lead.trophy_size && (
+                                    <span className="px-1.5 py-0.2 rounded bg-surface text-secondary font-bold border border-shadow-darker/30 text-[9px]">
+                                      📏 {lead.trophy_size}
+                                    </span>
+                                  )}
+                                  {(lead as any).artwork_url && (
+                                    <a
+                                      href={(lead as any).artwork_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="text-[9px] text-primary hover:underline font-bold inline-flex items-center gap-0.5"
+                                      title="Open customer logo / vector artwork link"
+                                    >
+                                      <ExternalLink size={9} /> Artwork Link
+                                    </a>
+                                  )}
+                                </div>
+
+                                {lead.design_notes && (
+                                  <div
+                                    className="p-1.5 rounded-lg bg-surface border border-shadow-darker/25 text-[10px] text-primary-dark line-clamp-2 italic shadow-2xs"
+                                    title={`Design & Citation Requirement: ${lead.design_notes}`}
+                                  >
+                                    <span className="font-bold not-italic text-primary-dark">📝 Req / Citation: </span>
+                                    {lead.design_notes}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-between gap-1.5 flex-wrap pt-1">
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDesignBriefLead(lead);
+                                      }}
+                                      className="text-[10px] font-bold text-primary-dark hover:text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 shadow-2xs transition-all"
+                                      title="View full 17-point creative design requirements & assets"
+                                    >
+                                      <Palette size={11} className="text-primary" />
+                                      <span>Design Brief</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const hasSpecs = Boolean(
+                                          lead.single_box_size ||
+                                          lead.trophy_materials_used ||
+                                          lead.materials_stock_status ||
+                                          lead.delivery_mode
+                                        );
+                                        setSelectedProductionSpecsMode(hasSpecs ? 'view' : 'edit');
+                                        setSelectedProductionSpecsLead(lead);
+                                      }}
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1 shadow-2xs transition-all ${Boolean(
+                                        lead.single_box_size ||
+                                        lead.trophy_materials_used ||
+                                        lead.materials_stock_status ||
+                                        lead.delivery_mode
+                                      )
+                                        ? 'text-secondary hover:text-primary-dark bg-surface hover:bg-surface-hover border border-shadow-darker/30'
+                                        : 'text-primary-dark bg-primary/15 hover:bg-primary/25 border border-primary/30 font-extrabold'
+                                        }`}
+                                      title="Hand off & specify 9 manufacturing requirements for Production"
+                                    >
+                                      <Factory size={11} className="text-primary" />
+                                      <span>
+                                        {Boolean(
+                                          lead.single_box_size ||
+                                          lead.trophy_materials_used ||
+                                          lead.materials_stock_status ||
+                                          lead.delivery_mode
+                                        )
+                                          ? 'Production Specs'
+                                          : '+ Add Production Specs'}
+                                      </span>
+                                    </button>
+                                  </div>
+
+                                  {lead.design_deadline && (
+                                    <span className="text-[9px] font-semibold text-secondary bg-surface border border-shadow-darker/30 px-1.5 py-0.5 rounded">
+                                      ⏳ Due: {lead.design_deadline}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Production Pipeline Micro Spec & Quantity Progress */}
+                            {isProductionPipeline && (
+                              <div className="space-y-2 pt-1 border-t border-shadow-darker/10 mt-1">
+                                <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+                                  {(lead as any).production_status && (
+                                    <span
+                                      className="px-1.5 py-0.2 rounded font-extrabold uppercase text-[9px] bg-primary/10 text-primary-dark border border-primary/20"
+                                    >
+                                      {((lead as any).production_status || '').replace(/_/g, ' ')}
+                                    </span>
+                                  )}
+                                  {(lead as any).trophy_size && (
+                                    <span className="text-[10px] text-secondary font-bold">
+                                      📐 {(lead as any).trophy_size}
+                                    </span>
+                                  )}
+                                  {lead.single_box_size && (
+                                    <span className="text-[9px] text-secondary font-medium truncate max-w-[110px]" title={`Single Box: ${lead.single_box_size}`}>
+                                      📦 {lead.single_box_size}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Project Batch Quantity Progress Meter */}
+                                <div className="bg-surface/90 p-2 rounded-xl border border-shadow-darker/15 space-y-1.5">
+                                  <div className="flex items-center justify-between text-[10px] font-bold">
+                                    <span className="text-secondary flex items-center gap-1">
+                                      <TrendingUp size={11} className="text-primary" /> Progress by Quantity:
+                                    </span>
+                                    <span className="text-primary font-mono font-extrabold">
+                                      {lead.production_overall_progress || 0}% Complete
+                                    </span>
+                                  </div>
+
+                                  <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                                    <div
+                                      className="h-full bg-primary rounded-full transition-all duration-300"
+                                      style={{ width: `${lead.production_overall_progress || 0}%` }}
+                                    />
+                                  </div>
+
+                                  {/* Top 3 Manufacturing Step Counts */}
+                                  {lead.production_batch_stages && lead.production_batch_stages.length > 0 ? (
+                                    <div className="space-y-1 pt-0.5">
+                                      {lead.production_batch_stages.slice(0, 3).map((st) => {
+                                        const pct = st.target_quantity > 0 ? Math.min(100, Math.round((st.completed_quantity / st.target_quantity) * 100)) : 0;
+                                        return (
+                                          <div key={st.id} className="flex items-center justify-between text-[9px] text-slate-700 dark:text-slate-200">
+                                            <span className="truncate max-w-[130px] font-medium">{st.name.replace(/^\d+\.\s*/, '')}</span>
+                                            <span className="font-mono font-bold text-primary-dark">
+                                              {st.completed_quantity}/{st.target_quantity} ({pct}%)
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                      {lead.production_batch_stages.length > 3 && (
+                                        <div className="text-[8.5px] text-secondary text-right font-medium">
+                                          +{lead.production_batch_stages.length - 3} more steps...
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="text-[9px] text-secondary italic">
+                                      Target: {lead.required_quantity || 100} pcs &bull; Click "Log Pieces" to record work
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center justify-between gap-1 flex-wrap pt-0.5">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedProductionProgressLead(lead);
+                                      }}
+                                      className="text-[10px] font-bold text-white bg-primary hover:bg-primary-dark px-2 py-0.5 rounded-lg inline-flex items-center gap-1 shadow-2xs transition-all"
+                                      title="Record piece counts for each manufacturing step"
+                                    >
+                                      <Plus size={10} />
+                                      <span>Log Pieces</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedProductionSpecsLead(lead);
+                                      }}
+                                      className="text-[10px] font-bold text-primary-dark hover:text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 shadow-2xs transition-all"
+                                      title="View & Edit 9 Production Specifications"
+                                    >
+                                      <Factory size={10} className="text-primary" />
+                                      <span>Specs</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        printProductionTeamChecklist(lead);
+                                      }}
+                                      className="text-[10px] font-bold text-secondary hover:text-primary-dark bg-surface hover:bg-surface-hover border border-shadow-darker/30 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 shadow-2xs transition-all"
+                                      title="Print clean 1-page Production Team Checklist with 9 manufacturing specifications"
+                                    >
+                                      <Printer size={10} className="text-primary" />
+                                      <span>Print</span>
+                                    </button>
+                                  </div>
+
+                                  {lead.production_deadline && (
+                                    <span className="text-[9px] font-semibold text-secondary bg-surface border border-shadow-darker/30 px-1.5 py-0.5 rounded">
+                                      ⏳ {lead.production_deadline}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Sales Pipeline Design Request Quick Button */}
+                            {!isDesignPipeline && !isProductionPipeline && (lead.status === 'requirement_design_finalization' || lead.status === 'design_stage' || lead.design_deadline || lead.trophy_size) && (
+                              <div className="pt-0.5 flex items-center justify-between gap-1 flex-wrap text-[10px]">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSubmitDesignTargetStage(lead.status || 'requirement_design_finalization');
+                                    setSubmitDesignModalLead(lead);
+                                  }}
+                                  className="text-[10px] font-bold text-primary-dark hover:text-primary bg-primary/10 hover:bg-primary/20 border border-primary/20 px-2 py-0.5 rounded-md inline-flex items-center gap-1 transition-colors"
+                                  title="Open & update Design Request specifications"
+                                >
+                                  <Palette size={10} className="text-primary" />
+                                  <span>{lead.concept || lead.trophy_size ? 'Design Specs' : '+ Submit Design'}</span>
+                                </button>
+                                {lead.trophy_size && (
+                                  <span className="text-[9px] text-secondary font-medium truncate max-w-[120px]">
+                                    📏 {lead.trophy_size}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
                             {/* Active Reminder Micro Banner (if any) */}
                             {lead.active_reminder &&
                               (() => {
@@ -1591,19 +2579,56 @@ export default function PipelineBoard() {
                             {/* Card Footer: Rep Avatar + 1-Click WhatsApp + Actions */}
                             <div className="flex items-center justify-between pt-1.5 border-t border-shadow-darker/10 gap-1.5">
                               <div className="flex items-center gap-1.5">
-                                {lead.sales_person ? (
+                                {isDesignPipeline ? (
+                                  (lead as any).design_person ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary-dark text-[9px] font-bold border border-primary/20 max-w-[120px] truncate"
+                                      title={`Designer: ${(lead as any).design_person}`}
+                                    >
+                                      <Palette size={10} className="text-primary shrink-0" />
+                                      <span className="truncate">{(lead as any).design_person}</span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="text-[9px] text-amber-700 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"
+                                      title="Unassigned Designer"
+                                    >
+                                      🎨 Unassigned
+                                    </span>
+                                  )
+                                ) : isProductionPipeline ? (
+                                  (lead as any).production_person ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-800 text-[9px] font-bold border border-amber-200 max-w-[120px] truncate"
+                                      title={`Production: ${(lead as any).production_person}`}
+                                    >
+                                      <Factory size={10} className="text-amber-600 shrink-0" />
+                                      <span className="truncate">{(lead as any).production_person}</span>
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className="text-[9px] text-amber-700 font-bold bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"
+                                      title="Unassigned Production"
+                                    >
+                                      🏭 Unassigned
+                                    </span>
+                                  )
+                                ) : lead.sales_person ? (
                                   <span
-                                    className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[9px] font-black flex items-center justify-center border border-primary/20 shrink-0 uppercase"
-                                    title={`Rep: ${lead.sales_person}`}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary text-[9px] font-bold border border-primary/20 max-w-[120px] truncate"
+                                    title={`Aligned: ${lead.sales_person}`}
                                   >
-                                    {lead.sales_person.slice(0, 2)}
+                                    <span className="w-3.5 h-3.5 rounded-full bg-primary text-white text-[8px] font-black flex items-center justify-center uppercase shrink-0">
+                                      {lead.sales_person.charAt(0)}
+                                    </span>
+                                    <span className="truncate">{lead.sales_person}</span>
                                   </span>
                                 ) : (
                                   <span
-                                    className="w-5 h-5 rounded-full bg-shadow-darker/20 text-secondary text-[8px] font-bold flex items-center justify-center shrink-0"
+                                    className="text-[9px] text-secondary/60 italic px-1"
                                     title="Unassigned"
                                   >
-                                    --
+                                    Unassigned
                                   </span>
                                 )}
 
@@ -1644,8 +2669,8 @@ export default function PipelineBoard() {
 
                                 <select
                                   aria-label={`Move stage for ${lead.name}`}
-                                  className="text-[10px] font-bold bg-surface rounded-input px-1.5 py-1 border border-shadow-darker/20 text-primary-dark hover:border-primary transition-colors max-w-[90px] truncate"
-                                  value={lead.status || stage.id}
+                                  className="text-[10px] font-bold bg-surface rounded-input px-1.5 py-1 border border-shadow-darker/20 text-primary-dark hover:border-primary transition-colors max-w-[85px] truncate"
+                                  value={isDesignPipeline ? ((lead as any).design_stage_id || stage.id) : isProductionPipeline ? ((lead as any).production_stage_id || stage.id) : (lead.status || stage.id)}
                                   onChange={(e) => handleQuickMove(lead, e.target.value)}
                                 >
                                   {activeStages.map((s) => (
@@ -1654,6 +2679,18 @@ export default function PipelineBoard() {
                                     </option>
                                   ))}
                                 </select>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirmLead(lead);
+                                  }}
+                                  className="p-1 rounded-md text-rose-500 hover:text-rose-700 hover:bg-rose-500/15 transition-colors shrink-0"
+                                  title={`Delete lead: ${lead.name}`}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1666,7 +2703,8 @@ export default function PipelineBoard() {
             })}
           </div>
         </div>
-      )}
+      )
+      }
 
       {/* Confirmation & Notification Dispatch Modal */}
       <StageChangeConfirmModal
@@ -1704,21 +2742,332 @@ export default function PipelineBoard() {
       />
 
       {/* Quick Chat Modal */}
-      {quickChatLead && (
-        <PipelineQuickChatModal
-          lead={quickChatLead}
-          onClose={() => setQuickChatLead(null)}
-        />
-      )}
+      {
+        quickChatLead && (
+          <PipelineQuickChatModal
+            lead={quickChatLead}
+            onClose={() => setQuickChatLead(null)}
+          />
+        )
+      }
 
-      {isAdmin && (
-        <LeadAssignmentModal
-          isOpen={showAssignmentModal}
-          onClose={() => setShowAssignmentModal(false)}
-          leads={leads}
-        />
-      )}
-    </div>
+      {
+        isAdmin && (
+          <LeadAssignmentModal
+            isOpen={showAssignmentModal}
+            onClose={() => setShowAssignmentModal(false)}
+            leads={leads}
+          />
+        )
+      }
+
+      {/* 7:30 AM Automated Daily Follow-Up Dispatcher Modal */}
+      <FollowupAutomationModal
+        isOpen={showFollowupModal}
+        onClose={() => setShowFollowupModal(false)}
+      />
+
+      {/* Delete Lead Confirmation Modal */}
+      {
+        deleteConfirmLead && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-surface border border-shadow-darker/20 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-rose-500/10 text-rose-600 flex items-center justify-center shrink-0">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-primary-dark">
+                    Delete Lead from Pipeline?
+                  </h3>
+                  <p className="text-xs text-secondary mt-0.5">
+                    This action permanently removes the lead from the CRM pipeline.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-shadow-darker/5 border border-shadow-darker/10 space-y-1.5 text-xs">
+                <div className="font-bold text-primary-dark text-sm">
+                  {deleteConfirmLead.name}
+                </div>
+                {deleteConfirmLead.company && (
+                  <div className="text-secondary flex items-center gap-1">
+                    <Building size={12} />
+                    <span>{deleteConfirmLead.company}</span>
+                  </div>
+                )}
+                {deleteConfirmLead.phone && (
+                  <div className="text-secondary font-mono flex items-center gap-1">
+                    <Phone size={12} />
+                    <span>{deleteConfirmLead.phone}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 pt-1 text-[11px]">
+                  <span className="px-2 py-0.5 rounded bg-primary/10 text-primary font-bold">
+                    Stage: {(deleteConfirmLead.status || 'New').replace(/_/g, ' ')}
+                  </span>
+                  {deleteConfirmLead.value && (
+                    <span className="font-bold text-emerald-700">
+                      ₹{Number(deleteConfirmLead.value).toLocaleString('en-IN')}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeletingLead}
+                  onClick={() => setDeleteConfirmLead(null)}
+                  className="neo-btn text-xs font-semibold px-4 py-2 text-secondary hover:text-primary-dark"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingLead}
+                  onClick={handleDeleteLead}
+                  className="neo-btn-primary text-xs font-bold px-4 py-2 !bg-rose-600 hover:!bg-rose-700 text-white inline-flex items-center gap-1.5 shadow-sm"
+                >
+                  {isDeletingLead ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={13} />
+                      <span>Delete Lead</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Manage Pipeline Stages Modal (Design or Production) */}
+      {
+        showManageStagesModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+            <div className="bg-surface border border-shadow-darker/20 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-5">
+              <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center font-bold">
+                    {isProductionPipeline ? <Factory size={18} /> : <Palette size={18} />}
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-primary-dark">
+                      Manage {isProductionPipeline ? 'Production' : isDesignPipeline ? 'Design' : activePipeline.name} Pipeline Stages
+                    </h3>
+                    <p className="text-xs text-secondary">
+                      Add new stages, rename labels, or change the stage order
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowManageStagesModal(false)}
+                  className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-shadow-darker/10 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Stage List */}
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1 custom-sidebar-scrollbar">
+                {editingStages.map((stage, idx) => (
+                  <div
+                    key={stage.id}
+                    className="flex items-center gap-2 p-2 rounded-xl border border-shadow-darker/20 bg-shadow-darker/5"
+                  >
+                    <span className="w-5 text-center text-xs font-bold text-secondary">
+                      {idx + 1}.
+                    </span>
+                    <input
+                      type="text"
+                      value={stage.label}
+                      onChange={(e) => {
+                        const copy = [...editingStages];
+                        copy[idx] = { ...copy[idx], label: e.target.value };
+                        setEditingStages(copy);
+                      }}
+                      className="flex-1 text-xs font-bold bg-surface rounded-input px-2.5 py-1.5 border border-shadow-darker/20 text-primary-dark focus:border-primary"
+                      placeholder="Stage Label"
+                    />
+                    <span className="text-[10px] font-mono text-secondary/70 px-1.5 py-0.5 rounded bg-shadow-darker/10">
+                      {stage.id}
+                    </span>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveStageOrder(idx, 'up')}
+                        className="p-1 text-secondary hover:text-primary disabled:opacity-30 disabled:hover:text-secondary rounded"
+                        title="Move up"
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === editingStages.length - 1}
+                        onClick={() => handleMoveStageOrder(idx, 'down')}
+                        className="p-1 text-secondary hover:text-primary disabled:opacity-30 disabled:hover:text-secondary rounded"
+                        title="Move down"
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={editingStages.length <= 2}
+                        onClick={() => handleRemoveCustomStage(stage.id)}
+                        className="p-1 text-rose-500/70 hover:text-rose-700 disabled:opacity-30 rounded ml-0.5"
+                        title="Remove stage"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add New Stage Input */}
+              <div className="flex items-center gap-2 pt-2 border-t border-shadow-darker/10">
+                <input
+                  type="text"
+                  value={newStageLabel}
+                  onChange={(e) => setNewStageLabel(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddCustomStage();
+                    }
+                  }}
+                  placeholder={isProductionPipeline ? "e.g. Laser Engraving, QC Check..." : "e.g. 3D Model Rendering, Client Proofing..."}
+                  className="flex-1 text-xs bg-surface rounded-input px-3 py-2 border border-shadow-darker/20 text-primary-dark focus:border-primary"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddCustomStage}
+                  className="neo-btn text-xs px-3 py-2 font-bold inline-flex items-center gap-1 shrink-0 text-primary-dark bg-primary/10 hover:bg-primary/20 border border-primary/20"
+                >
+                  <Plus size={13} /> Add Stage
+                </button>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-between pt-3 border-t border-shadow-darker/10">
+                <button
+                  type="button"
+                  onClick={() => setEditingStages(isProductionPipeline ? [...DEFAULT_PRODUCTION_STAGES] : [...DEFAULT_DESIGN_STAGES])}
+                  className="text-xs text-secondary hover:text-primary-dark flex items-center gap-1 font-semibold"
+                  title="Reset to default stages"
+                >
+                  <RotateCcw size={12} /> Reset to Defaults
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowManageStagesModal(false)}
+                    className="neo-btn text-xs px-4 py-2 font-semibold text-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingStages}
+                    onClick={handleSaveDesignStages}
+                    className="neo-btn-primary text-xs px-4 py-2 font-bold text-white inline-flex items-center gap-1.5 shadow-sm bg-primary hover:bg-primary-dark"
+                  >
+                    {isSavingStages ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Stages</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Printable Factory Job Card Modal */}
+      {
+        selectedJobCardLead && (
+          <ProductionJobCardModal
+            isOpen={Boolean(selectedJobCardLead)}
+            lead={selectedJobCardLead}
+            onClose={() => setSelectedJobCardLead(null)}
+            onOpenSpecsModal={() => {
+              setSelectedProductionSpecsLead(selectedJobCardLead);
+            }}
+          />
+        )
+      }
+
+      {/* Dedicated Production Specifications Modal */}
+      {
+        selectedProductionSpecsLead && (
+          <ProductionSpecsModal
+            isOpen={Boolean(selectedProductionSpecsLead)}
+            lead={selectedProductionSpecsLead}
+            initialTab={selectedProductionSpecsMode}
+            onClose={() => setSelectedProductionSpecsLead(null)}
+            onOpenJobCard={() => {
+              setSelectedJobCardLead(selectedProductionSpecsLead);
+            }}
+          />
+        )
+      }
+
+      {/* Project-Based Manufacturing Quantity Progress Modal */}
+      {
+        selectedProductionProgressLead && (
+          <ProductionProgressModal
+            isOpen={Boolean(selectedProductionProgressLead)}
+            lead={selectedProductionProgressLead}
+            onClose={() => setSelectedProductionProgressLead(null)}
+          />
+        )
+      }
+
+      {/* Dedicated Design Brief & Creative Requirements Modal */}
+      {
+        selectedDesignBriefLead && (
+          <DesignBriefModal
+            isOpen={Boolean(selectedDesignBriefLead)}
+            lead={selectedDesignBriefLead}
+            onClose={() => setSelectedDesignBriefLead(null)}
+            onOpenProductionSpecs={() => {
+              const currentLead = selectedDesignBriefLead;
+              setSelectedDesignBriefLead(null);
+              setSelectedProductionSpecsLead(currentLead);
+            }}
+          />
+        )
+      }
+
+      {/* Sales Submit Design Request Form Modal */}
+      {
+        submitDesignModalLead && (
+          <SubmitDesignRequestModal
+            isOpen={Boolean(submitDesignModalLead)}
+            lead={submitDesignModalLead}
+            targetStageId={submitDesignTargetStage}
+            onClose={() => {
+              setSubmitDesignModalLead(null);
+              setSubmitDesignTargetStage('');
+            }}
+          />
+        )
+      }
+    </div >
   );
 }
 

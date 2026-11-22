@@ -2,6 +2,14 @@ import { collection, getDocs, addDoc, updateDoc, doc, Timestamp } from 'firebase
 import { db } from '../lib/firebase';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getApiKey } from './ai';
+import {
+    generateMonthlyBudgetPlan,
+    generateFinancialHealthAudit,
+    persistMonthlyBudget,
+    getSavedMonthlyBudget,
+    type MonthlyBudgetPlan,
+    type FinancialHealthReport
+} from './financialIntelligenceEngine';
 
 function getTimestampMs(val: any): number {
     if (!val) return 0;
@@ -54,6 +62,7 @@ export interface LiveBusinessSnapshot {
     thisMonthExpenses: number;
     lifetimeExpenses: number;
     recentExpenses: Array<{ amount: number; category: string; description: string; date: string }>;
+    expensesByCategory: Record<string, number>;
 
     // Products & Stock
     totalProductsCount: number;
@@ -112,6 +121,7 @@ export async function getLiveBusinessSnapshot(): Promise<LiveBusinessSnapshot> {
         thisMonthExpenses: 0,
         lifetimeExpenses: 0,
         recentExpenses: [],
+        expensesByCategory: {},
 
         totalProductsCount: 0,
         lowStockProductsCount: 0,
@@ -284,6 +294,9 @@ export async function getLiveBusinessSnapshot(): Promise<LiveBusinessSnapshot> {
                 snapshot.thisMonthExpenses += amt;
             }
 
+            const catName = data.category || data.purpose || 'General';
+            snapshot.expensesByCategory[catName] = (snapshot.expensesByCategory[catName] || 0) + amt;
+
             if (snapshot.recentExpenses.length < 5) {
                 snapshot.recentExpenses.push({
                     amount: amt,
@@ -385,8 +398,16 @@ export function formatSnapshotPrompt(s: LiveBusinessSnapshot): string {
 [6. CUSTOMERS & CASH MEMOS]
 - Total Customers: ${s.totalCustomersCount}
 - Total Cash Memos: ${s.totalCashMemosCount} (Today: ${s.todayCashMemosCount})
+
+[7. FINANCIAL ADVISORY & SPENDING INTELLIGENCE]
+- Estimated Operating Margin: ~${s.lifetimeRevenue > 0 ? Math.round(((s.lifetimeRevenue - s.lifetimeExpenses) / s.lifetimeRevenue) * 100) : 0}%
+- Recorded Expenses By Category: ${JSON.stringify(s.expensesByCategory || {})}
+- Pending Receivables Due: ₹${s.totalOutstandingBalance.toLocaleString()} across ${s.unpaidInvoicesCount} invoices
+- Quotation Pipeline Potential: ₹${s.pendingQuotationsValue.toLocaleString()} across ${s.pendingQuotationsCount} open quotes
 ================================================================
-CRITICAL INSTRUCTION: Use the above live numbers directly whenever the user asks about sales, yesterday, today, quotations, leads, inventory, expenses, or customers. NEVER say you don't have access to this data!
+CRITICAL INSTRUCTION: You are also the Chief Financial Officer (CFO) and Master Financial Strategist for Bill Pro.
+Use the above live numbers directly whenever the user asks about sales, quotations, leads, inventory, expenses, customers, or financial guidance.
+NEVER say you don't have access to this data, and NEVER say the app doesn't support future monthly budget planning or specifying spending categories!
 `;
 }
 
@@ -394,14 +415,93 @@ CRITICAL INSTRUCTION: Use the above live numbers directly whenever the user asks
  * Intelligent Rule Fallback when AI models are unavailable or for instantaneous response
  */
 export function ruleBasedAiFallback(
-    query: string, 
+    query: string,
     s: LiveBusinessSnapshot
-): { action: string; payload?: any; target?: string; message: string; status: 'SUCCESS' | 'ERROR' } {
+): { action: string; payload?: any; target?: string; message: string; spokenText?: string; status: 'SUCCESS' | 'ERROR' } {
     const q = query.toLowerCase().trim();
+
+    // 0. Future Monthly Budget Planning & Spending Categories
+    if (
+        q.includes('budget') ||
+        (q.includes('plan') && (q.includes('spend') || q.includes('expense') || q.includes('month') || q.includes('future') || q.includes('cost') || q.includes('financ'))) ||
+        q.includes('spending categor') ||
+        q.includes('category list') ||
+        q.includes('categories list') ||
+        q.includes('spending plan') ||
+        q.includes('spending limit')
+    ) {
+        let targetRev = 0;
+        const lakhMatch = query.match(/(\d+(?:\.\d+)?)\s*(?:lakh|lac|l)/i);
+        if (lakhMatch) {
+            targetRev = parseFloat(lakhMatch[1]) * 100000;
+        } else {
+            const numMatch = query.match(/(?:rs\.?|inr|₹)?\s*([1-9]\d{4,9})/i);
+            if (numMatch) {
+                targetRev = parseFloat(numMatch[1].replace(/,/g, ''));
+            }
+        }
+
+        const plan = generateMonthlyBudgetPlan(s, targetRev);
+        return {
+            action: 'BUDGET_PLAN',
+            payload: plan,
+            message: plan.chatMarkdown,
+            spokenText: plan.spokenDigest,
+            status: 'SUCCESS'
+        };
+    }
+
+    // 0.1 Financial Health & Strategic Advisory / Margin / Cash Flow
+    if (
+        (q.includes('financial') && (q.includes('guid') || q.includes('advic') || q.includes('help') || q.includes('tip') || q.includes('strategy') || q.includes('cfo'))) ||
+        q.includes('health check') ||
+        q.includes('cash flow') ||
+        q.includes('operating margin') ||
+        q.includes('profit margin') ||
+        q.includes('cut cost') ||
+        q.includes('increase profit') ||
+        q.includes('how is my business doing')
+    ) {
+        const audit = generateFinancialHealthAudit(s);
+        return {
+            action: 'FINANCIAL_ADVICE',
+            payload: audit,
+            message: audit.chatMarkdown,
+            spokenText: audit.spokenDigest,
+            status: 'SUCCESS'
+        };
+    }
+
+    // 0.2 Recover Pending Invoices & Receivables
+    if (
+        (q.includes('collect') && (q.includes('due') || q.includes('unpaid') || q.includes('receivable') || q.includes('balance') || q.includes('money'))) ||
+        (q.includes('pending') && (q.includes('due') || q.includes('balance') || q.includes('unpaid') || q.includes('recovery')))
+    ) {
+        const outstanding = s.totalOutstandingBalance;
+        const count = s.unpaidInvoicesCount;
+        const chatMsg = `### 💼 Receivables Recovery Strategy
+You have **₹${outstanding.toLocaleString('en-IN')}** in pending balances across **${count} unpaid invoices**.
+
+#### 3-Tier Collection Action Plan:
+1. **Tier 1 (Soft Reminder):** Send automated friendly WhatsApp reminders with invoice PDF attached for balances under 7 days overdue.
+2. **Tier 2 (Account Statement):** For invoices overdue by 15+ days, dispatch an official Statement of Account outlining line-item invoice numbers and payment links.
+3. **Tier 3 (Credit Pause):** Require a 50% advance before accepting new custom orders from clients with balances overdue past 30 days.
+
+*You can say: "Dispatch invoice to customer" to immediately share via WhatsApp.*`;
+
+        const voiceMsg = `You currently have ₹${(outstanding / 1000).toFixed(0)} thousand in pending dues across ${count} invoices. I recommend sending WhatsApp invoice reminders to clients with balances overdue past seven days, and requiring upfront advance payments on new orders for repeat defaulters.`;
+
+        return {
+            action: 'REPLY',
+            message: chatMsg,
+            spokenText: voiceMsg,
+            status: 'SUCCESS'
+        };
+    }
 
     // 1. Yesterday Sales
     if (q.includes('yesterday') && (q.includes('sale') || q.includes('revenue') || q.includes('invoice') || q.includes('order'))) {
-        const msg = s.yesterdayInvoicesCount > 0 
+        const msg = s.yesterdayInvoicesCount > 0
             ? `Yesterday, you recorded ₹${s.yesterdaySales.toLocaleString()} in sales across ${s.yesterdayInvoicesCount} invoices. Lifetime revenue is ₹${s.lifetimeRevenue.toLocaleString()}.`
             : `Yesterday, there were 0 sales recorded (₹0 across 0 invoices). Lifetime revenue is ₹${s.lifetimeRevenue.toLocaleString()} across ${s.totalInvoicesCount} total invoices.`;
         return { action: 'REPLY', message: msg, status: 'SUCCESS' };
@@ -523,6 +623,7 @@ export async function askBillProAi(
     payload?: any;
     target?: string;
     message: string;
+    spokenText?: string;
     status: 'SUCCESS' | 'ERROR';
 }> {
     const apiKey = getApiKey();
@@ -531,12 +632,15 @@ export async function askBillProAi(
         try {
             const genAI = new GoogleGenerativeAI(apiKey);
             const systemPrompt = `
-You are the Master AI Worker for Bill Pro web application. You run all operations and answer business analytics questions with exact numbers.
+You are the Master AI Worker and Chief Financial Officer (CFO) / Strategic Financial Advisor for Bill Pro web application. You run operations, answer business analytics questions with exact numbers, and formulate forward-looking financial budgets and spending plans.
 ${formatSnapshotPrompt(snapshot)}
 
 ACTIONS YOU CAN EXECUTE:
 - PREFILL_DOCUMENT: { "action": "PREFILL_DOCUMENT", "target": "/invoices/new" (or "/quotations/new"), "payload": { "customerSearch": "Customer Name", "customerName": "Customer Name", "items": [{ "productSearch": "Item Name", "description": "Item Name", "quantity": 100, "rate": 699, "price": 699 }] }, "message": "Opening invoice for..." }
 - NAVIGATE: { "action": "NAVIGATE", "target": "/dashboard" | "/invoices" | "/invoices/new" | "/quotations" | "/quotations/new" | "/leads" | "/leads/new" | "/pipeline" | "/cash-memos" | "/proforma-invoices" | "/library/products" | "/library/customers" | "/expense" | "/reports" | "/settings" }
+- BUDGET_PLAN: { "action": "BUDGET_PLAN", "payload": { "targetRevenue": 500000, "projectedProfit": 100000, "totalSpendingCap": 400000 }, "message": "Detailed markdown budget table with spending categories list...", "spokenText": "Crisp 2-sentence executive summary..." }
+- FINANCIAL_ADVICE: { "action": "FINANCIAL_ADVICE", "payload": {}, "message": "Structured business financial health analysis...", "spokenText": "Crisp 2-sentence spoken assessment..." }
+- SAVE_BUDGET: { "action": "SAVE_BUDGET", "payload": {}, "message": "Saved monthly budget plan." }
 - ADD_LEAD: { "action": "ADD_LEAD", "payload": { "name": "...", "phone": "...", "company_name": "...", "budget": 5000, "requirement": "..." } }
 - ADD_PRODUCT: { "action": "ADD_PRODUCT", "payload": { "name": "...", "retail_price": 100, "quantity": 10 } }
 - ADD_CUSTOMER: { "action": "ADD_CUSTOMER", "payload": { "name": "...", "phone": "...", "gst_number": "..." } }
@@ -551,12 +655,18 @@ CRITICAL RULES:
 2. For questions about sales (yesterday, today, this month, lifetime): Use the exact numbers from the Live Business Snapshot above.
 3. For questions about quotations (how many quotations, pending, accepted, total value): State the exact counts and values.
 4. For questions about leads, expenses, stock, customers: State the exact counts.
-5. Output ONLY valid JSON matching this schema:
+5. FINANCIAL GUIDANCE & MONTHLY BUDGETING: You are the business's Chief Financial Officer (CFO).
+   When asked to specify or plan a future monthly budget, spending categories list, cash flow strategy, or financial guidance:
+   NEVER refuse or state that the app doesn't support future monthly budgeting or spending categories!
+   Formulate a concrete, professional monthly budget plan with target revenue, target profit margin, total spending cap, and a clear spending categories table (Raw Materials, Production/Machinery, Staff/Labor, Office/Utilities, Logistics, Marketing, Emergency Reserve).
+   Include 'spokenText' with a concise 2-sentence conversational digest suitable for voice synthesis.
+6. Output ONLY valid JSON matching this schema:
 {
-  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "REPLY",
+  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "BUDGET_PLAN" | "FINANCIAL_ADVICE" | "SAVE_BUDGET" | "REPLY",
   "target": "/route_path",
   "payload": {},
-  "message": "Direct, conversational message answering with exact numbers or confirming the action taken."
+  "message": "Direct, conversational message answering with exact numbers or formatted markdown table for budget plans.",
+  "spokenText": "Optional concise 2-3 sentence digest for text-to-speech."
 }
 `;
             const CANDIDATES = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-flash-latest'];
@@ -578,6 +688,7 @@ CRITICAL RULES:
                         payload: parsed.payload,
                         target: parsed.target,
                         message: parsed.message || 'Done.',
+                        spokenText: parsed.spokenText,
                         status: 'SUCCESS'
                     };
                 } catch (err: any) {
@@ -598,8 +709,8 @@ CRITICAL RULES:
  * Execute client-side business action
  */
 export async function executeClientSideAction(
-    action: string, 
-    payload: any, 
+    action: string,
+    payload: any,
     navigate: (path: string, options?: any) => void
 ): Promise<{ success: boolean; message: string }> {
     try {
@@ -608,6 +719,18 @@ export async function executeClientSideAction(
                 const target = payload?.target || '/dashboard';
                 navigate(target);
                 return { success: true, message: `Navigating to ${target}` };
+            }
+
+            case 'BUDGET_PLAN': {
+                return { success: true, message: 'Monthly budget plan generated.' };
+            }
+
+            case 'SAVE_BUDGET': {
+                if (payload) {
+                    await persistMonthlyBudget(payload);
+                    return { success: true, message: 'Monthly budget plan saved successfully.' };
+                }
+                return { success: false, message: 'No budget data provided to save.' };
             }
 
             case 'ADD_PRODUCT': {

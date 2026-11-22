@@ -36,11 +36,16 @@ export function ActiveAlarmModal() {
 
   const note = activeTriggeredAlarm;
   const isUrgent = note.priority === 'urgent' || note.priority === 'high';
+  const isPipelineRoutine = note.lead_id === 'pipeline';
 
   const handleOpenLead = () => {
     muteAlarmSound();
     dismissAlarm();
-    navigate(`/leads/${note.lead_id}`);
+    if (isPipelineRoutine) {
+      navigate('/pipeline');
+    } else {
+      navigate(`/leads/${note.lead_id}`);
+    }
   };
 
   return (
@@ -75,7 +80,7 @@ export function ActiveAlarmModal() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                  ⏰ Scheduled Reminder Alert
+                  {isPipelineRoutine ? '⏰ Daily Sales Routine (10:00 - 10:30 AM)' : '⏰ Scheduled Reminder Alert'}
                 </span>
                 {note.priority && (
                   <span
@@ -97,7 +102,7 @@ export function ActiveAlarmModal() {
                 )}
               </div>
               <h3 className="text-lg font-extrabold text-primary-dark mt-1">
-                {note.lead_name || 'Customer Follow-up'}
+                {isPipelineRoutine ? 'Daily Client Follow-up Time' : (note.lead_name || 'Customer Follow-up')}
               </h3>
             </div>
           </div>
@@ -219,7 +224,7 @@ export function ActiveAlarmModal() {
               onClick={handleOpenLead}
               className="neo-btn-primary text-xs px-4 py-2 font-bold inline-flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md"
             >
-              <ExternalLink size={14} /> View Lead
+              <ExternalLink size={14} /> {isPipelineRoutine ? 'Open Pipeline Board' : 'View Lead'}
             </button>
           </div>
         </div>

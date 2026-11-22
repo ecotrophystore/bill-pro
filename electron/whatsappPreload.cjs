@@ -17,6 +17,8 @@ const SYSTEM_BOT_NAMES = new Set([
 let cachedIdbOwnPhone = '';
 let idbLookupStarted = false;
 const cachedContactPhonesByName = new Map();
+// Maps phone last-10 digits → customer's own WhatsApp display name (pushname), NOT the sales-team-saved name
+const cachedPushnameByPhone = new Map();
 let contactsIdbLastRefreshAt = 0;
 
 function indexSavedContactRecord(row) {
@@ -30,6 +32,11 @@ function indexSavedContactRecord(row) {
       cachedContactPhonesByName.set(key, phone);
     }
   });
+  // Store customer's own pushname separately so we never mix it with the sales-team-saved contact name
+  const pushname = String(row.pushname || '').trim();
+  if (phone && pushname) {
+    cachedPushnameByPhone.set(phone.slice(-10), pushname);
+  }
 }
 
 function refreshSavedContactsFromIndexedDB() {
@@ -360,10 +367,14 @@ function extractActiveChatSnapshot() {
       }
     }
 
+    // Look up customer's own pushname (NOT the sales-team-saved contact name)
+    const pushname = (phone ? cachedPushnameByPhone.get(phone.slice(-10)) : '') || '';
+
     return {
       contactName,
       headerSubtitle,
       phone,
+      pushname,
       aboutText,
       isGroup,
       isSystemBot,
@@ -649,13 +660,13 @@ function readIndexedDbHistory(startMs, endMs) {
               const idRemoteMatch = idStr.match(/^(?:true|false)_([^_@]+@[^_]+)/);
               const rawChatId = String(
                 idObj?.remote?._serialized ||
-                  idObj?.remote ||
-                  (idRemoteMatch ? idRemoteMatch[1] : '') ||
-                  m?.chatId?._serialized ||
-                  m?.chatId ||
-                  m?.from?._serialized ||
-                  m?.from ||
-                  ''
+                idObj?.remote ||
+                (idRemoteMatch ? idRemoteMatch[1] : '') ||
+                m?.chatId?._serialized ||
+                m?.chatId ||
+                m?.from?._serialized ||
+                m?.from ||
+                ''
               ).replace(/:\d+@/, '@');
               if (!rawChatId || rawChatId.includes('@g.us') || rawChatId.includes('@broadcast') || rawChatId.includes('@newsletter') || rawChatId === 'status@broadcast') {
                 continue;
@@ -1028,9 +1039,11 @@ async function scanChatsForImport(opts) {
 
       if (!latestText || latestText.length < 2) continue;
 
+      const pushname = (phone ? cachedPushnameByPhone.get(phone.slice(-10)) : '') || '';
       candidates.push({
         key,
         contactName: item.contactName,
+        pushname,
         phone,
         latestText,
         inboundHistory: inboundHistory.slice(-6).map((h) => ({ direction: 'inbound', content: h.content })),
@@ -1158,8 +1171,12 @@ function scanSidebarIncomingChats(isConnected) {
       if (emittedSidebarSigs.has(sig)) continue;
       emittedSidebarSigs.add(sig);
 
+      // Look up customer's own pushname (NOT the sales-team-saved contact name)
+      const pushname = (phone ? cachedPushnameByPhone.get(phone.slice(-10)) : '') || '';
+
       ipcRenderer.sendToHost('wa:unread-event', {
         contactName,
+        pushname,
         phone,
         previewText,
         timeHint: timeText,
@@ -1649,7 +1666,7 @@ function pollAndSendOpenedChat(opts) {
             ok: true,
             resolvedPhone: openedSnap?.phone || digits || ''
           });
-        }, 900);
+        }, 250);
         return;
       }
     }
@@ -1682,10 +1699,10 @@ function pollAndSendOpenedChat(opts) {
       return;
     }
 
-    setTimeout(tick, 250);
+    setTimeout(tick, 150);
   };
 
-  setTimeout(tick, 350);
+  setTimeout(tick, 60);
 }
 
 function ensureChatsPaneReady(onReady) {
@@ -1993,7 +2010,7 @@ ipcRenderer.on('wa:send-direct-message', (_event, payload) => {
         resolvedPhone: activeSnapshot?.phone || digits || '',
         error: sent ? undefined : 'WhatsApp compose input not found in open chat'
       });
-    }, 900);
+    }, 250);
     return;
   }
 
@@ -2090,7 +2107,7 @@ if (IS_WHATSAPP_WEB) {
     emitTimer = setTimeout(() => {
       emitTimer = null;
       emitState();
-    }, 400);
+    }, 150);
   };
 
   window.addEventListener('DOMContentLoaded', () => {

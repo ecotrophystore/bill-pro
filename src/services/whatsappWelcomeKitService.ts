@@ -149,20 +149,20 @@ function sanitizeConfig(raw: any): WelcomeKitConfig {
   if (!raw || typeof raw !== 'object') return DEFAULT_WELCOME_KIT_CONFIG;
   const items: WelcomeKitItem[] = Array.isArray(raw.items)
     ? raw.items.map((it: any, idx: number) => ({
-        id: String(it?.id || `item_${idx + 1}`),
-        kind: (it?.kind || 'custom_text') as WelcomeKitItemKind,
-        title: String(it?.title || `Item ${idx + 1}`),
-        enabled: it?.enabled !== false,
-        messageText: String(it?.messageText || ''),
-        attachmentType: (it?.attachmentType || 'none') as WelcomeKitAttachmentType,
-        fileName: it?.fileName ? String(it.fileName) : undefined,
-        mimeType: it?.mimeType ? String(it.mimeType) : undefined,
-        fileUrl: it?.fileUrl ? String(it.fileUrl) : undefined,
-        localFilePath: it?.localFilePath ? String(it.localFilePath) : undefined,
-        fileSizeBytes: typeof it?.fileSizeBytes === 'number' ? it.fileSizeBytes : undefined,
-        sourceTemplateId: it?.sourceTemplateId ? String(it.sourceTemplateId) : undefined,
-        sourceCollection: it?.sourceCollection
-      }))
+      id: String(it?.id || `item_${idx + 1}`),
+      kind: (it?.kind || 'custom_text') as WelcomeKitItemKind,
+      title: String(it?.title || `Item ${idx + 1}`),
+      enabled: it?.enabled !== false,
+      messageText: String(it?.messageText || ''),
+      attachmentType: (it?.attachmentType || 'none') as WelcomeKitAttachmentType,
+      fileName: it?.fileName ? String(it.fileName) : undefined,
+      mimeType: it?.mimeType ? String(it.mimeType) : undefined,
+      fileUrl: it?.fileUrl ? String(it.fileUrl) : undefined,
+      localFilePath: it?.localFilePath ? String(it.localFilePath) : undefined,
+      fileSizeBytes: typeof it?.fileSizeBytes === 'number' ? it.fileSizeBytes : undefined,
+      sourceTemplateId: it?.sourceTemplateId ? String(it.sourceTemplateId) : undefined,
+      sourceCollection: it?.sourceCollection
+    }))
     : DEFAULT_WELCOME_KIT_ITEMS;
 
   return {
@@ -406,22 +406,33 @@ export async function loadAppCustomizedTemplates(): Promise<AppCustomizedTemplat
   return options;
 }
 
+let cachedStageNewEnquiryText: { text: string; fetchedAt: number } | null = null;
+
 export async function resolveStageNewEnquiryText(): Promise<string> {
+  const now = Date.now();
+  if (cachedStageNewEnquiryText && now - cachedStageNewEnquiryText.fetchedAt < 60000) {
+    return cachedStageNewEnquiryText.text;
+  }
   if (db) {
     try {
       const snap = await getDoc(doc(db, 'stage_messages', 'new_enquiry'));
       if (snap.exists()) {
         const data = snap.data() as StageMessageConfig;
         if (data?.whatsapp_enabled !== false && data?.whatsapp_template?.trim()) {
-          return data.whatsapp_template.trim();
+          const res = data.whatsapp_template.trim();
+          cachedStageNewEnquiryText = { text: res, fetchedAt: now };
+          return res;
         }
+        cachedStageNewEnquiryText = { text: '', fetchedAt: now };
         return '';
       }
     } catch {
       // ignore and fall back
     }
   }
-  return DEFAULT_STAGE_MESSAGES.new_enquiry?.whatsapp_template || '';
+  const fallback = DEFAULT_STAGE_MESSAGES.new_enquiry?.whatsapp_template || '';
+  cachedStageNewEnquiryText = { text: fallback, fetchedAt: now };
+  return fallback;
 }
 
 export function renderWelcomeKitMessage(
@@ -539,7 +550,7 @@ export async function recordWelcomeKitDeliveryToCrm(params: {
       welcome_kit_sent_at: serverTimestamp(),
       last_welcome_kit_items: params.sentSummary,
       updated_at: serverTimestamp()
-    }).catch(() => {});
+    }).catch(() => { });
 
     await addDoc(collection(db, 'activities'), {
       lead_id: params.leadId,
@@ -550,7 +561,7 @@ export async function recordWelcomeKitDeliveryToCrm(params: {
       actor: auth?.currentUser?.displayName || auth?.currentUser?.email || 'EcoBill Welcome Kit Automation',
       created_at: serverTimestamp(),
       date: new Date().toISOString()
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   await addDoc(collection(db, 'messages'), {
@@ -563,7 +574,7 @@ export async function recordWelcomeKitDeliveryToCrm(params: {
     platform: 'whatsapp',
     triggeredBy: 'welcome_kit_automation',
     created_at: serverTimestamp()
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 const EARLY_FOLLOWUP_STAGES = new Set([
@@ -743,7 +754,7 @@ export async function recordNoReplyFollowupDelivery(params: {
     no_reply_followup_sent: true,
     no_reply_followup_sent_at: serverTimestamp(),
     updated_at: serverTimestamp()
-  }).catch(() => {});
+  }).catch(() => { });
 
   await addDoc(collection(db, 'activities'), {
     lead_id: params.leadId,
@@ -754,7 +765,7 @@ export async function recordNoReplyFollowupDelivery(params: {
     actor: auth?.currentUser?.displayName || auth?.currentUser?.email || 'EcoBill No-Reply Follow-Up',
     created_at: serverTimestamp(),
     date: new Date().toISOString()
-  }).catch(() => {});
+  }).catch(() => { });
 
   await addDoc(collection(db, 'messages'), {
     leadId: params.leadId,
@@ -766,6 +777,6 @@ export async function recordNoReplyFollowupDelivery(params: {
     platform: 'whatsapp',
     triggeredBy: 'no_reply_testimonial_followup',
     created_at: serverTimestamp()
-  }).catch(() => {});
+  }).catch(() => { });
 }
 

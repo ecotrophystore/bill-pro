@@ -13,20 +13,20 @@ const GOOGLE_CREDIT_CEILING = 1500.00;
 const BUFFER_THRESHOLD = 0.95;
 
 interface TokenUsage {
-  promptTokens: number;
-  candidatesTokens: number;
-  totalTokens: number;
+    promptTokens: number;
+    candidatesTokens: number;
+    totalTokens: number;
 }
 
 function calculateCreditCost(usage: TokenUsage, cachedPromptTokens: number = 0): number {
-  const INPUT_COST_PER_TOKEN = 0.000000075;
-  const CACHED_INPUT_COST_PER_TOKEN = 0.00000001875;
-  const OUTPUT_COST_PER_TOKEN = 0.00000030;
-  
-  const regularInputTokens = Math.max(0, usage.promptTokens - cachedPromptTokens);
-  return (regularInputTokens * INPUT_COST_PER_TOKEN) + 
-         (cachedPromptTokens * CACHED_INPUT_COST_PER_TOKEN) + 
-         (usage.candidatesTokens * OUTPUT_COST_PER_TOKEN);
+    const INPUT_COST_PER_TOKEN = 0.000000075;
+    const CACHED_INPUT_COST_PER_TOKEN = 0.00000001875;
+    const OUTPUT_COST_PER_TOKEN = 0.00000030;
+
+    const regularInputTokens = Math.max(0, usage.promptTokens - cachedPromptTokens);
+    return (regularInputTokens * INPUT_COST_PER_TOKEN) +
+        (cachedPromptTokens * CACHED_INPUT_COST_PER_TOKEN) +
+        (usage.candidatesTokens * OUTPUT_COST_PER_TOKEN);
 }
 
 /**
@@ -51,10 +51,10 @@ export const aiToolGateway = onCall({ cors: true }, async (request) => {
     if (!userDoc.exists) {
         throw new HttpsError("permission-denied", "User record not found.");
     }
-    
+
     const userData = userDoc.data();
     if (userData?.is_active === false) {
-         throw new HttpsError("permission-denied", "User account is disabled.");
+        throw new HttpsError("permission-denied", "User account is disabled.");
     }
 
     const userRole = userData?.role;
@@ -71,7 +71,7 @@ export const aiToolGateway = onCall({ cors: true }, async (request) => {
     try {
         // 2. Route & Execute Tool securely
         const result = await executeTool(toolName, args || {}, context);
-        
+
         // 3. System Audit Log for all AI Gateway interactions
         await db.collection("audit_logs").add({
             document_type: "ai_action",
@@ -87,7 +87,7 @@ export const aiToolGateway = onCall({ cors: true }, async (request) => {
         return { success: true, result };
     } catch (error: any) {
         console.error(`AI Gateway Error [${toolName}]:`, error);
-        
+
         await db.collection("audit_logs").add({
             document_type: "ai_action",
             action: toolName,
@@ -100,7 +100,7 @@ export const aiToolGateway = onCall({ cors: true }, async (request) => {
         });
 
         throw new HttpsError(
-            error.code && error.code.startsWith("functions/") ? error.code.replace("functions/", "") as any : "internal", 
+            error.code && error.code.startsWith("functions/") ? error.code.replace("functions/", "") as any : "internal",
             error.message || "Failed to execute AI tool"
         );
     }
@@ -157,7 +157,7 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
     const organizationId = request.auth.uid; // Mocking orgId via user uid for now
 
     const budgetRef = db.collection('system_config').doc('gemini_budget');
-    
+
     // 1. Enforce Circuit Breaker
     const budgetSnap = await budgetRef.get();
     let totalCreditsConsumed = 0;
@@ -167,15 +167,15 @@ export const executeBillProAgentTask = onCall({ cors: true, secrets: [googleGenA
 
     if (totalCreditsConsumed >= GOOGLE_CREDIT_CEILING) {
         console.error(`🚨 AI Budget Blocked: 1500 Credit Ceiling reached (${totalCreditsConsumed.toFixed(2)} used).`);
-        return { 
-            success: false, 
-            fallbackActive: true, 
+        return {
+            success: false,
+            fallbackActive: true,
             text: JSON.stringify({
                 status: "ERROR",
                 severity: "HIGH",
                 avatarState: "warning",
                 voiceAlertText: "Budget constraint active. Running structural offline rule validations instead."
-            }) 
+            })
         };
     }
 
@@ -201,6 +201,8 @@ You are the central autonomous AI operator of Bill Pro. You can perform all work
 9. If they say an invoice was paid, use "MARK_PAID" (invoiceNumber, paymentMethod).
 10. If they received or sold stock, use "UPDATE_STOCK" (productSearch, quantityToAdd).
 11. If they ask to send/dispatch via WhatsApp, use "DISPATCH" (documentType, customerSearch).
+12. If the user asks for financial guidance, planning a future monthly budget, specifying spending categories, cash flow advice, or profit improvements:
+NEVER state that Bill Pro doesn't support future monthly budget planning or specifying spending categories! You are the Chief Financial Officer (CFO) and Master Financial Strategist. Formulate a concrete, highly-structured future monthly budget plan with target revenue, target profit margin, total spending cap, and a clear spending categories table (Raw Materials, Production/Machinery, Staff/Labor, Office/Utilities, Logistics, Marketing, Emergency Reserve).
 
 Valid routes for NAVIGATE:
 - /dashboard
@@ -220,7 +222,7 @@ Valid routes for NAVIGATE:
 
 Respond STRICTLY in this JSON format:
 {
-  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "CREATE_QUOTATION" | "CREATE_INVOICE" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "REPLY",
+  "action": "NAVIGATE" | "ADD_PRODUCT" | "ADD_CUSTOMER" | "ADD_LEAD" | "PREFILL_DOCUMENT" | "CREATE_QUOTATION" | "CREATE_INVOICE" | "DISPATCH" | "ADD_EXPENSE" | "MARK_PAID" | "UPDATE_STOCK" | "BUDGET_PLAN" | "FINANCIAL_ADVICE" | "REPLY",
   "target": "/route_path" (or "quotation", "invoice" for DISPATCH),
   "payload": { 
       "name": "Item Name / Lead Name", "retail_price": 100, "phone": "1234567890",
@@ -235,7 +237,8 @@ Respond STRICTLY in this JSON format:
   "status": "SUCCESS" | "ERROR",
   "severity": "LOW" | "MEDIUM" | "HIGH",
   "avatarState": "thinking" | "warning" | "idle" | "celebrating",
-  "message": "Your helpful, accurate conversational response in English, Tanglish, or Tamil. Directly answer with the exact live numbers from LIVE ANALYTICS."
+  "message": "Your helpful, accurate conversational response in English, Tanglish, or Tamil. Directly answer with the exact live numbers from LIVE ANALYTICS.",
+  "spokenText": "Optional concise 2-sentence spoken digest for speech synthesis"
 }
 `;
         let injectedContext = "";

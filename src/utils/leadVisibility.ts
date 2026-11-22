@@ -13,6 +13,25 @@ export function isAdminUser(user?: Pick<User, 'role'> | null): boolean {
   return String(user?.role || '').toLowerCase() === 'admin';
 }
 
+export function isSalesTeamUser(user?: Pick<User, 'role'> | null): boolean {
+  const role = String(user?.role || '').toLowerCase();
+  return (
+    role === 'sales' ||
+    role === 'admin' ||
+    role === 'accounts' ||
+    role === 'design' ||
+    role === 'production'
+  );
+}
+
+/**
+ * Returns true if the user has permission to view all leads across the company.
+ * Everyone on the sales, design, and production teams, as well as administrators and accounts staff, can view leads.
+ */
+export function canViewAllLeads(user?: Pick<User, 'role'> | null): boolean {
+  return isSalesTeamUser(user);
+}
+
 export function getLeadOwnerId(lead?: Partial<Lead> | Record<string, any> | null): string {
   if (!lead) return '';
   return String(lead.owner_id || (lead as any).ownerId || '').trim();
@@ -24,23 +43,20 @@ export function getLeadAssigneeName(lead?: Partial<Lead> | Record<string, any> |
 }
 
 /**
- * Returns true if the given user is allowed to view the lead.
- * - Admins can view every lead.
- * - Non-admin team members can ONLY view leads assigned to them (by UID or legacy name match when UID is absent).
+ * Checks whether a lead is specifically owned by/assigned to a given user.
  */
-export function isLeadAssignedToUser(
+export function isLeadDirectlyAssignedToUser(
   lead: Partial<Lead> | Record<string, any> | null | undefined,
-  user: Pick<User, 'id' | 'name' | 'email' | 'role'> | null | undefined
+  user: Pick<User, 'id' | 'name' | 'email'> | null | undefined
 ): boolean {
   if (!lead || !user) return false;
-  if (isAdminUser(user)) return true;
 
   const ownerId = getLeadOwnerId(lead);
   if (ownerId) {
     return ownerId === String(user.id || '').trim();
   }
 
-  // Legacy fallback only if no explicit owner_id / ownerId was stored on the lead
+  // Legacy fallback if no explicit owner_id was recorded
   const salesPerson = String(lead.sales_person || '').trim().toLowerCase();
   if (!salesPerson) return false;
 
@@ -49,19 +65,33 @@ export function isLeadAssignedToUser(
   return Boolean((userName && salesPerson === userName) || (userEmail && salesPerson === userEmail));
 }
 
+/**
+ * Returns true if the given user is allowed to view the lead.
+ * - Everyone on the sales team (and admins / accounts) can view all leads.
+ * - Other users can view if explicitly assigned to them.
+ */
+export function isLeadAssignedToUser(
+  lead: Partial<Lead> | Record<string, any> | null | undefined,
+  user: Pick<User, 'id' | 'name' | 'email' | 'role'> | null | undefined
+): boolean {
+  if (!lead || !user) return false;
+  if (canViewAllLeads(user)) return true;
+  return isLeadDirectlyAssignedToUser(lead, user);
+}
+
 export function filterLeadsForUser<T extends Partial<Lead> | Record<string, any>>(
   leads: T[],
   user: Pick<User, 'id' | 'name' | 'email' | 'role'> | null | undefined
 ): T[] {
   if (!user) return [];
-  if (isAdminUser(user)) return leads;
+  if (canViewAllLeads(user)) return leads;
   return leads.filter((lead) => isLeadAssignedToUser(lead, user));
 }
 
 /**
  * Subscribes to leads visible to the current user.
- * - Admins subscribe to all leads.
- * - Non-admins subscribe ONLY to leads where `owner_id == user.id` (server-side scoped).
+ * - Sales team members, admins, and accounts subscribe to all leads.
+ * - Scoped users subscribe only to leads where `owner_id == user.id`.
  */
 export function subscribeScopedLeads(
   firestore: Firestore | null | undefined,
@@ -75,8 +105,8 @@ export function subscribeScopedLeads(
     return () => {};
   }
 
-  const isAdmin = isAdminUser(user);
-  const q = isAdmin
+  const canViewAll = canViewAllLeads(user);
+  const q = canViewAll
     ? adminConstraints.length > 0
       ? query(collection(firestore, 'leads'), ...adminConstraints)
       : query(collection(firestore, 'leads'))
@@ -86,20 +116,18 @@ export function subscribeScopedLeads(
     q,
     (snap) => {
       const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead));
-      // Keep consistent newest-first ordering without requiring composite Firestore indexes
-      if (!isAdmin) {
-        rows.sort((a, b) => {
-          const at =
-            typeof (a as any).created_at?.toMillis === 'function'
-              ? (a as any).created_at.toMillis()
-              : ((a as any).created_at?.seconds || 0) * 1000;
-          const bt =
-            typeof (b as any).created_at?.toMillis === 'function'
-              ? (b as any).created_at.toMillis()
-              : ((b as any).created_at?.seconds || 0) * 1000;
-          return bt - at;
-        });
-      }
+      // Keep consistent newest-first ordering
+      rows.sort((a, b) => {
+        const at =
+          typeof (a as any).created_at?.toMillis === 'function'
+            ? (a as any).created_at.toMillis()
+            : ((a as any).created_at?.seconds || 0) * 1000;
+        const bt =
+          typeof (b as any).created_at?.toMillis === 'function'
+            ? (b as any).created_at.toMillis()
+            : ((b as any).created_at?.seconds || 0) * 1000;
+        return bt - at;
+      });
       onLeads(filterLeadsForUser(rows, user));
     },
     (err) => {
@@ -117,8 +145,8 @@ export async function fetchScopedLeads(
   adminConstraints: QueryConstraint[] = []
 ): Promise<Lead[]> {
   if (!firestore || !user) return [];
-  const isAdmin = isAdminUser(user);
-  const q = isAdmin
+  const canViewAll = canViewAllLeads(user);
+  const q = canViewAll
     ? adminConstraints.length > 0
       ? query(collection(firestore, 'leads'), ...adminConstraints)
       : query(collection(firestore, 'leads'))
@@ -126,9 +154,17 @@ export async function fetchScopedLeads(
 
   const snap = await getDocs(q).catch(() => null);
   if (!snap) return [];
-  return filterLeadsForUser(
-    snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead)),
-    user
-  );
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead));
+  rows.sort((a, b) => {
+    const at =
+      typeof (a as any).created_at?.toMillis === 'function'
+        ? (a as any).created_at.toMillis()
+        : ((a as any).created_at?.seconds || 0) * 1000;
+    const bt =
+      typeof (b as any).created_at?.toMillis === 'function'
+        ? (b as any).created_at.toMillis()
+        : ((b as any).created_at?.seconds || 0) * 1000;
+    return bt - at;
+  });
+  return filterLeadsForUser(rows, user);
 }
-
