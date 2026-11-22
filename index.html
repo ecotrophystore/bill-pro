@@ -2,19 +2,49 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/bill-pro/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>bill-pro</title>
-    <script type="module" crossorigin src="/bill-pro/assets/index-DJWs2iG_.js"></script>
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/chunk-DECur_0Z.js">
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/preload-helper-DBub7ojb.js">
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/index.esm-Bg4Gc-Rb.js">
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/firebase-DrrKnNb0.js">
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/createLucideIcon-hzVZEwf7.js">
-    <link rel="modulepreload" crossorigin href="/bill-pro/assets/AuthContext-BhoFwiqM.js">
-    <link rel="stylesheet" crossorigin href="/bill-pro/assets/index-BQ80OzKN.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <style>
+      #initial-loader {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #F3E9DD;
+        z-index: 9999;
+      }
+      .spinner {
+        width: 40px; height: 40px;
+        border: 4px solid rgba(0, 125, 124, 0.2);
+        border-top-color: #007D7C;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+    <script type="module" crossorigin src="/assets/index-D9WDsd8m.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-B1FJdls4.js">
+    <link rel="modulepreload" crossorigin href="/assets/pdf-vendor-DMzSPVLz.js">
+    <link rel="modulepreload" crossorigin href="/assets/firebase-vendor-DyPWRw4d.js">
+    <link rel="modulepreload" crossorigin href="/assets/ai-B5CUBagF.js">
+    <link rel="modulepreload" crossorigin href="/assets/react-vendor-Db_gDBm0.js">
+    <link rel="modulepreload" crossorigin href="/assets/ui-vendor-CRn8Eixp.js">
+    <link rel="modulepreload" crossorigin href="/assets/firebase-B5nJFsMU.js">
+    <link rel="modulepreload" crossorigin href="/assets/AuthContext-C8P8NNzV.js">
+    <link rel="modulepreload" crossorigin href="/assets/leadVisibility-DIT3ebWk.js">
+    <link rel="modulepreload" crossorigin href="/assets/leadAssignmentService-LyhCN422.js">
+    <link rel="modulepreload" crossorigin href="/assets/types-L6RiTWTH.js">
+    <link rel="modulepreload" crossorigin href="/assets/metaRequirementExtractor-DjWE_i1A.js">
+    <link rel="modulepreload" crossorigin href="/assets/pipelineClassifier-C5_NKvz4.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-Crvb_vAA.css">
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div id="initial-loader"><div class="spinner"></div></div>
+    </div>
   </body>
 </html>
