@@ -22,6 +22,7 @@ import {
   type StageMoveResult,
 } from '../../services/stageNotificationService';
 import { buildTemplateContext, renderTemplateText } from '../../utils/templateVariables';
+import { formatWhatsAppNumberDisplay } from '../../utils/whatsappNumberUtils';
 
 interface StageChangeConfirmModalProps {
   isOpen: boolean;
@@ -87,8 +88,8 @@ export function StageChangeConfirmModal({
 
   const hasAnyNotification = Boolean(
     (config?.whatsapp_enabled && renderedWhatsApp) ||
-      (config?.sms_enabled && renderedSms) ||
-      (config?.email_enabled && renderedEmail)
+    (config?.sms_enabled && renderedSms) ||
+    (config?.email_enabled && renderedEmail)
   );
 
   const handleConfirmMove = async (sendMessage: boolean) => {
@@ -127,43 +128,46 @@ export function StageChangeConfirmModal({
         {/* Header */}
         <div className="flex items-start justify-between gap-4 border-b border-shadow-darker/10 pb-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-bold text-primary tracking-wide uppercase">
-              <span>{pipelineName}</span>
-              <span>•</span>
-              <span className="text-secondary font-medium">Stage Transition</span>
+            <div className="flex items-center flex-wrap gap-1.5 text-xs font-bold text-primary tracking-wide uppercase">
+              <span className="truncate max-w-full">{pipelineName}</span>
+              <span className="shrink-0 text-shadow-darker/20">•</span>
+              <span className="text-secondary font-medium shrink-0">Stage Transition</span>
             </div>
             <h2 className="text-xl font-bold text-primary-dark mt-1">
-              Move Customer Stage
+              Move Stage: With Message or Without Message?
             </h2>
+            <p className="text-xs text-secondary mt-0.5">
+              Choose whether to send an automated notification to this customer when moving to <strong>{toStage.label}</strong>.
+            </p>
           </div>
           <button
             onClick={onClose}
             disabled={processing}
-            className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-slate-100 transition-colors"
+            className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-transparent transition-colors"
           >
             <X size={18} />
           </button>
         </div>
 
         {/* Stage Change Breadcrumb */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-shadow-darker/10">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-xl bg-transparent border border-shadow-darker/10 gap-3">
           <div className="flex-1">
             <span className="text-[10px] font-bold text-secondary uppercase tracking-wider block">From Stage</span>
-            <span className="text-sm font-bold text-slate-700">{fromStage.label}</span>
+            <span className="text-sm font-bold text-slate-700 block mt-0.5">{fromStage.label}</span>
           </div>
-          <div className="px-3 text-primary">
+          <div className="px-1 text-primary rotate-90 sm:rotate-0 self-center shrink-0">
             <ArrowRight size={18} className="animate-pulse" />
           </div>
-          <div className="flex-1 text-right">
+          <div className="flex-1 sm:text-right">
             <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider block">To Stage</span>
-            <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+            <span className="text-sm font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 inline-block mt-0.5">
               {toStage.label}
             </span>
           </div>
         </div>
 
         {/* Customer Summary Card */}
-        <div className="flex items-center justify-between gap-3 text-xs bg-slate-50/50 p-2.5 rounded-lg border border-shadow-darker/5">
+        <div className="flex items-center justify-between gap-3 text-xs bg-transparent p-2.5 rounded-lg border border-shadow-darker/5">
           <div>
             <span className="font-bold text-primary-dark">{lead.name}</span>
             {lead.company && <span className="text-secondary"> ({lead.company})</span>}
@@ -219,7 +223,7 @@ export function StageChangeConfirmModal({
           </div>
 
           {loadingConfig ? (
-            <div className="p-6 text-center text-xs text-secondary bg-slate-50 rounded-xl border border-shadow-darker/10">
+            <div className="p-6 text-center text-xs text-secondary bg-transparent rounded-xl border border-shadow-darker/10">
               <Loader2 size={16} className="animate-spin mx-auto mb-1 text-primary" />
               Loading template preview...
             </div>
@@ -228,19 +232,24 @@ export function StageChangeConfirmModal({
               {/* WhatsApp Bubble Preview */}
               {config?.whatsapp_enabled && renderedWhatsApp ? (
                 <div className="p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200 text-xs relative">
-                  <div className="flex items-center justify-between mb-1.5 text-emerald-800 font-bold">
-                    <span className="flex items-center gap-1">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-2 text-emerald-800 font-bold">
+                    <span className="flex items-center gap-1 shrink-0">
                       <Phone size={12} /> WhatsApp Message
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(lead.source_whatsapp_number || lead.source_whatsapp_label) && (
+                        <span className="text-[10px] font-mono bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded border border-emerald-300">
+                          From: {formatWhatsAppNumberDisplay(lead.source_whatsapp_number) || lead.source_whatsapp_label}
+                        </span>
+                      )}
                       <span className="text-[10px] text-emerald-600 font-normal">
-                        To: {lead.phone || 'No phone'}
+                        To: {lead.phone || `${lead.name} (WhatsApp contact match)`}
                       </span>
                       {lead.phone && (
                         <button
                           type="button"
                           onClick={() => openWhatsAppWebDirect(lead.phone || '', renderedWhatsApp)}
-                          className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-white/90 hover:bg-white px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
+                          className="inline-flex items-center shrink-0 gap-1 text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-transparent hover:bg-transparent px-2 py-0.5 rounded border border-emerald-300 shadow-xs transition-colors"
                           title="Open prefilled message in WhatsApp Web directly"
                         >
                           <ExternalLink size={10} /> Open WhatsApp Web
@@ -279,7 +288,7 @@ export function StageChangeConfirmModal({
               ) : null}
 
               {!hasAnyNotification && (
-                <div className="p-4 rounded-xl bg-slate-50 border border-dashed border-shadow-darker/20 text-center text-xs text-secondary">
+                <div className="p-4 rounded-xl bg-transparent border border-dashed border-shadow-darker/20 text-center text-xs text-secondary">
                   No automated customer message configured for this stage. Stage will be updated without sending a message.
                 </div>
               )}
@@ -296,47 +305,55 @@ export function StageChangeConfirmModal({
         )}
 
         {/* Modal Actions */}
-        <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-shadow-darker/10 flex-wrap">
+        <div className="flex items-center justify-between gap-3 pt-3 border-t border-shadow-darker/10 flex-wrap">
           <button
             type="button"
             onClick={onClose}
             disabled={processing}
-            className="neo-btn text-xs px-3.5 py-2 font-semibold"
+            className="neo-btn text-xs px-3.5 py-2 font-semibold text-secondary hover:text-primary-dark"
           >
             Cancel
           </button>
 
-          <button
-            type="button"
-            onClick={() => handleConfirmMove(false)}
-            disabled={processing || (requiresReason && !customReason.trim())}
-            className="neo-btn text-xs px-3.5 py-2 font-semibold text-secondary hover:text-primary-dark"
-          >
-            {duplicateInfo.isDuplicate ? 'Change Stage Without Sending' : 'Confirm Without Message'}
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleConfirmMove(false)}
+              disabled={processing || (requiresReason && !customReason.trim())}
+              className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-surface hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 shadow-sm transition-all flex items-center gap-1.5"
+            >
+              <CheckCircle2 size={14} className="text-slate-400" />
+              <span>Move Without Message</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => handleConfirmMove(true)}
-            disabled={processing || (requiresReason && !customReason.trim())}
-            className="neo-btn-primary text-xs px-4 py-2 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md hover:shadow-lg"
-          >
-            {processing ? (
-              <>
-                <Loader2 size={14} className="animate-spin" /> Moving...
-              </>
-            ) : duplicateInfo.isDuplicate ? (
-              <>
-                <Send size={14} /> Send Again & Move
-              </>
-            ) : (
-              <>
-                <Send size={14} /> Confirm & Send Message
-              </>
-            )}
-          </button>
+            {hasAnyNotification ? (
+              <button
+                type="button"
+                onClick={() => handleConfirmMove(true)}
+                disabled={processing || (requiresReason && !customReason.trim())}
+                className="neo-btn-primary text-xs px-4 py-2.5 font-bold flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md hover:shadow-lg transition-all"
+              >
+                {processing ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" /> Moving...
+                  </>
+                ) : duplicateInfo.isDuplicate ? (
+                  <>
+                    <Send size={14} /> Send Again & Move With Message
+                  </>
+                ) : (
+                  <>
+                    <Send size={14} /> Move With Message
+                  </>
+                )}
+              </button>
+            ) : null}
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
+
+

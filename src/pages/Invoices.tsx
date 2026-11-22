@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown } from 'lucide-react';
+import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown, Share2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { Invoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
 
 export default function Invoices() {
   const navigate = useNavigate();
@@ -23,9 +25,29 @@ export default function Invoices() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [shareInvoice, setShareInvoice] = useState<Invoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
+
+  const getInvoiceDate = (inv: Invoice): Date => {
+    const custom = (inv as any).custom_date || (inv as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return inv.created_at?.toDate ? inv.created_at.toDate() : new Date();
+  };
+
+  const formatInvoiceDate = (inv: Invoice): string => {
+    const custom = (inv as any).custom_date || (inv as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...';
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -69,6 +91,11 @@ export default function Invoices() {
   const openPaymentModal = (inv: Invoice) => {
     setSelectedInvoice(inv);
     setIsPaymentModalOpen(true);
+  };
+
+  const openShareModal = (inv: Invoice) => {
+    setShareInvoice(inv);
+    setIsShareModalOpen(true);
   };
 
   const deleteInvoice = async (id: string) => {
@@ -116,16 +143,71 @@ export default function Invoices() {
     navigate('/invoices/new', { state: { voiceData: { customerName, items, customerType } } });
   };
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredInvoices = invoices
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filteredInvoices = invoices
       .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
+    const now = new Date();
+    filteredInvoices = filteredInvoices.filter(inv => {
+      const date = getInvoiceDate(inv);
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filteredInvoices.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              const { downloadPDF } = await import('../utils/pdfGenerator');
+              for (const item of filteredInvoices) {
+                const blob = await downloadPDF(item, customers[item.customer_id] || 'Unknown Customer', 'Invoice', 'blob', settings);
+                if (blob) {
+                  const customerName = customers[item.customer_id]?.name || 'Unknown';
+                  const filename = `Invoice_${item.number}_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                  zip.file(filename, blob);
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'Invoices_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
 
     if (format === 'excel') {
       const reportData = filteredInvoices.map(inv => ({
         'Invoice Number': inv.number,
         'Customer': customers[inv.customer_id]?.name || 'Unknown Customer',
-        'Date': inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+        'Date': formatInvoiceDate(inv),
         'Subtotal (₹)': inv.subtotal || 0,
         'Tax Amount (₹)': inv.tax_total || 0,
         'Grand Total (₹)': inv.grand_total || 0,
@@ -150,7 +232,7 @@ export default function Invoices() {
         body: filteredInvoices.map(inv => [
           inv.number,
           customers[inv.customer_id]?.name || 'Unknown Customer',
-          inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+          formatInvoiceDate(inv),
           `Rs. ${inv.grand_total?.toLocaleString() || '0'}`,
           (inv.payment_status || 'unpaid').toUpperCase()
         ]),
@@ -160,6 +242,10 @@ export default function Invoices() {
     }
   };
 
+  const displayInvoices = invoices
+    .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -168,33 +254,17 @@ export default function Invoices() {
           <p className="text-secondary mt-1">Manage official tax invoices, tracked by FY sequence.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button onClick={() => navigate('/invoices/new')} className="neo-btn-primary flex items-center gap-2">
             <Plus size={18} /> New Invoice
           </button>
@@ -214,7 +284,7 @@ export default function Invoices() {
         </div>
         <div className="relative">
           <select 
-            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -229,9 +299,10 @@ export default function Invoices() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
-              <tr className="bg-surface border-b border-shadow-darker/10">
+              <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Invoice Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
@@ -245,21 +316,18 @@ export default function Invoices() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Loading invoices...
                 </td></tr>
-              ) : invoices.length === 0 ? (
+              ) : displayInvoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No invoices found.</td></tr>
-              ) : invoices
-                  .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
-                  .map((inv) => (
+              ) : displayInvoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || 'Loading...'}</td>
-                  <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
+                  <td className="p-4 text-secondary">{formatInvoiceDate(inv)}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
-                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div>₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</div>
                     {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
                       <div className="text-xs text-orange-600 font-semibold mt-0.5">
-                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                        Bal: ₹ {inv.balance_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     )}
                   </td>
@@ -274,40 +342,65 @@ export default function Invoices() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
-                      <button 
-                        onClick={() => navigate(`/invoices/edit/${inv.id}`)}
-                        className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Invoice"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="View PDF"
-                      >
-                        <FileText size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="Download"
-                      >
-                        <Download size={18} />
-                      </button>
-                      <button 
-                        onClick={() => deleteInvoice(inv.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Invoice"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                      <button onClick={() => openShareModal(inv)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
+                      <button onClick={() => deleteInvoice(inv.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Loading invoices...
+              </div>
+            ) : displayInvoices.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No invoices found.</div>
+            ) : displayInvoices.map((inv) => (
+              <div key={inv.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
+                    <p className="text-secondary font-medium mt-0.5">{customers[inv.customer_id]?.name || 'Loading...'}</p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {formatInvoiceDate(inv)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
+                    <button 
+                      onClick={() => openPaymentModal(inv)}
+                      className={`mt-1 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                      inv.payment_status === 'paid' ? 'bg-green-100 text-green-700' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {inv.payment_status?.toUpperCase() || 'UNPAID'}
+                    </button>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-bold mt-1">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-1 pt-2 border-t border-shadow-darker/5">
+                  <button onClick={() => navigate(`/invoices/edit/${inv.id}`)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary transition-colors" title="Edit Invoice"><Edit size={18} /></button>
+                  <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'view', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                  <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Invoice', 'download', settings)} className="flex-1 flex justify-center py-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                  <button onClick={() => openShareModal(inv)} className="flex-1 flex justify-center py-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
+                  <button onClick={() => deleteInvoice(inv.id)} className="flex-1 flex justify-center py-2 text-secondary hover:text-red-600 transition-colors" title="Delete Invoice"><Trash2 size={18} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -323,6 +416,21 @@ export default function Invoices() {
           onPaymentUpdated={() => {}}
         />
       )}
+
+      {shareInvoice && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareInvoice(null);
+          }}
+          document={shareInvoice}
+          documentType="Invoice"
+          customer={customers[shareInvoice.customer_id]}
+          settings={settings}
+        />
+      )}
     </div>
   );
 }
+

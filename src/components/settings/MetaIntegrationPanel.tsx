@@ -335,7 +335,7 @@ export default function MetaIntegrationPanel() {
   return (
     <section className="space-y-6 max-w-[1400px] mx-auto pb-20">
       {/* Header */}
-      <div className="flex justify-between items-center bg-surface p-4 rounded-lg border border-shadow-darker/10 shadow-sm">
+      <div className="flex justify-between items-center bg-transparent p-4 rounded-lg border border-shadow-darker/10 shadow-sm">
         <div>
           <h3 className="flex items-center gap-2 text-primary-dark font-bold text-lg">
             <Database size={20} className="text-primary" />
@@ -441,7 +441,7 @@ export default function MetaIntegrationPanel() {
                 <select
                   value={config.environment}
                   onChange={e => handleChange('environment', e.target.value)}
-                  className={`appearance-none bg-surface ${inputCls(fieldErrors.environment)}`}
+                  className={`appearance-none bg-transparent ${inputCls(fieldErrors.environment)}`}
                   disabled={!isAdmin}
                 >
                   <option value="">-- Select Environment --</option>
@@ -665,8 +665,8 @@ export default function MetaIntegrationPanel() {
       {showTestModal && <SendTestMessageModal onClose={() => setShowTestModal(false)} onSuccess={() => { setShowTestModal(false); fetchStatus(); }} />}
       {showDiagnosticModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl overflow-hidden border-2 border-shadow-darker/20 neo-shadow">
-            <div className="bg-surface p-4 border-b border-shadow-darker/10 flex justify-between items-center">
+          <div className="bg-transparent rounded-2xl w-full max-w-lg shadow-xl overflow-hidden border-2 border-shadow-darker/20 neo-shadow">
+            <div className="bg-transparent p-4 border-b border-shadow-darker/10 flex justify-between items-center">
               <h3 className="font-bold text-primary-dark flex items-center gap-2">
                 <Activity size={18} className="text-primary" /> Token Diagnostics
               </h3>
@@ -683,7 +683,7 @@ export default function MetaIntegrationPanel() {
               ) : diagnosticReport ? (
                 <div className="space-y-3">
                   {diagnosticReport.checks?.map((check: any, idx: number) => (
-                    <div key={idx} className="bg-white p-3 rounded-lg border border-shadow-darker/10 flex items-start gap-3">
+                    <div key={idx} className="bg-transparent p-3 rounded-lg border border-shadow-darker/10 flex items-start gap-3">
                       <div className="mt-0.5">
                         {check.passed ? <CheckCircle size={16} className="text-green-500" /> : <AlertCircle size={16} className="text-red-500" />}
                       </div>
@@ -702,3 +702,5 @@ export default function MetaIntegrationPanel() {
     </section>
   );
 }
+
+

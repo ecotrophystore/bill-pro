@@ -1,9 +1,11 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { AlertCircle, ArrowRight, Loader2, RefreshCw, Send } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { testLeadIngestHttp } from '../lib/testLeadIngest';
 import type { Lead, LeadIntakeEvent, LeadPlatform, Pipeline } from '../types';
+import { useAuth } from '../contexts/AuthContext';
+import { subscribeScopedLeads } from '../utils/leadVisibility';
 
 function formatTs(value: any) {
   if (!value) return '-';
@@ -21,6 +23,7 @@ function sourceLabel(platform: LeadPlatform) {
 }
 
 export default function LeadIntake() {
+  const { dbUser } = useAuth();
   const [platform, setPlatform] = useState<LeadPlatform>('meta');
   const [pipelineId, setPipelineId] = useState('default');
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -58,16 +61,21 @@ export default function LeadIntake() {
       console.error('Pipeline query failed', error);
     });
 
-    const leadsQuery = query(collection(db, 'leads'), orderBy('created_at', 'desc'));
     const eventsQuery = query(collection(db, 'lead_intake_events'), orderBy('created_at', 'desc'));
 
-    const unsubLeads = onSnapshot(leadsQuery, (snapshot) => {
-      setLeads(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Lead)));
-      setLoading(false);
-    }, (error) => {
-      console.error('Lead query failed', error);
-      setLoading(false);
-    });
+    const unsubLeads = subscribeScopedLeads(
+      db,
+      dbUser,
+      (scopedLeads) => {
+        setLeads(scopedLeads);
+        setLoading(false);
+      },
+      (error) => {
+        console.error('Lead query failed', error);
+        setLoading(false);
+      },
+      [orderBy('created_at', 'desc')]
+    );
 
     const unsubEvents = onSnapshot(eventsQuery, (snapshot) => {
       setEventsError('');
@@ -82,7 +90,7 @@ export default function LeadIntake() {
       unsubLeads();
       unsubEvents();
     };
-  }, []);
+  }, [dbUser?.id, dbUser?.role]);
 
   useEffect(() => {
     if (!pipelines.length) return;
@@ -235,7 +243,7 @@ export default function LeadIntake() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm hidden md:table">
                 <thead>
                   <tr className="text-left text-secondary border-b border-shadow-darker/10">
                     <th className="py-3 pr-4 font-semibold">Time</th>
@@ -274,6 +282,49 @@ export default function LeadIntake() {
                   ))}
                 </tbody>
               </table>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden divide-y divide-shadow-darker/10">
+                {events.map((event) => (
+                  <div key={event.id} className="py-4 space-y-3">
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <div className="font-semibold text-primary-dark">{event.platform}</div>
+                        <div className="text-[10px] text-secondary mt-0.5">{event.source}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest ${
+                          event.status === 'created' || event.status === 'matched'
+                            ? 'bg-success/10 text-success'
+                            : event.status === 'duplicate'
+                              ? 'bg-warning/10 text-warning'
+                              : event.status === 'failed'
+                                ? 'bg-error/10 text-error'
+                                : 'bg-secondary/10 text-secondary'
+                        }`}>
+                          {event.status}
+                        </span>
+                        <div className="text-[10px] text-secondary mt-1">{formatTs(event.created_at)}</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-shadow-darker/5 p-2 rounded-lg text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">Lead ID:</span>
+                        <span className="font-semibold text-primary-dark">{event.lead_id || '-'}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">Event:</span>
+                        <span className="text-secondary">{event.event_id || '-'}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-secondary bg-white p-2 border border-shadow-darker/10 rounded-lg whitespace-pre-wrap break-words">
+                      {event.message || event.error || '-'}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

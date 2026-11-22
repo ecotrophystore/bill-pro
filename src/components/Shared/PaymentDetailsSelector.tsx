@@ -22,7 +22,7 @@ export const PaymentDetailsSelector: React.FC<PaymentDetailsSelectorProps> = ({ 
         <select
           value={value}
           onChange={(e) => onChange(e.target.value as PaymentMethodToShow)}
-          className="w-full neo-input appearance-none bg-surface"
+          className="w-full neo-input appearance-none bg-transparent"
         >
           <option value="Bank Details">Bank Details Only</option>
           <option value="UPI Details">UPI Details Only</option>
@@ -34,3 +34,4 @@ export const PaymentDetailsSelector: React.FC<PaymentDetailsSelectorProps> = ({ 
     </div>
   );
 };
+

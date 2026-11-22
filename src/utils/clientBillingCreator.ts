@@ -11,10 +11,11 @@ import {
   where,
   orderBy,
   limit,
-  getDocs
+  getDocs,
+  Timestamp
 } from 'firebase/firestore';
 
-import { formatDocumentNumber } from './numberGenerator';
+import { formatDocumentNumber, getNextProposedNumber } from './numberGenerator';
 import type { Settings } from '../types';
 
 const exactRound = (num: number): number => {
@@ -154,9 +155,9 @@ export async function clientCreateQuotation(rawData: any) {
     });
 
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let quotationNumber = rawData.number;
     if (!quotationNumber) {
@@ -182,6 +183,8 @@ export async function clientCreateQuotation(rawData: any) {
     const quotationRef = doc(collection(db, "quotations"));
     const quotationData = {
       ...rawData,
+      lead_id: rawData.lead_id || undefined,
+      customer_phone: rawData.customer_phone || undefined,
       number: quotationNumber,
       items: validatedItems,
       subtotal: exactRound(rawSubtotal),
@@ -192,6 +195,7 @@ export async function clientCreateQuotation(rawData: any) {
       charge_amount: charge,
       round_off: roundOff,
       grand_total: finalGrandTotal,
+      total_amount: finalGrandTotal,
       status: rawData.status || 'draft',
       created_by: uid,
       created_at: serverTimestamp()
@@ -233,9 +237,9 @@ export async function clientCreateInvoice(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let invoiceNumber = rawData.number;
     if (!invoiceNumber) {
@@ -278,7 +282,8 @@ export async function clientCreateInvoice(rawData: any) {
       balance_amount: rawData.balance_amount || finalGrandTotal,
       payment_history: [],
       created_by: uid,
-      created_at: serverTimestamp(),
+      created_at: rawData.custom_date ? Timestamp.fromDate(new Date(rawData.custom_date + 'T12:00:00')) : serverTimestamp(),
+      custom_date: rawData.custom_date || new Date().toISOString().split('T')[0],
       audit_trail: [{
         action: "direct_creation",
         user: uid,
@@ -331,9 +336,9 @@ export async function clientCreateProformaInvoice(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let proformaNumber = rawData.number;
     if (!proformaNumber) {
@@ -430,9 +435,9 @@ export async function clientCreateCashMemo(rawData: any) {
     const discountPercent = rawData.discount_percent || 0;
     const discountAmount = exactRound((subtotal * discountPercent) / 100);
     const charge = rawData.charge_amount || rawData.chargeAmount || 0;
-    const grandTotalExact = subtotal - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
     let memoNumber = rawData.number;
     if (!memoNumber) {
@@ -477,7 +482,8 @@ export async function clientCreateCashMemo(rawData: any) {
       balance_amount: rawData.balance_amount || finalGrandTotal,
       payment_history: [],
       created_by: uid,
-      created_at: serverTimestamp(),
+      created_at: rawData.custom_date ? Timestamp.fromDate(new Date(rawData.custom_date + 'T12:00:00')) : serverTimestamp(),
+      custom_date: rawData.custom_date || new Date().toISOString().split('T')[0],
       audit_trail: [{
         action: "cash_memo_creation",
         user: uid,
@@ -569,7 +575,11 @@ export function deriveCashMemoNumberFromQuotation(quotationNumber?: string, targ
   return `${prefix}/${clean}`;
 }
 
-export async function clientConvertQuotationToProforma(quotationId: string, force: boolean = false) {
+export async function clientConvertQuotationToInvoice(
+  quotationId: string, 
+  customInvoiceNumber?: string, 
+  force: boolean = false
+) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
@@ -580,7 +590,220 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
       if (!qDoc.exists()) throw new Error("Quotation not found");
       const qData = qDoc.data();
 
-      if (qData.conversion_status === "converted" && qData.linked_proforma_id && !force) {
+      if (qData.conversion_status === "converted" && qData.linked_invoice_id && !force) {
+        const invRef = doc(db, "invoices", qData.linked_invoice_id);
+        const invSnap = await transaction.get(invRef);
+        if (invSnap.exists()) {
+          return {
+            success: true,
+            invoiceId: qData.linked_invoice_id,
+            invoiceNumber: qData.invoiceNumber || invSnap.data()?.number || qData.linked_invoice_id
+          };
+        }
+      }
+
+      let subtotal = 0;
+      let totalTax = 0;
+
+      const validatedItems = (qData.items || []).map((item: any) => {
+        const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
+        const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : 18;
+        const taxAmountRaw = (lineTotalRaw * taxPercentage) / 100;
+        const lineTotal = exactRound(lineTotalRaw);
+        const taxAmount = exactRound(taxAmountRaw);
+        subtotal += lineTotal;
+        totalTax += taxAmount;
+        return { 
+          ...item, 
+          line_total: lineTotal, 
+          tax_amount: taxAmount,
+          tax_percentage: taxPercentage
+        };
+      });
+
+      const discountPercent = qData.discount_percent || 0;
+      const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
+      const charge = qData.charge_amount || qData.chargeAmount || 0;
+      const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
+
+      let invoiceNumber = customInvoiceNumber?.trim();
+      if (!invoiceNumber) {
+        invoiceNumber = await getNextProposedNumber("invoices", "invoice");
+      }
+
+      const advanceAmount = qData.advance_amount || 0;
+      const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
+      const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
+
+      const invoiceRef = doc(collection(db, "invoices"));
+      const invoiceData = {
+        ...qData,
+        id: invoiceRef.id,
+        number: invoiceNumber,
+        documentType: "invoice",
+        is_locked: true,
+        is_gst: true,
+        status: "finalized",
+        conversion_status: null,
+        payment_status: initialPaymentStatus,
+        items: validatedItems,
+        subtotal: exactRound(subtotal),
+        tax_total: exactRound(totalTax),
+        cgst: qData.is_igst ? 0 : exactRound(totalTax / 2),
+        sgst_igst: qData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+        discount_amount: discountAmount,
+        charge_amount: charge,
+        round_off: roundOff,
+        grand_total: finalGrandTotal,
+        advance_amount: advanceAmount,
+        balance_amount: balanceAmount,
+        payment_history: [],
+        sourceDocumentType: "gst_quotation",
+        sourceQuotationId: quotationId,
+        sourceQuotationNumber: qData.number || "",
+        linked_quotation_id: quotationId,
+        created_by: uid,
+        created_at: serverTimestamp(),
+        invoice_date: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        audit_trail: [{
+          action: "converted_from_quotation",
+          user: uid,
+          timestamp: new Date().toISOString()
+        }]
+      };
+
+      transaction.set(invoiceRef, invoiceData);
+
+      transaction.update(quotationRef, {
+        conversion_status: "converted",
+        convertedToInvoice: true,
+        linked_invoice_id: invoiceRef.id,
+        invoiceId: invoiceRef.id,
+        invoiceNumber: invoiceNumber,
+        convertedAt: serverTimestamp(),
+        status: "converted",
+        updated_at: serverTimestamp()
+      });
+
+      return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
+    });
+  } catch (txError) {
+    console.warn("Direct write fallback for Quotation to Invoice conversion:", txError);
+    const quotationRef = doc(db, "quotations", quotationId);
+    const qDoc = await getDoc(quotationRef);
+    if (!qDoc.exists()) throw new Error("Quotation not found");
+    const qData = qDoc.data();
+
+    let subtotal = 0;
+    let totalTax = 0;
+
+    const validatedItems = (qData.items || []).map((item: any) => {
+      const lineTotalRaw = (item.quantity || 0) * (item.rate || 0);
+      const taxPercentage = item.tax_percentage !== undefined ? item.tax_percentage : 18;
+      const taxAmountRaw = (lineTotalRaw * taxPercentage) / 100;
+      const lineTotal = exactRound(lineTotalRaw);
+      const taxAmount = exactRound(taxAmountRaw);
+      subtotal += lineTotal;
+      totalTax += taxAmount;
+      return { 
+        ...item, 
+        line_total: lineTotal, 
+        tax_amount: taxAmount,
+        tax_percentage: taxPercentage
+      };
+    });
+
+    const discountPercent = qData.discount_percent || 0;
+    const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
+    const charge = qData.charge_amount || qData.chargeAmount || 0;
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
+
+    let invoiceNumber = customInvoiceNumber?.trim();
+    if (!invoiceNumber) {
+      invoiceNumber = await getNextProposedNumber("invoices", "invoice");
+    }
+
+    const advanceAmount = qData.advance_amount || 0;
+    const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
+    const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
+
+    const invoiceRef = doc(collection(db, "invoices"));
+    const invoiceData = {
+      ...qData,
+      id: invoiceRef.id,
+      number: invoiceNumber,
+      documentType: "invoice",
+      is_locked: true,
+      is_gst: true,
+      status: "finalized",
+      conversion_status: null,
+      payment_status: initialPaymentStatus,
+      items: validatedItems,
+      subtotal: exactRound(subtotal),
+      tax_total: exactRound(totalTax),
+      cgst: qData.is_igst ? 0 : exactRound(totalTax / 2),
+      sgst_igst: qData.is_igst ? exactRound(totalTax) : exactRound(totalTax / 2),
+      discount_amount: discountAmount,
+      charge_amount: charge,
+      round_off: roundOff,
+      grand_total: finalGrandTotal,
+      advance_amount: advanceAmount,
+      balance_amount: balanceAmount,
+      payment_history: [],
+      sourceDocumentType: "gst_quotation",
+      sourceQuotationId: quotationId,
+      sourceQuotationNumber: qData.number || "",
+      linked_quotation_id: quotationId,
+      created_by: uid,
+      created_at: serverTimestamp(),
+      invoice_date: serverTimestamp(),
+      updated_at: serverTimestamp(),
+      audit_trail: [{
+        action: "converted_from_quotation",
+        user: uid,
+        timestamp: new Date().toISOString()
+      }]
+    };
+
+    await setDoc(invoiceRef, invoiceData);
+    await updateDoc(quotationRef, {
+      conversion_status: "converted",
+      convertedToInvoice: true,
+      linked_invoice_id: invoiceRef.id,
+      invoiceId: invoiceRef.id,
+      invoiceNumber: invoiceNumber,
+      convertedAt: serverTimestamp(),
+      status: "converted",
+      updated_at: serverTimestamp()
+    });
+
+    return { success: true, invoiceId: invoiceRef.id, invoiceNumber };
+  }
+}
+
+export async function clientConvertQuotationToProforma(
+  quotationId: string, 
+  customProformaNumberOrForce?: string | boolean, 
+  force: boolean = false
+) {
+  if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
+  const uid = auth.currentUser.uid;
+  const customProformaNumber = typeof customProformaNumberOrForce === 'string' ? customProformaNumberOrForce : undefined;
+  const isForce = typeof customProformaNumberOrForce === 'boolean' ? customProformaNumberOrForce : force;
+
+  try {
+    return await runTransaction(db, async (transaction) => {
+      const quotationRef = doc(db, "quotations", quotationId);
+      const qDoc = await transaction.get(quotationRef);
+      if (!qDoc.exists()) throw new Error("Quotation not found");
+      const qData = qDoc.data();
+
+      if (qData.conversion_status === "converted" && qData.linked_proforma_id && !isForce) {
         const piRef = doc(db, "proforma_invoices", qData.linked_proforma_id);
         const piSnap = await transaction.get(piRef);
         if (piSnap.exists()) {
@@ -614,12 +837,14 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
-      // Derived Proforma Number changing QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
-      const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
+      let proformaNumber = customProformaNumber?.trim();
+      if (!proformaNumber) {
+        proformaNumber = await getNextProposedNumber("proforma_invoices", "proforma");
+      }
 
       const advanceAmount = qData.advance_amount || 0;
       const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
@@ -709,11 +934,14 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
     const discountPercent = qData.discount_percent || 0;
     const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
     const charge = qData.charge_amount || qData.chargeAmount || 0;
-    const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
-    const proformaNumber = deriveProformaNumberFromQuotation(qData.number);
+    let proformaNumber = customProformaNumber?.trim();
+    if (!proformaNumber) {
+      proformaNumber = await getNextProposedNumber("proforma_invoices", "proforma");
+    }
     const advanceAmount = qData.advance_amount || 0;
     const balanceAmount = Math.max(0, finalGrandTotal - advanceAmount);
     const initialPaymentStatus = balanceAmount <= 0 ? "paid" : (advanceAmount > 0 ? "partial" : "unpaid");
@@ -774,7 +1002,7 @@ export async function clientConvertQuotationToProforma(quotationId: string, forc
   }
 }
 
-export async function clientConvertQuotationToCashMemo(quotationId: string) {
+export async function clientConvertQuotationToCashMemo(quotationId: string, customMemoNumber?: string) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
@@ -814,12 +1042,14 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound((subtotal * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
-      // Derived Cash Memo Number changing QTN -> MEMO
-      const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
+      let memoNumber = customMemoNumber?.trim();
+      if (!memoNumber) {
+        memoNumber = await getNextProposedNumber("cash_memos", "memo");
+      }
 
       const memoRef = doc(collection(db, "cash_memos"));
       const memoData = {
@@ -885,11 +1115,14 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
     const discountPercent = qData.discount_percent || 0;
     const discountAmount = exactRound((subtotal * discountPercent) / 100);
     const charge = qData.charge_amount || qData.chargeAmount || 0;
-    const grandTotalExact = subtotal - discountAmount + charge;
-    const finalGrandTotal = Math.round(grandTotalExact);
-    const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+    const grandTotalExact = exactRound(subtotal - discountAmount + charge);
+    const finalGrandTotal = grandTotalExact;
+    const roundOff = 0;
 
-    const memoNumber = deriveCashMemoNumberFromQuotation(qData.number);
+    let memoNumber = customMemoNumber?.trim();
+    if (!memoNumber) {
+      memoNumber = await getNextProposedNumber("cash_memos", "memo");
+    }
     const memoRef = doc(collection(db, "cash_memos"));
     const memoData = {
       ...qData,
@@ -937,7 +1170,7 @@ export async function clientConvertQuotationToCashMemo(quotationId: string) {
   }
 }
 
-export async function clientConvertProformaToInvoice(proformaId: string) {
+export async function clientConvertProformaToInvoice(proformaId: string, customInvoiceNumber?: string) {
   if (!db || !auth?.currentUser) throw new Error("Unauthenticated or Database Offline");
   const uid = auth.currentUser.uid;
 
@@ -960,8 +1193,10 @@ export async function clientConvertProformaToInvoice(proformaId: string) {
         }
       }
 
-      // Derived Invoice Number changing PI -> INV (e.g. PI/25/26/0002 -> INV/25/26/0002)
-      const invoiceNumber = deriveInvoiceNumberFromProforma(pData.number);
+      let invoiceNumber = customInvoiceNumber?.trim();
+      if (!invoiceNumber) {
+        invoiceNumber = await getNextProposedNumber("invoices", "invoice");
+      }
 
       const invoiceRef = doc(collection(db, "invoices"));
       const invoiceData = {
@@ -1005,7 +1240,10 @@ export async function clientConvertProformaToInvoice(proformaId: string) {
     if (!pDoc.exists()) throw new Error("Proforma Invoice not found");
     const pData = pDoc.data();
 
-    const invoiceNumber = deriveInvoiceNumberFromProforma(pData.number);
+    let invoiceNumber = customInvoiceNumber?.trim();
+    if (!invoiceNumber) {
+      invoiceNumber = await getNextProposedNumber("invoices", "invoice");
+    }
     const invoiceRef = doc(collection(db, "invoices"));
     const invoiceData = {
       ...pData,

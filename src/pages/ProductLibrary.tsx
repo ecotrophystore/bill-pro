@@ -7,12 +7,14 @@ import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import SpeechInput from '../components/Shared/SpeechInput';
+import { UnitSelector } from '../components/Billing/UnitSelector';
 
 export default function ProductLibrary() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'purchase' | 'manual'>('all');
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -21,10 +23,13 @@ export default function ProductLibrary() {
 
   // Form Fields
   const [name, setName] = useState('');
+  const [size, setSize] = useState('');
+  const [sku, setSku] = useState('');
   const [hsnCode, setHsnCode] = useState('');
   const [retailPrice, setRetailPrice] = useState('');
   const [wholesalePrice, setWholesalePrice] = useState('');
   const [taxPercentage, setTaxPercentage] = useState('18');
+  const [unit, setUnit] = useState('Pcs');
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -51,10 +56,13 @@ export default function ProductLibrary() {
     setModalMode('add');
     setEditingProductId(null);
     setName('');
+    setSize('');
+    setSku('');
     setHsnCode('');
     setRetailPrice('');
     setWholesalePrice('');
     setTaxPercentage('18');
+    setUnit('Pcs');
     setIsModalOpen(true);
   };
 
@@ -62,21 +70,37 @@ export default function ProductLibrary() {
     setModalMode('edit');
     setEditingProductId(product.id);
     setName(product.name || '');
+    setSize(product.size || '');
+    setSku(product.sku || '');
     setHsnCode(product.hsn_code || '');
     setRetailPrice(product.retail_price?.toString() || '0');
     setWholesalePrice(product.wholesale_price?.toString() || '0');
     setTaxPercentage(product.tax_percentage?.toString() || '18');
+    setUnit(product.unit || 'Pcs');
     setIsModalOpen(true);
   };
+
+  // Auto-generate SKU based on retail price
+  useEffect(() => {
+    if (modalMode === 'add') {
+      const price = parseFloat(retailPrice);
+      if (!isNaN(price) && price >= 0) {
+        const generatedNum = Math.floor(price / 100) * 100 + 99;
+        setSku(`ETWA${generatedNum}`);
+      } else {
+        setSku('');
+      }
+    }
+  }, [retailPrice, modalMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return alert("Product name is required.");
-    
+
     const rPrice = parseFloat(retailPrice || "0");
     const wPrice = parseFloat(wholesalePrice || "0");
     const tax = parseFloat(taxPercentage || "0");
-    
+
     if (isNaN(rPrice) || isNaN(wPrice) || isNaN(tax)) {
       return alert("Please enter valid numbers for prices and tax percentage.");
     }
@@ -86,21 +110,29 @@ export default function ProductLibrary() {
       if (modalMode === 'add') {
         const docRef = await addDoc(collection(db, 'products'), {
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
-          created_at: new Date()
+          unit: unit.trim() || 'Pcs',
+          created_at: new Date(),
+          source: 'manual'
         });
-        
+
         const newProduct: Product = {
           id: docRef.id,
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
           hsn_code: hsnCode.trim() || '0000',
-          created_at: new Date() as any
+          unit: unit.trim() || 'Pcs',
+          created_at: new Date() as any,
+          source: 'manual'
         };
         setProducts([newProduct, ...products]);
       } else {
@@ -108,19 +140,25 @@ export default function ProductLibrary() {
         const productRef = doc(db, 'products', editingProductId);
         await updateDoc(productRef, {
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
-          hsn_code: hsnCode.trim() || '0000'
+          hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs'
         });
-        
+
         setProducts(products.map(p => p.id === editingProductId ? {
           ...p,
           name: name.trim(),
+          size: size.trim(),
+          sku: sku.trim(),
           retail_price: rPrice,
           wholesale_price: wPrice,
           tax_percentage: tax,
-          hsn_code: hsnCode.trim() || '0000'
+          hsn_code: hsnCode.trim() || '0000',
+          unit: unit.trim() || 'Pcs'
         } : p));
       }
       setIsModalOpen(false);
@@ -143,9 +181,126 @@ export default function ProductLibrary() {
     }
   };
 
-  const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (product.hsn_code && product.hsn_code.includes(searchQuery))
+  const filteredProducts = products.filter(product => {
+    return product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (product.hsn_code && product.hsn_code.includes(searchQuery)) ||
+      (product.sku && product.sku.toLowerCase().includes(searchQuery.toLowerCase()));
+  });
+
+  const purchaseProducts = filteredProducts.filter(p => p.source === 'purchase' || (p.priceHistory && p.priceHistory.length > 0));
+  const ecotrophyProducts = filteredProducts.filter(p => !(p.source === 'purchase' || (p.priceHistory && p.priceHistory.length > 0)));
+
+  const renderProductTable = (productsList: Product[], title: string, subtitle: string) => (
+    <div className="neo-card mb-8">
+      <div className="mb-4">
+        <h2 className="text-xl font-bold text-primary-dark">{title}</h2>
+        <p className="text-sm text-secondary">{subtitle} ({productsList.length} items)</p>
+      </div>
+      
+      {productsList.length === 0 ? (
+        <div className="text-center py-8 text-secondary">No products found.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full hidden md:table">
+            <thead>
+              <tr className="border-b-2 border-secondary/20">
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">Name</th>
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">Size</th>
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">SKU</th>
+                <th className="text-left py-3 px-4 text-primary-dark font-semibold">HSN Code</th>
+                <th className="text-right py-3 px-4 text-primary-dark font-semibold">Retail Price</th>
+                <th className="text-right py-3 px-4 text-primary-dark font-semibold">Cost Price</th>
+                <th className="text-right py-3 px-4 text-primary-dark font-semibold">Stock</th>
+                <th className="text-right py-3 px-4 text-primary-dark font-semibold">Tax %</th>
+                <th className="text-right py-3 px-4 text-primary-dark font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {productsList.map(product => (
+                <tr key={product.id} className="border-b border-secondary/10 hover:bg-transparent">
+                  <td className="py-3 px-4 font-medium">{product.name}</td>
+                  <td className="py-3 px-4 text-secondary">{product.size || '-'}</td>
+                  <td className="py-3 px-4 text-primary font-bold">{product.sku || '-'}</td>
+                  <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
+                  <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
+                  <td className="py-3 px-4 text-right text-secondary">₹{product.costPrice || 0}</td>
+                  <td className="py-3 px-4 text-right">
+                    <span className={`inline-flex px-2 py-1 rounded-full text-xs font-bold ${(product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' :
+                        (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                      }`}>
+                      {product.stockQuantity || 0} {product.unit || 'nos'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right">{product.tax_percentage}%</td>
+                  <td className="py-3 px-4 flex justify-end gap-2">
+                    <button
+                      onClick={() => handleOpenEditModal(product)}
+                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Edit Product"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteProduct(product.id!)}
+                      className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Delete Product"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {productsList.map(product => (
+              <div key={product.id} className="p-4 space-y-3 hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-bold text-primary-dark">{product.name}</div>
+                    <div className="text-xs text-secondary mt-1 flex items-center gap-2">
+                      {product.sku && <span className="font-bold text-primary">{product.sku}</span>}
+                      {product.sku && <span>•</span>}
+                      <span>HSN: {product.hsn_code || 'N/A'}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-primary-dark">₹{product.retail_price}</div>
+                    <div className="text-xs text-secondary mt-0.5">Cost: ₹{product.costPrice || 0}</div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center text-sm">
+                  <span className={`inline-flex px-2 py-1 rounded-full text-[10px] font-bold ${(product.stockQuantity || 0) > 10 ? 'bg-success/10 text-success' :
+                      (product.stockQuantity || 0) > 0 ? 'bg-warning/10 text-warning' : 'bg-error/10 text-error'
+                    }`}>
+                    Stock: {product.stockQuantity || 0} {product.unit || 'nos'}
+                  </span>
+                  <span className="text-xs font-semibold text-secondary">Tax: {product.tax_percentage}%</span>
+                </div>
+
+                <div className="flex items-center gap-2 mt-4 pt-4 border-t border-shadow-darker/10">
+                  <button
+                    onClick={() => handleOpenEditModal(product)}
+                    className="flex-1 neo-btn flex justify-center items-center gap-2 py-2 text-secondary hover:text-primary transition-colors text-xs font-bold"
+                  >
+                    <Edit size={14} /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteProduct(product.id!)}
+                    className="neo-btn flex justify-center items-center p-2 text-secondary hover:text-error transition-colors"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   const handleVoiceProduct = (_customerName: string | null, items: any[]) => {
@@ -211,25 +366,25 @@ export default function ProductLibrary() {
           <p className="text-secondary mt-1">Manage your products and pricing</p>
         </div>
         <div className="flex gap-4 items-center">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
+          <div className="relative">
+            <button
+              onClick={() => setShowReportDropdown(!showReportDropdown)}
               className="neo-btn flex items-center gap-2"
             >
               <Download size={18} /> Report <ChevronDown size={14} />
             </button>
             {showReportDropdown && (
-              <div 
+              <div
                 className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
                 onMouseLeave={() => setShowReportDropdown(false)}
               >
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
                   Excel (.xlsx)
                 </button>
-                <button 
+                <button
                   onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
                   className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
                 >
@@ -245,68 +400,40 @@ export default function ProductLibrary() {
         </div>
       </div>
 
-      <div className="neo-card">
-        <div className="flex justify-between items-center mb-4">
-          <div className="relative w-64">
+      <div className="neo-card mb-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="relative w-full md:w-96">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" size={20} />
-            <SpeechInput 
-              type="text" 
-              placeholder="Search products..." 
+            <SpeechInput
+              type="text"
+              placeholder="Search products..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="neo-input w-full pl-10"
             />
           </div>
-        </div>
-
-        {loading ? (
-          <div className="text-center py-8 text-secondary">Loading products...</div>
-        ) : filteredProducts.length === 0 ? (
-          <div className="text-center py-8 text-secondary">No products found.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b-2 border-secondary/20">
-                  <th className="text-left py-3 px-4 text-primary-dark font-semibold">Name</th>
-                  <th className="text-left py-3 px-4 text-primary-dark font-semibold">HSN Code</th>
-                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Retail Price</th>
-                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Wholesale Price</th>
-                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Tax %</th>
-                  <th className="text-right py-3 px-4 text-primary-dark font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredProducts.map(product => (
-                  <tr key={product.id} className="border-b border-secondary/10 hover:bg-surface/50">
-                    <td className="py-3 px-4 font-medium">{product.name}</td>
-                    <td className="py-3 px-4 text-secondary">{product.hsn_code}</td>
-                    <td className="py-3 px-4 text-right">₹{product.retail_price}</td>
-                    <td className="py-3 px-4 text-right">₹{product.wholesale_price}</td>
-                    <td className="py-3 px-4 text-right">{product.tax_percentage}%</td>
-                    <td className="py-3 px-4 flex justify-end gap-2">
-                      <button 
-                        onClick={() => handleOpenEditModal(product)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                        title="Edit Product"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteProduct(product.id!)}
-                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        title="Delete Product"
-                      >
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="w-full md:w-auto">
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as any)}
+              className="neo-input w-full"
+            >
+              <option value="all">All Products</option>
+              <option value="purchase">Purchase Products Only</option>
+              <option value="manual">Ecotrophy Products Only</option>
+            </select>
           </div>
-        )}
+        </div>
       </div>
+
+      {loading ? (
+        <div className="text-center py-8 text-secondary neo-card">Loading products...</div>
+      ) : (
+        <>
+          {(sourceFilter === 'all' || sourceFilter === 'purchase') && renderProductTable(purchaseProducts, "Purchase Products", "Products imported from vendor bills and purchases")}
+          {(sourceFilter === 'all' || sourceFilter === 'manual') && renderProductTable(ecotrophyProducts, "Ecotrophy Products", "Products created manually or manufactured")}
+        </>
+      )}
 
       {/* Product Modal */}
       {isModalOpen && (
@@ -316,7 +443,7 @@ export default function ProductLibrary() {
               <h2 className="text-xl font-bold text-primary-dark">
                 {modalMode === 'add' ? 'Add Product' : 'Edit Product'}
               </h2>
-              <button 
+              <button
                 onClick={() => setIsModalOpen(false)}
                 className="text-secondary hover:text-primary-dark transition-colors"
               >
@@ -325,36 +452,59 @@ export default function ProductLibrary() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
-                <SpeechInput 
-                  type="text" 
-                  value={name} 
-                  onChange={(e) => setName(e.target.value)} 
-                  required
-                  placeholder="e.g. Acrylic Trophy"
-                  className="neo-input w-full"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Product Name *</label>
+                  <SpeechInput
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    required
+                    placeholder="e.g. Acrylic Trophy"
+                    className="neo-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Size</label>
+                  <SpeechInput
+                    type="text"
+                    value={size}
+                    onChange={(e) => setSize(e.target.value)}
+                    placeholder="e.g. 8 inch"
+                    className="neo-input w-full"
+                  />
+                </div>
               </div>
-
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
-                <SpeechInput 
-                  type="text" 
-                  value={hsnCode} 
-                  onChange={(e) => setHsnCode(e.target.value)} 
-                  placeholder="e.g. 39269099"
-                  className="neo-input w-full"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Product Code (SKU)</label>
+                  <SpeechInput
+                    type="text"
+                    value={sku}
+                    onChange={(e) => setSku(e.target.value)}
+                    placeholder="e.g. ETWA699"
+                    className="neo-input w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">HSN Code</label>
+                  <SpeechInput
+                    type="text"
+                    value={hsnCode}
+                    onChange={(e) => setHsnCode(e.target.value)}
+                    placeholder="e.g. 39269099"
+                    className="neo-input w-full"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                 <div>
+                <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Retail Price (₹) *</label>
-                  <SpeechInput 
-                    type="number" 
-                    value={retailPrice} 
-                    onChange={(e) => setRetailPrice(e.target.value)} 
+                  <SpeechInput
+                    type="number"
+                    value={retailPrice}
+                    onChange={(e) => setRetailPrice(e.target.value)}
                     required
                     min="0"
                     step="any"
@@ -364,10 +514,10 @@ export default function ProductLibrary() {
                 </div>
                 <div>
                   <label className="block text-sm font-semibold text-primary-dark mb-1">Wholesale Price (₹) *</label>
-                  <SpeechInput 
-                    type="number" 
-                    value={wholesalePrice} 
-                    onChange={(e) => setWholesalePrice(e.target.value)} 
+                  <SpeechInput
+                    type="number"
+                    value={wholesalePrice}
+                    onChange={(e) => setWholesalePrice(e.target.value)}
                     required
                     min="0"
                     step="any"
@@ -377,31 +527,41 @@ export default function ProductLibrary() {
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-semibold text-primary-dark mb-1">Tax Percentage (%) *</label>
-                <select 
-                  value={taxPercentage} 
-                  onChange={(e) => setTaxPercentage(e.target.value)}
-                  className="neo-input w-full bg-transparent"
-                >
-                  <option value="0">0%</option>
-                  <option value="5">5%</option>
-                  <option value="12">12%</option>
-                  <option value="18">18%</option>
-                  <option value="28">28%</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Tax Percentage (%) *</label>
+                  <select
+                    value={taxPercentage}
+                    onChange={(e) => setTaxPercentage(e.target.value)}
+                    className="neo-input w-full bg-transparent"
+                  >
+                    <option value="0">0%</option>
+                    <option value="5">5%</option>
+                    <option value="12">12%</option>
+                    <option value="18">18%</option>
+                    <option value="28">28%</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-primary-dark mb-1">Unit Metric *</label>
+                  <UnitSelector
+                    value={unit}
+                    onChange={setUnit}
+                    className="h-[46px]"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-secondary/10">
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   onClick={() => setIsModalOpen(false)}
                   className="px-4 py-2 text-secondary hover:text-primary-dark font-medium transition-colors"
                 >
                   Cancel
                 </button>
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   disabled={isSaving}
                   className="neo-btn-primary px-6"
                 >
@@ -415,3 +575,4 @@ export default function ProductLibrary() {
     </div>
   );
 }
+

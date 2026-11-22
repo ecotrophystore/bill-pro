@@ -11,11 +11,14 @@ import { db } from "./config.js";
 import { resolveWhatsAppAuthorization, waToken } from "./meta/auth.js";
 
 const googleWebhookKey = defineSecret("GOOGLE_WEBHOOK_KEY");
+const metaFbToken = defineSecret("META_FACEBOOK_SYSTEM_USER_TOKEN");
 
 export * from './metaIntegration.js';
 export * from './metaWebhookProcessor.js';
 export * from './meta/facebook.js';
 export * from './meta/instagram.js';
+export * from './enrichment.js';
+export * from './ai/gateway.js';
 
 
 function getAI() {
@@ -147,9 +150,9 @@ export const convertQuotationToInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let invoiceNumber: string | undefined;
       if (!invoiceNumber) {
@@ -259,8 +262,8 @@ export const convertQuotationToCashMemo = onCall(async (request) => {
         };
       });
 
-      const finalGrandTotal = Math.round(subtotal);
-      const roundOff = exactRound(finalGrandTotal - subtotal);
+      const finalGrandTotal = exactRound(subtotal);
+      const roundOff = 0;
 
       const rawQNum = qData.number || '';
       const memoNumber = rawQNum ? rawQNum.replace(/^qtn/i, 'MEMO') : `MEMO/${new Date().getFullYear()}/0001`;
@@ -368,9 +371,9 @@ export const convertQuotationToProforma = onCall(async (request) => {
       const discountPercent = qData.discount_percent || 0;
       const discountAmount = exactRound(((subtotal + totalTax) * discountPercent) / 100);
       const charge = qData.charge_amount || qData.chargeAmount || 0;
-      const grandTotalExact = subtotal + totalTax - discountAmount + charge;
-      const finalGrandTotal = Math.round(grandTotalExact);
-      const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax - discountAmount + charge);
+      const finalGrandTotal = grandTotalExact;
+      const roundOff = 0;
 
       // Directly change QTN -> PI (e.g. QTN/25/26/0002 -> PI/25/26/0002)
       const rawQNum = qData.number || '';
@@ -555,9 +558,9 @@ export const createInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let invoiceNumber = rawData.number;
       if (!invoiceNumber) {
@@ -657,9 +660,9 @@ export const createProformaInvoice = onCall(async (request) => {
         };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const roundOff = exactRound(Math.round(grandTotalExact) - grandTotalExact);
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let proformaNumber = rawData.number;
       if (!proformaNumber) {
@@ -757,8 +760,8 @@ export const createCashMemo = onCall(async (request) => {
         };
       });
 
-      const finalGrandTotal = Math.round(subtotal);
-      const roundOff = exactRound(finalGrandTotal - subtotal);
+      const finalGrandTotal = exactRound(subtotal);
+      const roundOff = 0;
 
       let memoNumber = rawData.number;
       if (!memoNumber) {
@@ -851,8 +854,9 @@ export const createQuotation = onCall(async (request) => {
         return { ...item, line_total: lineTotal, tax_amount: taxAmount };
       });
 
-      const grandTotalExact = subtotal + totalTax;
-      const finalGrandTotal = Math.round(grandTotalExact);
+      const grandTotalExact = exactRound(subtotal + totalTax);
+      const roundOff = 0;
+      const finalGrandTotal = grandTotalExact;
 
       let quotationNumber = rawData.number;
       if (!quotationNumber) {
@@ -905,13 +909,14 @@ export const matchTransaction = onCall(async (request) => {
        throw new HttpsError("permission-denied", "Unauthorized action");
     }
 
-    const { transactionId, documentId, documentType } = request.data;
+    const { transactionId, documentId, documentType, matchAmount } = request.data;
     if (!transactionId || !documentId || !documentType) {
         throw new HttpsError("invalid-argument", "Missing required fields");
     }
 
+    const colName = documentType === 'invoice' ? 'invoices' : documentType === 'expense' ? 'expenses' : 'purchases';
     const txnRef = db.collection("transactions").doc(transactionId);
-    const docRef = db.collection(documentType === 'invoice' ? 'invoices' : 'purchases').doc(documentId);
+    const docRef = db.collection(colName).doc(documentId);
 
     return await db.runTransaction(async (transaction) => {
         const tSnap = await transaction.get(txnRef);
@@ -924,21 +929,58 @@ export const matchTransaction = onCall(async (request) => {
 
         if (tData.match_status === 'matched') throw new HttpsError("already-exists", "Transaction already matched");
 
+        const txnAmount = exactRound(Number(matchAmount ?? tData.amount ?? 0));
+        const totalBill = exactRound(
+          documentType === 'invoice'
+            ? Number(dData.grand_total || 0)
+            : documentType === 'expense'
+            ? Number(dData.requested || dData.paid || dData.amount || 0)
+            : Number(dData.grandTotal ?? dData.amount ?? 0)
+        );
+        const existingBankPaid = exactRound(Number(dData.reconciled_bank_amount || 0));
+        const baseManualPaid = exactRound(
+          dData.manual_paid_amount !== undefined
+            ? Number(dData.manual_paid_amount)
+            : documentType === 'invoice'
+            ? (dData.balance_amount !== undefined ? Math.max(0, totalBill - Number(dData.balance_amount) - existingBankPaid) : Number(dData.advance_amount || 0))
+            : documentType === 'expense'
+            ? Math.max(0, Number(dData.paid || 0) - existingBankPaid)
+            : Number(dData.paid_amount || 0)
+        );
+
+        const newBankPaid = exactRound(existingBankPaid + txnAmount);
+        const newTotalPaid = exactRound(baseManualPaid + newBankPaid);
+        const newBalance = exactRound(Math.max(0, totalBill - newTotalPaid));
+        const paymentStatus = newBalance <= 0.01 && totalBill > 0 ? 'paid' : newTotalPaid > 0.01 ? 'partial' : 'unpaid';
+
         // 1. Update Transaction
         transaction.update(txnRef, {
             match_status: 'matched',
+            matched_id: documentId,
+            matched_entity_type: documentType,
+            matched_amount: txnAmount,
             linked_document_id: documentId,
             linked_document_type: documentType,
             matched_at: FieldValue.serverTimestamp(),
             matched_by: uid
         });
 
-        // 2. Update Document Payment Status
-        // Even if the document is 'locked' from basic editing, payment status transitions are allowed via functions.
-        transaction.update(docRef, {
-            payment_status: 'paid', // Simple matching for now
-            status: documentType === 'invoice' ? 'finalized' : 'cleared'
-        });
+        // 2. Update Document Payment Status & Balance accurately (partial stays partial!)
+        const billPatch: Record<string, any> = {
+            manual_paid_amount: baseManualPaid,
+            reconciled_bank_amount: newBankPaid,
+            paid_amount: newTotalPaid,
+            balance_amount: newBalance,
+            payment_status: paymentStatus,
+        };
+        if (documentType === 'invoice' && paymentStatus === 'paid') {
+            billPatch.status = 'finalized';
+        } else if (documentType === 'purchase' && paymentStatus === 'paid') {
+            billPatch.status = 'cleared';
+        } else if (documentType === 'expense') {
+            billPatch.paid = newTotalPaid;
+        }
+        transaction.update(docRef, billPatch);
 
         // 3. Register Audit Log
         const auditLogRef = db.collection("audit_logs").doc();
@@ -948,10 +990,10 @@ export const matchTransaction = onCall(async (request) => {
             action: "reconciliation",
             user_id: uid,
             timestamp: FieldValue.serverTimestamp(),
-            notes: `Matched with Bank Txn ID: ${tData.bank_transaction_id}`
+            notes: `Matched ₹${txnAmount} with Bank Txn ID: ${tData.bank_transaction_id} (${paymentStatus}, Balance: ₹${newBalance})`
         });
 
-        return { success: true };
+        return { success: true, paymentStatus, newBalance };
     });
 });
 
@@ -2459,7 +2501,251 @@ export const updateLeadDetails = onCall(async (request) => {
   });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Send a free-text WhatsApp message for a stage change (called from frontend)
+// ─────────────────────────────────────────────────────────────────────────────
+export const sendStageWhatsApp = onCall({
+  secrets: [metaFbToken, waToken],
+  region: "asia-south1",
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Must be logged in");
+
+  const { leadId, message, phone, stageId, stageName } = request.data;
+  if (!leadId || !message || !phone) throw new HttpsError("invalid-argument", "Missing leadId, message, or phone");
+
+  let tokensToTry: string[] = [];
+  try { if (metaFbToken.value()) tokensToTry.push(metaFbToken.value()); } catch { }
+  try { if (waToken.value()) tokensToTry.push(waToken.value()); } catch { }
+
+  let phoneNumberId = "1263075550230396";
+  let graphApiVersion = "v18.0";
+  try {
+    const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+    if (metaConfigDoc.exists) {
+      const cfg = metaConfigDoc.data() || {};
+      if (cfg.whatsappPhoneNumberId) phoneNumberId = cfg.whatsappPhoneNumberId;
+      if (cfg.phoneNumberId) phoneNumberId = cfg.phoneNumberId;
+      if (cfg.graphApiVersion) graphApiVersion = cfg.graphApiVersion;
+      if (cfg.accessToken) tokensToTry.push(cfg.accessToken);
+    }
+  } catch { }
+
+  if (leadId) {
+    try {
+      const leadDoc = await db.collection("leads").doc(leadId).get();
+      if (leadDoc.exists) {
+        const lData = leadDoc.data() || {};
+        if (lData.whatsapp_business_phone_id) {
+          phoneNumberId = lData.whatsapp_business_phone_id;
+        }
+      }
+    } catch { }
+  }
+
+  tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+  if (tokensToTry.length === 0) {
+    throw new HttpsError("failed-precondition", "No Meta/WhatsApp access token configured in secrets or Firestore.");
+  }
+
+  const rawPhone = String(phone).replace(/\D/g, "");
+  const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+
+  let wamid = "";
+  let lastError = "";
+
+  for (const token of tokensToTry) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanPhone,
+          type: "text",
+          text: { body: message },
+        }),
+      });
+
+      const resJson: any = await res.json();
+      if (resJson.messages?.[0]?.id) {
+        wamid = resJson.messages[0].id;
+        break;
+      } else {
+        lastError = resJson.error?.message || JSON.stringify(resJson);
+        console.warn(`[sendStageWhatsApp] Token attempt failed: ${lastError}`);
+      }
+    } catch (err: any) {
+      lastError = err.message || String(err);
+    }
+  }
+
+  if (!wamid) {
+    await db.collection("activities").add({
+      lead_id: leadId,
+      type: "message.stage_failed",
+      message: `Stage WhatsApp failed for "${stageName}": ${lastError}`,
+      actor: "system",
+      created_at: FieldValue.serverTimestamp(),
+    });
+    throw new HttpsError("internal", `WhatsApp API error: ${lastError}`);
+  }
+
+  await db.collection("messages").add({
+    leadId,
+    senderPhone: cleanPhone,
+    direction: "outbound",
+    type: "text",
+    content: message,
+    metaMessageId: wamid,
+    platform: "whatsapp",
+    triggeredBy: "stage_change",
+    created_at: FieldValue.serverTimestamp(),
+  });
+
+  await db.collection("activities").add({
+    lead_id: leadId,
+    type: "message.stage_sent",
+    message: `Auto WhatsApp sent for stage "${stageName}". WAMID: ${wamid}`,
+    actor: "system",
+    created_at: FieldValue.serverTimestamp(),
+  });
+
+  return { ok: true, wamid };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Send a manual or AI-assisted chat reply via WhatsApp Cloud API (Live Chat)
+// ─────────────────────────────────────────────────────────────────────────────
+export const sendWhatsAppChatMessage = onCall({
+  secrets: [metaFbToken, waToken],
+  region: "asia-south1",
+}, async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Must be logged in");
+
+  const { conversationId, leadId, phone, message } = request.data;
+  if (!message || !phone) throw new HttpsError("invalid-argument", "Missing phone or message");
+
+  let tokensToTry: string[] = [];
+  try { if (metaFbToken.value()) tokensToTry.push(metaFbToken.value()); } catch { }
+  try { if (waToken.value()) tokensToTry.push(waToken.value()); } catch { }
+
+  let phoneNumberId = "1263075550230396";
+  let graphApiVersion = "v18.0";
+  try {
+    const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+    if (metaConfigDoc.exists) {
+      const cfg = metaConfigDoc.data() || {};
+      if (cfg.whatsappPhoneNumberId) phoneNumberId = cfg.whatsappPhoneNumberId;
+      if (cfg.phoneNumberId) phoneNumberId = cfg.phoneNumberId;
+      if (cfg.graphApiVersion) graphApiVersion = cfg.graphApiVersion;
+      if (cfg.accessToken) tokensToTry.push(cfg.accessToken);
+    }
+  } catch { }
+
+  if (leadId) {
+    try {
+      const leadDoc = await db.collection("leads").doc(leadId).get();
+      if (leadDoc.exists) {
+        const lData = leadDoc.data() || {};
+        if (lData.whatsapp_business_phone_id) {
+          phoneNumberId = lData.whatsapp_business_phone_id;
+        }
+      }
+    } catch { }
+  }
+
+  tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+  if (tokensToTry.length === 0) {
+    throw new HttpsError("failed-precondition", "No Meta/WhatsApp access token configured in secrets or Firestore.");
+  }
+
+  const rawPhone = String(phone).replace(/\D/g, "");
+  const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+
+  let wamid = "";
+  let lastError = "";
+
+  for (const token of tokensToTry) {
+    try {
+      const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: cleanPhone,
+          type: "text",
+          text: { body: message },
+        }),
+      });
+
+      const resJson: any = await res.json();
+      if (resJson.messages?.[0]?.id) {
+        wamid = resJson.messages[0].id;
+        break;
+      } else {
+        lastError = resJson.error?.message || JSON.stringify(resJson);
+        console.warn(`[sendWhatsAppChatMessage] Token attempt failed: ${lastError}`);
+      }
+    } catch (err: any) {
+      lastError = err.message || String(err);
+    }
+  }
+
+  if (!wamid) {
+    throw new HttpsError("internal", `WhatsApp API error: ${lastError}`);
+  }
+
+  const senderName = request.auth.token.name || request.auth.token.email || "Staff";
+
+  // Record outbound message in messages collection
+  const messageDocRef = await db.collection("messages").add({
+    conversationId: conversationId || null,
+    leadId: leadId || null,
+    senderPhone: cleanPhone,
+    direction: "outbound",
+    type: "text",
+    content: message,
+    metaMessageId: wamid,
+    platform: "whatsapp",
+    triggeredBy: "live_chat",
+    senderName,
+    senderUid: request.auth.uid,
+    created_at: FieldValue.serverTimestamp(),
+  });
+
+  // Update conversation doc if provided
+  if (conversationId) {
+    try {
+      await db.collection("conversations").doc(conversationId).set({
+        lastMessage: `[You]: ${message}`,
+        lastMessageAt: FieldValue.serverTimestamp(),
+        lastDirection: "outbound",
+        ai_suggested_reply: "", // Clear pending suggestion if any
+        updated_at: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    } catch (e) {
+      console.warn(`[sendWhatsAppChatMessage] Could not update conversation doc: ${e}`);
+    }
+  }
+
+  if (leadId) {
+    await db.collection("activities").add({
+      lead_id: leadId,
+      type: "whatsapp_reply_sent",
+      title: "WhatsApp Chat Reply Sent",
+      message: `Sent WhatsApp reply: "${message.slice(0, 100)}${message.length > 100 ? '...' : ''}"`,
+      actor: senderName,
+      created_at: FieldValue.serverTimestamp(),
+    });
+  }
+
+  return { ok: true, wamid, messageId: messageDocRef.id };
+});
+
 export const processMessageQueueItem = onDocumentCreated({
+
   document: "message_queue/{itemId}",
   secrets: [waToken]
 }, async (event) => {
@@ -2487,6 +2773,81 @@ export const processMessageQueueItem = onDocumentCreated({
       status: "sent",
       updated_at: FieldValue.serverTimestamp()
     });
+    return;
+  }
+
+  // ── FREE-TEXT message (stage-change notifications) ────────────────────────
+  if (data.message_type === "free_text" && data.body && data.recipient_phone) {
+    let fbTokenValue = "";
+    try { fbTokenValue = metaFbToken.value(); } catch { }
+
+    if (!fbTokenValue) {
+      await snapshot.ref.update({ status: "failed", error: "META_FACEBOOK_SYSTEM_USER_TOKEN not configured", updated_at: FieldValue.serverTimestamp() });
+      return;
+    }
+
+    let phoneNumberId = "1263075550230396";
+    let graphApiVersion = "v18.0";
+    try {
+      const metaConfigDoc = await db.collection("meta_integrations").doc("default").get();
+      if (metaConfigDoc.exists) {
+        const cfg = metaConfigDoc.data() || {};
+        if (cfg.whatsappPhoneNumberId) phoneNumberId = cfg.whatsappPhoneNumberId;
+        if (cfg.phoneNumberId) phoneNumberId = cfg.phoneNumberId;
+        if (cfg.graphApiVersion) graphApiVersion = cfg.graphApiVersion;
+      }
+    } catch { }
+
+    try {
+      const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${fbTokenValue}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: String(data.recipient_phone).replace(/\D/g, ""),
+          type: "text",
+          text: { body: data.body },
+        }),
+      });
+
+      const resJson: any = await res.json();
+      const wamid = resJson.messages?.[0]?.id;
+
+      if (wamid) {
+        await snapshot.ref.update({ status: "sent", metaMessageId: wamid, sentAt: FieldValue.serverTimestamp(), updated_at: FieldValue.serverTimestamp() });
+        await db.collection("messages").add({
+          leadId: data.lead_id,
+          senderPhone: data.recipient_phone,
+          direction: "outbound",
+          type: "text",
+          content: data.body,
+          metaMessageId: wamid,
+          platform: "whatsapp",
+          triggeredBy: "stage_change",
+          created_at: FieldValue.serverTimestamp(),
+        });
+        await db.collection("activities").add({
+          lead_id: data.lead_id,
+          type: "message.stage_sent",
+          message: `Stage-change WhatsApp sent successfully. WAMID: ${wamid}`,
+          actor: "system",
+          created_at: FieldValue.serverTimestamp(),
+        });
+      } else {
+        const errMsg = resJson.error?.message || JSON.stringify(resJson);
+        await snapshot.ref.update({ status: "failed", error: errMsg, updated_at: FieldValue.serverTimestamp() });
+        await db.collection("activities").add({
+          lead_id: data.lead_id,
+          type: "message.stage_failed",
+          message: `Stage-change WhatsApp failed: ${errMsg}`,
+          actor: "system",
+          created_at: FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (err: any) {
+      await snapshot.ref.update({ status: "failed", error: err?.message || String(err), updated_at: FieldValue.serverTimestamp() });
+    }
     return;
   }
 
@@ -2775,7 +3136,7 @@ export const onLeadCreated = onDocumentCreated("leads/{leadId}", async (event) =
 });
 
 // ── Trigger: lead document updated (stage change / pipeline move) ─────────────
-export const onLeadUpdated = onDocumentUpdated("leads/{leadId}", async (event) => {
+export const onLeadUpdated = onDocumentUpdated({ document: "leads/{leadId}", secrets: [metaFbToken, waToken] }, async (event) => {
   const before = event.data?.before.data();
   const after  = event.data?.after.data();
   if (!before || !after) return;
@@ -2908,6 +3269,168 @@ export const onLeadUpdated = onDocumentUpdated("leads/{leadId}", async (event) =
       }
     } catch (err) {
       console.error("Failed stage change auto enrollments:", err);
+    }
+  }
+
+  // ── AUTO STAGE-CHANGE WHATSAPP MESSAGE ────────────────────────────────────
+  // When a lead's stage changes, automatically send a WhatsApp message to the customer
+  if (stageChanged && after.phone) {
+    try {
+      const newStageId = after.status;
+      const leadId = event.params.leadId;
+
+      // Skip non-human stages
+      const skipStages = ['won', 'lost', 'lost_cancelled', 'completed'];
+      if (!skipStages.includes(newStageId)) {
+        // Look up stage_messages config for this stage
+        const stageMsgDoc = await db.collection('stage_messages').doc(newStageId).get();
+        let whatsappEnabled = true;
+        let whatsappTemplate = `Hi {customer_name}, your order is now in the "{current_stage}" stage. Our team will keep you updated. – EcoTrophy`;
+
+        if (stageMsgDoc.exists) {
+          const cfg = stageMsgDoc.data() || {};
+          whatsappEnabled = cfg.whatsapp_enabled !== false;
+          if (cfg.whatsapp_template) whatsappTemplate = cfg.whatsapp_template;
+        }
+
+        if (whatsappEnabled) {
+          // Build context for template rendering
+          const pipelineSnap = await db.collection('pipelines').doc(after.pipeline_id || 'default').get();
+          const pipelineData = pipelineSnap.data() || {};
+          const stages: any[] = pipelineData.stages || [];
+          const currentStageObj = stages.find((s: any) => s.id === newStageId);
+          const prevStageObj = stages.find((s: any) => s.id === before.status);
+
+          const context: Record<string, string> = {
+            customer_name: after.name || 'Customer',
+            lead_name: after.name || 'Customer',
+            phone: after.phone || '',
+            current_stage: currentStageObj?.label || newStageId,
+            previous_stage: prevStageObj?.label || before.status || '',
+            pipeline_name: pipelineData.name || after.pipeline_id || '',
+            required_quantity: String(after.required_quantity || ''),
+            budget: String(after.budget || ''),
+            event_name: after.event_name || '',
+            event_type: after.event_type || '',
+            company: after.company || '',
+            location: after.location || '',
+          };
+
+          // Render template
+          const renderedMessage = String(whatsappTemplate).replace(/\{\{?([a-zA-Z0-9_]+)\}?\}/g, (_m: string, key: string) => context[key] || '');
+
+          // Get token and phone_number_id from meta_integrations config
+          let tokensToTry: string[] = [];
+          try { if (metaFbToken.value()) tokensToTry.push(metaFbToken.value()); } catch { }
+          try { if (waToken.value()) tokensToTry.push(waToken.value()); } catch { }
+          
+          let phoneNumberId = '1263075550230396'; // fallback from existing config
+          let graphApiVersion = 'v18.0';
+          const metaConfigDoc = await db.collection('meta_integrations').doc('default').get();
+          if (metaConfigDoc.exists) {
+            const metaCfg = metaConfigDoc.data() || {};
+            if (metaCfg.whatsappPhoneNumberId) phoneNumberId = metaCfg.whatsappPhoneNumberId;
+            if (metaCfg.phoneNumberId) phoneNumberId = metaCfg.phoneNumberId;
+            if (metaCfg.graphApiVersion) graphApiVersion = metaCfg.graphApiVersion;
+            if (metaCfg.accessToken) tokensToTry.push(metaCfg.accessToken);
+          }
+          tokensToTry = [...new Set(tokensToTry.filter(Boolean))];
+
+          if (tokensToTry.length === 0) {
+            console.warn('[AutoStageMsg] No Meta access token configured, skipping auto-message.');
+          } else {
+            // Normalize phone
+            const rawPhone = String(after.phone).replace(/\D/g, '');
+            const finalPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+
+            let wamid = '';
+            let lastError = '';
+
+            for (const token of tokensToTry) {
+              try {
+                const apiRes = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneNumberId}/messages`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    messaging_product: 'whatsapp',
+                    recipient_type: 'individual',
+                    to: finalPhone,
+                    type: 'text',
+                    text: { body: renderedMessage },
+                  }),
+                });
+
+                const apiData: any = await apiRes.json();
+                if (apiData.messages?.[0]?.id) {
+                  wamid = apiData.messages[0].id;
+                  break;
+                } else {
+                  lastError = apiData.error?.message || JSON.stringify(apiData);
+                }
+              } catch (err: any) {
+                lastError = err.message || String(err);
+              }
+            }
+
+            if (wamid) {
+              // Save message to messages collection
+              await db.collection('messages').add({
+                leadId,
+                senderPhone: finalPhone,
+                direction: 'outbound',
+                type: 'text',
+                content: renderedMessage,
+                metaMessageId: wamid,
+                platform: 'whatsapp',
+                triggeredBy: 'stage_change_auto',
+                created_at: FieldValue.serverTimestamp(),
+              });
+
+              // Log activity
+              await db.collection('activities').add({
+                lead_id: leadId,
+                type: 'message.stage_auto_sent',
+                message: `Auto WhatsApp sent for stage change to "${currentStageObj?.label || newStageId}": ${renderedMessage.substring(0, 80)}...`,
+                actor: 'system',
+                created_at: FieldValue.serverTimestamp(),
+              });
+
+              // Update lead notification history
+              const existingHistory = after.notification_history || [];
+              await db.collection('leads').doc(leadId).update({
+                notification_history: [
+                  {
+                    id: `wa_${wamid}`,
+                    stage_id: newStageId,
+                    stage_name: currentStageObj?.label || newStageId,
+                    channel: 'whatsapp',
+                    recipient: finalPhone,
+                    message: renderedMessage,
+                    status: 'sent',
+                    sent_at: new Date(),
+                    sent_by: 'system_auto',
+                  },
+                  ...existingHistory,
+                ],
+                [`notifications_sent.${newStageId}`]: true,
+              });
+
+              console.log(`[AutoStageMsg] ✅ Sent to ${finalPhone} for stage ${newStageId}. WAMID: ${wamid}`);
+            } else {
+              console.warn(`[AutoStageMsg] ⚠️ API error for lead ${leadId}:`, lastError);
+              await db.collection('activities').add({
+                lead_id: leadId,
+                type: 'message.stage_auto_failed',
+                message: `Auto WhatsApp failed for stage "${newStageId}": ${lastError || 'Unknown error'}`,
+                actor: 'system',
+                created_at: FieldValue.serverTimestamp(),
+              });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[AutoStageMsg] Failed to send automatic stage-change WhatsApp:', err);
     }
   }
 
@@ -3397,5 +3920,156 @@ export const processAutomationEnrollments = onSchedule({
     } catch (err: any) {
       console.error(`Transaction failed processing enrollment ${enrollId}:`, err);
     }
+  }
+});
+
+/**
+ * Daily Morning 7:30 AM Automated Follow-Up Dispatcher
+ * Automatically sends a "Hi" WhatsApp message to all leads in "follow_up" stage every morning at 7:30 AM IST.
+ * Governed by the toggle in system_settings/whatsapp_followup_automation.
+ */
+export const dailyMorningFollowupDispatch = onSchedule({
+  schedule: "30 7 * * *",
+  timeZone: "Asia/Kolkata",
+  memory: "256MiB"
+}, async (event) => {
+  try {
+    const configDoc = await db.collection("system_settings").doc("whatsapp_followup_automation").get();
+    if (!configDoc.exists) {
+      console.log("[7:30 AM FollowUp] Config not found in system_settings.");
+      return;
+    }
+    const config = configDoc.data() || {};
+    if (!config.enabled) {
+      console.log("[7:30 AM FollowUp] Automation is toggled OFF. Skipping.");
+      return;
+    }
+
+    const now = new Date();
+    const todayIST = now.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    if (config.lastRunDate === todayIST) {
+      console.log(`[7:30 AM FollowUp] Already executed today (${todayIST}). Skipping duplicate.`);
+      return;
+    }
+
+    const targetStage = config.targetStageId || "follow_up";
+    const snap = await db.collection("leads").where("status", "==", targetStage).get();
+
+    if (snap.empty) {
+      console.log(`[7:30 AM FollowUp] 0 leads found in "${targetStage}" stage.`);
+      await configDoc.ref.update({
+        lastRunDate: todayIST,
+        lastRunAt: FieldValue.serverTimestamp(),
+        lastRunSummary: {
+          totalLeads: 0,
+          sentCount: 0,
+          failedCount: 0,
+          timestamp: new Date().toISOString()
+        }
+      });
+      return;
+    }
+
+    let phoneId = "1263075550230396";
+    let token = "EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD";
+    let graphApiVersion = "v18.0";
+
+    try {
+      const metaDoc = await db.collection("meta_integrations").doc("default").get();
+      if (metaDoc.exists) {
+        const d = metaDoc.data() || {};
+        if (d.whatsappPhoneNumberId) phoneId = d.whatsappPhoneNumberId;
+        if (d.metaWhatsAppAccessToken || d.accessToken) token = d.metaWhatsAppAccessToken || d.accessToken;
+        if (d.graphApiVersion) graphApiVersion = d.graphApiVersion;
+      }
+    } catch (e) {}
+
+    let sentCount = 0;
+    let failedCount = 0;
+
+    for (const docSnap of snap.docs) {
+      const lead = docSnap.data() || {};
+      const rawPhone = String(lead.phone || lead.normalized_phone || "");
+      const digits = rawPhone.replace(/\D/g, "");
+      const finalPhone = digits.length === 10 ? `91${digits}` : digits;
+
+      if (!finalPhone || finalPhone.length < 10) continue;
+
+      let name = "";
+      if (lead.name && !/^\+?[0-9\s-]+$/.test(String(lead.name).trim())) {
+        name = String(lead.name).trim().split(" ")[0];
+      }
+
+      let messageText = config.messageTemplate || "Hi {{name}}!";
+      if (name) {
+        messageText = messageText.replace(/\{\{name\}\}/gi, name);
+      } else {
+        messageText = messageText.replace(/\s*\{\{name\}\}/gi, "").trim();
+        if (!messageText || messageText.toLowerCase() === "hi") messageText = "Hi!";
+      }
+
+      try {
+        const res = await fetch(`https://graph.facebook.com/${graphApiVersion}/${phoneId}/messages`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: finalPhone,
+            type: "text",
+            text: { body: messageText }
+          })
+        });
+
+        const resJson = await res.json();
+        if (resJson.messages?.[0]?.id) {
+          sentCount++;
+          await db.collection("messages").add({
+            leadId: docSnap.id,
+            senderPhone: finalPhone,
+            direction: "outbound",
+            type: "text",
+            content: messageText,
+            metaMessageId: resJson.messages[0].id,
+            platform: "whatsapp",
+            triggeredBy: "daily_730am_followup_cloud_function",
+            created_at: FieldValue.serverTimestamp()
+          });
+
+          await db.collection("activities").add({
+            lead_id: docSnap.id,
+            type: "whatsapp_automated_followup",
+            title: "Automated 7:30 AM Follow-Up Sent",
+            message: `Sent automatic 7:30 AM greeting: "${messageText}"`,
+            actor: "System Scheduler (7:30 AM)",
+            created_at: FieldValue.serverTimestamp()
+          });
+        } else {
+          failedCount++;
+        }
+      } catch (err) {
+        failedCount++;
+      }
+
+      await new Promise((r) => setTimeout(r, 250));
+    }
+
+    await configDoc.ref.update({
+      lastRunDate: todayIST,
+      lastRunAt: FieldValue.serverTimestamp(),
+      lastRunSummary: {
+        totalLeads: snap.size,
+        sentCount,
+        failedCount,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    console.log(`[7:30 AM FollowUp] Completed: sent ${sentCount} of ${snap.size} leads.`);
+  } catch (err: any) {
+    console.error("[7:30 AM FollowUp] Scheduled run error:", err);
   }
 });

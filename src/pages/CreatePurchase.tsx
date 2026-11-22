@@ -4,11 +4,12 @@ import { Upload, Camera, FileText, CheckCircle, AlertTriangle, Loader2, Edit3, T
 import SpeechInput from '../components/Shared/SpeechInput';
 import { db, functions } from '../lib/firebase';
 import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { collection, addDoc, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, query, where, getDocs, Timestamp, doc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useAuth } from '../contexts/AuthContext';
-import { extractDataFromDocument } from '../services/ai';
+import { extractDataFromDocument, getApiKey, setApiKey } from '../services/ai';
 import type { Purchase, PurchaseItem } from '../types';
+import { ImageCropperModal } from '../components/ImageCropperModal';
 
 type Step = 'entry_method' | 'upload' | 'processing' | 'review' | 'confirmation';
 
@@ -17,6 +18,7 @@ export default function CreatePurchase() {
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const lastProcessedDataRef = useRef<{ base64: string; mimeType: string } | null>(null);
 
   const [step, setStep] = useState<Step>('entry_method');
   const [file, setFile] = useState<File | null>(null);
@@ -27,6 +29,9 @@ export default function CreatePurchase() {
   const [duplicateWarning, setDuplicateWarning] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [originalData, setOriginalData] = useState<any>(null);
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [inputKey, setInputKey] = useState(getApiKey());
+  const [isDragging, setIsDragging] = useState(false);
 
   const [formData, setFormData] = useState<Partial<Purchase>>({
     status: 'draft',
@@ -39,12 +44,69 @@ export default function CreatePurchase() {
     overallConfidence: 0,
     duplicateDetected: false
   });
+  const [syncInventory, setSyncInventory] = useState(true);
 
   const [confidenceInfo, setConfidenceInfo] = useState<any>({});
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [originalCropFile, setOriginalCropFile] = useState<File | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
+      if (selectedFile.size > 20 * 1024 * 1024) {
+        alert("File size exceeds 20MB limit.");
+        return;
+      }
+      setFile(selectedFile);
+      setStep('upload');
+      uploadFileAndProcess(selectedFile);
+    }
+  };
+
+  const handleCameraSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.size > 20 * 1024 * 1024) {
+        alert("File size exceeds 20MB limit.");
+        return;
+      }
+      
+      setOriginalCropFile(selectedFile);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCropImageUrl(event.target?.result as string);
+        setIsCropModalOpen(true);
+      };
+      reader.readAsDataURL(selectedFile);
+    }
+    // Reset the input value so the same file can be selected again
+    if (cameraInputRef.current) {
+        cameraInputRef.current.value = '';
+    }
+  };
+
+  const handleCropComplete = (croppedFile: File) => {
+    setFile(croppedFile);
+    setStep('upload');
+    uploadFileAndProcess(croppedFile);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const selectedFile = e.dataTransfer.files[0];
       if (selectedFile.size > 20 * 1024 * 1024) {
         alert("File size exceeds 20MB limit.");
         return;
@@ -125,10 +187,11 @@ export default function CreatePurchase() {
       reader.onload = async () => {
         try {
           const base64Data = (reader.result as string).split(',')[1];
+          lastProcessedDataRef.current = { base64: base64Data, mimeType: fileToProcess.type };
           await extractData(base64Data, fileToProcess.type, pId, fileToProcess.name);
-        } catch (err) {
+        } catch (err: any) {
           console.error("Extraction failed", err);
-          setErrorMsg("Extraction failed. Please try manual entry.");
+          setErrorMsg(err.message || "Extraction failed. Please try manual entry.");
           setStep('review');
         }
       };
@@ -139,6 +202,20 @@ export default function CreatePurchase() {
     } catch (err) {
       console.error(err);
       setErrorMsg("Error initiating processing.");
+      setStep('review');
+    }
+  };
+
+  const retryExtraction = async () => {
+    if (!lastProcessedDataRef.current) return;
+    setErrorMsg('');
+    setStep('processing');
+    setProcessingStatus('Retrying AI document extraction...');
+    try {
+      await extractData(lastProcessedDataRef.current.base64, lastProcessedDataRef.current.mimeType, purchaseId, file?.name || 'invoice');
+    } catch (err: any) {
+      console.error("Extraction failed", err);
+      setErrorMsg(err.message || "Extraction failed. Please try manual entry.");
       setStep('review');
     }
   };
@@ -187,7 +264,7 @@ export default function CreatePurchase() {
 
     } catch (err: any) {
       console.error("Extraction failed", err);
-      setErrorMsg("Extraction failed. You can continue with manual entry.");
+      setErrorMsg(err.message || "Extraction failed. You can continue with manual entry.");
       setStep('review'); // Allow manual entry fallback
     }
   };
@@ -222,6 +299,22 @@ export default function CreatePurchase() {
 
   const submitPurchase = async () => {
     if (!user) return;
+    
+    if (!formData.invoice?.invoice_number?.trim()) {
+      alert("Invoice Number is required.");
+      return;
+    }
+    
+    if (!formData.invoice?.invoice_date?.trim()) {
+      alert("Invoice Date is required.");
+      return;
+    }
+    
+    if (duplicateWarning) {
+      alert("This invoice appears to be a duplicate. Please resolve the warning before saving.");
+      return;
+    }
+
     try {
       setProcessingStatus('Submitting...');
       const finalData = {
@@ -243,6 +336,62 @@ export default function CreatePurchase() {
         action: 'submitted',
         timestamp: Timestamp.now()
       });
+
+      // --- Inventory Sync Logic ---
+      if (syncInventory) {
+        for (const item of formData.items || []) {
+          const itemNameLower = item.itemName.toLowerCase().trim();
+          const qProd = query(collection(db, 'products'));
+          const snap = await getDocs(qProd);
+          
+          let matchedDoc = null;
+          for (const d of snap.docs) {
+            if (d.data().name.toLowerCase().trim() === itemNameLower) {
+              matchedDoc = d;
+              break;
+            }
+          }
+
+          if (matchedDoc) {
+             const data = matchedDoc.data();
+             const newStock = (data.stockQuantity || 0) + item.quantity;
+             const history = data.priceHistory || [];
+             history.push({
+               date: Timestamp.now(),
+               price: item.unitPrice,
+               vendorName: finalData.vendor?.name || 'Unknown',
+               purchaseId: finalData.id
+             });
+             await updateDoc(doc(db, 'products', matchedDoc.id), {
+                stockQuantity: newStock,
+                costPrice: item.unitPrice,
+                priceHistory: history
+             });
+          } else {
+             // Create new product
+             await addDoc(collection(db, 'products'), {
+                name: item.itemName,
+                category: finalData.category || 'Uncategorized',
+                hsn_code: '0000',
+                retail_price: item.unitPrice * 1.2,
+                wholesale_price: item.unitPrice * 1.1,
+                tax_percentage: 18,
+                stockQuantity: item.quantity,
+                costPrice: item.unitPrice,
+                unit: 'nos',
+                priceHistory: [{
+                   date: Timestamp.now(),
+                   price: item.unitPrice,
+                   vendorName: finalData.vendor?.name || 'Unknown',
+                   purchaseId: finalData.id
+                }],
+                created_at: Timestamp.now(),
+                source: 'purchase'
+             });
+          }
+        }
+      }
+      // ----------------------------
 
       // AI Learning Feedback (compare original vs final)
       if (originalData) {
@@ -290,7 +439,10 @@ export default function CreatePurchase() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-3xl">
             <div 
               onClick={() => fileInputRef.current?.click()}
-              className="neo-card flex flex-col items-center justify-center p-12 cursor-pointer hover:bg-primary/5 transition-colors border-2 border-dashed border-primary/30 hover:border-primary"
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`neo-card flex flex-col items-center justify-center p-12 cursor-pointer transition-colors border-2 border-dashed ${isDragging ? 'bg-primary/10 border-primary' : 'hover:bg-primary/5 border-primary/30 hover:border-primary'}`}
             >
               <Upload size={48} className="text-primary mb-4" />
               <h3 className="text-xl font-bold text-primary-dark mb-2">Upload Invoice</h3>
@@ -311,7 +463,7 @@ export default function CreatePurchase() {
           <button onClick={() => cameraInputRef.current?.click()} className="neo-btn flex items-center gap-2">
             <Camera size={20} /> Use Mobile Camera
           </button>
-          <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleFileSelect} />
+          <input type="file" accept="image/*" capture="environment" className="hidden" ref={cameraInputRef} onChange={handleCameraSelect} />
         </div>
       )}
 
@@ -330,18 +482,85 @@ export default function CreatePurchase() {
 
       {step === 'review' && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center flex-wrap gap-4">
             <h1 className="text-2xl font-bold text-primary-dark">Review Purchase Details</h1>
-            <div className="flex gap-4">
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 text-sm font-semibold text-secondary cursor-pointer bg-white px-3 py-1.5 rounded-full border border-gray-200 shadow-sm">
+                <input 
+                  type="checkbox" 
+                  checked={syncInventory} 
+                  onChange={(e) => setSyncInventory(e.target.checked)} 
+                  className="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary"
+                />
+                📦 Auto-Sync Inventory
+              </label>
               <button onClick={() => setStep('entry_method')} className="neo-btn">Cancel</button>
               <button onClick={submitPurchase} className="neo-btn-primary">Submit Purchase</button>
             </div>
           </div>
 
           {errorMsg && (
-            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded neo-card">
-              <p className="font-bold">Notice</p>
-              <p>{errorMsg}</p>
+            <div className="bg-red-50 border-l-4 border-red-500 text-red-800 p-4 rounded neo-card flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+              <div>
+                <p className="font-bold flex items-center gap-2">
+                  <AlertTriangle size={18} className="text-red-500" /> Notice
+                </p>
+                <p className="text-sm mt-1">{errorMsg}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button 
+                  onClick={() => setShowKeyModal(true)} 
+                  className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-800 text-xs font-semibold rounded border border-red-300 transition-colors"
+                >
+                  Configure Key
+                </button>
+                {lastProcessedDataRef.current && (
+                  <button 
+                    onClick={retryExtraction} 
+                    className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded hover:bg-primary/90 transition-colors"
+                  >
+                    Retry Extraction
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {showKeyModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4 border border-gray-200 dark:border-gray-700 animate-scale-up">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">Configure Gemini API Key</h3>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Enter your Google Gemini API key from Google AI Studio (<a href="https://ai.google.dev/" target="_blank" rel="noreferrer" className="text-primary underline">ai.google.dev</a>). This key is saved in your browser and automatically used for OCR invoice extraction.
+                </p>
+                <input 
+                  type="password"
+                  value={inputKey}
+                  onChange={(e) => setInputKey(e.target.value)}
+                  placeholder="AQ.Ab8... or AIzaSy..."
+                  className="w-full px-3 py-2 border rounded-lg text-sm font-mono dark:bg-gray-900 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+                <div className="flex justify-end gap-2 pt-2">
+                  <button 
+                    onClick={() => setShowKeyModal(false)}
+                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-gray-300"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setApiKey(inputKey);
+                      setShowKeyModal(false);
+                      if (lastProcessedDataRef.current) {
+                        retryExtraction();
+                      }
+                    }}
+                    className="neo-btn-primary px-4 py-2 text-sm font-semibold"
+                  >
+                    Save & Apply
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -351,7 +570,7 @@ export default function CreatePurchase() {
                 <p className="font-bold flex items-center gap-2"><AlertTriangle size={18}/> Possible Duplicate Detected</p>
                 <p className="text-sm mt-1">An invoice from this vendor with the same number and amount already exists.</p>
               </div>
-              <button onClick={() => setDuplicateWarning(false)} className="px-4 py-2 bg-white rounded shadow text-sm font-bold">Continue Anyway</button>
+              <button onClick={() => setDuplicateWarning(false)} className="px-4 py-2 bg-transparent rounded shadow text-sm font-bold">Continue Anyway</button>
             </div>
           )}
 
@@ -445,7 +664,7 @@ export default function CreatePurchase() {
                   </button>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full text-left text-sm hidden md:table">
                     <thead>
                       <tr className="text-secondary border-b">
                         <th className="pb-2">Item Name</th>
@@ -477,6 +696,51 @@ export default function CreatePurchase() {
                       ))}
                     </tbody>
                   </table>
+
+                  {/* Mobile Card View */}
+                  <div className="md:hidden divide-y divide-shadow-darker/10">
+                    {formData.items?.map((item, idx) => (
+                      <div key={idx} className="py-4 space-y-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex-1">
+                            <span className="text-[10px] text-secondary font-bold block mb-1">ITEM NAME</span>
+                            <SpeechInput 
+                              type="text" 
+                              className="w-full bg-transparent border-b border-shadow-darker/20 hover:border-gray-300 focus:border-primary outline-none font-semibold text-primary-dark" 
+                              value={item.itemName} 
+                              onChange={e => handleItemChange(idx, 'itemName', e.target.value)} 
+                            />
+                          </div>
+                          <button onClick={() => removeItem(idx)} className="p-2 text-red-400 hover:text-red-600 mt-4"><Trash2 size={16} /></button>
+                        </div>
+                        
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <span className="text-[10px] text-secondary font-bold block mb-1">QTY</span>
+                            <SpeechInput 
+                              type="number" 
+                              className="w-full bg-transparent border-b border-shadow-darker/20 hover:border-gray-300 focus:border-primary outline-none text-center" 
+                              value={item.quantity} 
+                              onChange={e => handleItemChange(idx, 'quantity', Number(e.target.value))} 
+                            />
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-secondary font-bold block mb-1 text-right">PRICE</span>
+                            <SpeechInput 
+                              type="number" 
+                              className="w-full bg-transparent border-b border-shadow-darker/20 hover:border-gray-300 focus:border-primary outline-none text-right" 
+                              value={item.unitPrice} 
+                              onChange={e => handleItemChange(idx, 'unitPrice', Number(e.target.value))} 
+                            />
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-secondary font-bold block mb-1">TOTAL</span>
+                            <div className="font-bold text-primary-dark pt-1">₹{(item.quantity * item.unitPrice).toLocaleString()}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 
                 <div className="flex flex-col items-end pt-4 space-y-2 border-t">
@@ -511,6 +775,32 @@ export default function CreatePurchase() {
         </div>
       )}
 
+      {cropImageUrl && (
+        <ImageCropperModal
+          isOpen={isCropModalOpen}
+          onClose={() => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+          }}
+          imageUrl={cropImageUrl}
+          originalFile={originalCropFile}
+          onCropComplete={(cropped) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(cropped);
+          }}
+          onSkipCrop={(raw) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(raw);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+

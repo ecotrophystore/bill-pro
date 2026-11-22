@@ -9,6 +9,7 @@ import {
   Trash2, 
   Download, 
   ChevronDown, 
+  ChevronUp,
   Upload, 
   X, 
   FileText, 
@@ -27,13 +28,27 @@ import {
   Tags,
   DollarSign,
   Cloud,
-  CloudUpload
+  CloudUpload,
+  Camera,
+  Receipt,
+  ArrowRight,
+  ShieldCheck,
+  TrendingDown,
+  Percent,
+  LayoutList,
+  FolderKanban,
+  SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight,
+  Key
 } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { extractDataFromDocument } from '../services/ai';
+import ExportReportModal from '../components/Shared/ExportReportModal';
+import { extractDataFromDocument, getApiKey, setApiKey } from '../services/ai';
+
 import { db, auth } from '../lib/firebase';
 import { 
   collection, 
@@ -48,6 +63,9 @@ import {
   writeBatch, 
   serverTimestamp 
 } from 'firebase/firestore';
+import { ImageCropperModal } from '../components/ImageCropperModal';
+import { DuplicateBillModal, type DuplicateBillMatch } from '../components/Expense/DuplicateBillModal';
+import toast from 'react-hot-toast';
 
 interface ExpenseItem {
   id: string;
@@ -64,6 +82,7 @@ interface ExpenseItem {
   billNo?: string;
   notes?: string;
   created_at?: any;
+  isDuplicateOverride?: boolean;
 }
 
 export default function ExpensePage() {
@@ -92,6 +111,7 @@ export default function ExpensePage() {
   const [isParsing, setIsParsing] = useState(false);
   const [parsedFileName, setParsedFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // Manual Entry Form state
   const [manualForm, setManualForm] = useState({
@@ -111,9 +131,43 @@ export default function ExpensePage() {
   const [filterFromDate, setFilterFromDate] = useState('');
   const [filterToDate, setFilterToDate] = useState('');
   const [filterMember, setFilterMember] = useState('all');
+  const [filterPurpose, setFilterPurpose] = useState('all');
   const [filterTaxStatus, setFilterTaxStatus] = useState('all');
   const [filterPaymentMode, setFilterPaymentMode] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+
+  const [cropImageUrl, setCropImageUrl] = useState<string | null>(null);
+  const [originalCropFile, setOriginalCropFile] = useState<File | null>(null);
+  const [isCropModalOpen, setIsCropModalOpen] = useState(false);
+  const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
+  const [expandedPurpose, setExpandedPurpose] = useState<string | null>(null);
+
+  // New Drawer & Scan UI states
+  const [isAddDrawerOpen, setIsAddDrawerOpen] = useState(false);
+  const [isScanCardOpen, setIsScanCardOpen] = useState(false);
+  const [showDetailedStats, setShowDetailedStats] = useState(false);
+
+  // Edit Expense Modal state
+  const [editingExpense, setEditingExpense] = useState<ExpenseItem | null>(null);
+  const [isUpdatingExpense, setIsUpdatingExpense] = useState(false);
+
+  // Duplicate Bill Detection Modal states
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateBillMatch[]>([]);
+  const [pendingCleanItems, setPendingCleanItems] = useState<ExpenseItem[]>([]);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+
+  // Gemini API Key Modal state
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState(() => getApiKey());
+
+  // Ledger Presentation states
+  const [ledgerViewMode, setLedgerViewMode] = useState<'flat' | 'grouped'>('flat');
+  const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(15);
+  const [groupedCurrentPage, setGroupedCurrentPage] = useState(1);
+  const [groupedItemsPerPage, setGroupedItemsPerPage] = useState(8);
 
   // 1. Real-time Firestore sync for Expenses & Opening Cash
   useEffect(() => {
@@ -170,6 +224,31 @@ export default function ExpensePage() {
       unsubExpenses();
     };
   }, []);
+
+  // Auto-fix 2023 dates to 2026
+  useEffect(() => {
+    if (!db || savedExpenses.length === 0) return;
+    const fixDates = async () => {
+      let count = 0;
+      try {
+        const batch = writeBatch(db);
+        savedExpenses.forEach(expense => {
+          if (expense.date && expense.date.startsWith('2023')) {
+            const newDate = expense.date.replace('2023', '2026');
+            batch.update(doc(db, 'expenses', expense.id), { date: newDate });
+            count++;
+          }
+        });
+        if (count > 0) {
+          await batch.commit();
+          console.log(`Auto-fixed ${count} expense dates from 2023 to 2026.`);
+        }
+      } catch (err) {
+        console.warn("Failed to auto-fix dates:", err);
+      }
+    };
+    fixDates();
+  }, [savedExpenses]);
 
   // Update opening cash in Firestore
   const handleSaveOpeningCash = async () => {
@@ -237,17 +316,186 @@ export default function ExpensePage() {
     e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+      const selectedFile = e.dataTransfer.files[0];
+      if (selectedFile.type.startsWith('image/')) {
+        setOriginalCropFile(selectedFile);
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setCropImageUrl(event.target?.result as string);
+          setIsCropModalOpen(true);
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        processFile(selectedFile);
+      }
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.value && e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.type.startsWith('image/')) {
+        setOriginalCropFile(selectedFile);
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          setCropImageUrl(event.target?.result as string);
+          setIsCropModalOpen(true);
+          if (fileInputRef.current) {
+              fileInputRef.current.value = '';
+          }
+        };
+        reader.readAsDataURL(selectedFile);
+      } else {
+        processFile(selectedFile);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+      }
     }
   };
 
+  const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      setOriginalCropFile(selectedFile);
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCropImageUrl(event.target?.result as string);
+        setIsCropModalOpen(true);
+        if (cameraInputRef.current) {
+            cameraInputRef.current.value = '';
+        }
+      };
+      reader.readAsDataURL(selectedFile);
+    } else {
+      if (cameraInputRef.current) {
+          cameraInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleCropComplete = (croppedFile: File) => {
+    processFile(croppedFile);
+  };
+
   const exactRound = (num: number) => Math.round(num * 100) / 100;
+
+  // Helper to detect if any incoming expense is a duplicate/repeated bill
+  const checkDuplicates = (incomingItems: ExpenseItem[]): { cleanItems: ExpenseItem[]; duplicates: DuplicateBillMatch[] } => {
+    const existingPool = [...savedExpenses, ...previewRows];
+    const duplicates: DuplicateBillMatch[] = [];
+    const cleanItems: ExpenseItem[] = [];
+
+    for (const incoming of incomingItems) {
+      let matchedExisting: ExpenseItem | undefined;
+      let reason = '';
+      let source: 'database' | 'staged' = 'database';
+
+      const normIncomingBill = (incoming.billNo || '').trim().toLowerCase();
+      const normIncomingMember = (incoming.member || '').trim().toLowerCase();
+      const normIncomingPurpose = (incoming.purpose || '').trim().toLowerCase();
+      const incomingPaid = Number(incoming.paid) || 0;
+      const incomingDate = (incoming.date || '').trim();
+
+      for (const existing of existingPool) {
+        const normExistingBill = (existing.billNo || '').trim().toLowerCase();
+        const normExistingMember = (existing.member || '').trim().toLowerCase();
+        const normExistingPurpose = (existing.purpose || '').trim().toLowerCase();
+        const existingPaid = Number(existing.paid) || 0;
+        const existingDate = (existing.date || '').trim();
+        const isStaged = previewRows.some(p => p.id === existing.id);
+
+        // 1. Strict Match: Non-empty Bill Number matches existing record
+        if (normIncomingBill && normExistingBill && normIncomingBill === normExistingBill) {
+          matchedExisting = existing;
+          reason = `Matching Bill Number: "${incoming.billNo}" (Recorded on ${existingDate || 'N/A'}, Amount ₹${existingPaid})`;
+          source = isStaged ? 'staged' : 'database';
+          break;
+        }
+
+        // 2. Match on Date + Exact Paid Amount
+        if (incomingDate && existingDate && incomingDate === existingDate && Math.abs(incomingPaid - existingPaid) < 0.01 && incomingPaid > 0) {
+          if (normIncomingMember && normExistingMember && normIncomingMember === normExistingMember) {
+            matchedExisting = existing;
+            reason = `Same Date (${incomingDate}), Amount (₹${incomingPaid}) & Vendor/Member ("${existing.member}")`;
+            source = isStaged ? 'staged' : 'database';
+            break;
+          }
+          if (normIncomingPurpose && normExistingPurpose && normIncomingPurpose === normExistingPurpose) {
+            matchedExisting = existing;
+            reason = `Same Date (${incomingDate}), Amount (₹${incomingPaid}) & Purpose ("${existing.purpose}")`;
+            source = isStaged ? 'staged' : 'database';
+            break;
+          }
+          // Exact Date + Exact Amount
+          matchedExisting = existing;
+          reason = `Same Date (${incomingDate}) and exact Amount (₹${incomingPaid})`;
+          source = isStaged ? 'staged' : 'database';
+          break;
+        }
+      }
+
+      if (matchedExisting) {
+        duplicates.push({
+          incoming,
+          existing: matchedExisting,
+          reason,
+          source
+        });
+      } else {
+        cleanItems.push(incoming);
+      }
+    }
+
+    return { cleanItems, duplicates };
+  };
+
+  // Route incoming items through duplicate detection
+  const handleIncomingExpenses = (items: ExpenseItem[]) => {
+    if (items.length === 0) return;
+    const { cleanItems, duplicates } = checkDuplicates(items);
+
+    if (duplicates.length > 0) {
+      setDuplicateMatches(duplicates);
+      setPendingCleanItems(cleanItems);
+      setIsDuplicateModalOpen(true);
+    } else {
+      setPreviewRows(prev => [...prev, ...cleanItems]);
+      toast.success(
+        items.length === 1 
+          ? 'Bill added to staged queue!' 
+          : `Added ${items.length} bill(s) to staged queue.`
+      );
+    }
+  };
+
+  const handleAcceptDuplicates = (accepted: ExpenseItem[]) => {
+    const combined = [...pendingCleanItems, ...accepted];
+    setPreviewRows(prev => [...prev, ...combined]);
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+    toast.success(`Added ${combined.length} bill(s) to staged queue.`);
+  };
+
+  const handleDiscardDuplicates = () => {
+    if (pendingCleanItems.length > 0) {
+      setPreviewRows(prev => [...prev, ...pendingCleanItems]);
+      toast.success(`Skipped repeated bill(s). Added ${pendingCleanItems.length} unique item(s).`);
+    } else {
+      toast('Repeated bill discarded.', { icon: 'ℹ️' });
+    }
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+  };
+
+  const handleCancelDuplicateModal = () => {
+    setIsDuplicateModalOpen(false);
+    setDuplicateMatches([]);
+    setPendingCleanItems([]);
+    toast('Cancelled upload.', { icon: '🚫' });
+  };
 
   const processFile = (file: File) => {
     setParsedFileName(file.name);
@@ -280,11 +528,11 @@ export default function ExpensePage() {
                 gstAmount: gstAmt,
                 nonGstAmount: tax === 'Non-GST' ? paid : 0,
                 paymentMode: (row.PaymentMode || row.payment_mode || 'UPI') as any,
-                billNo: row.BillNo || row.bill_no || '',
+                billNo: (row.BillNo || row.bill_no || row.BillNumber || row.InvoiceNo || row.invoice_no || '').toString().trim(),
                 notes: row.Notes || row.notes || 'Parsed from CSV'
               };
             });
-            setPreviewRows(prev => [...prev, ...parsed]);
+            handleIncomingExpenses(parsed);
             setIsParsing(false);
           }
         });
@@ -315,11 +563,11 @@ export default function ExpensePage() {
               gstAmount: gstAmt,
               nonGstAmount: tax === 'Non-GST' ? paid : 0,
               paymentMode: (row.PaymentMode || row.payment_mode || 'UPI') as any,
-              billNo: row.BillNo || row.bill_no || '',
+              billNo: (row.BillNo || row.bill_no || row.BillNumber || row.InvoiceNo || row.invoice_no || '').toString().trim(),
               notes: row.Notes || row.notes || 'Parsed from XLSX'
             };
           });
-          setPreviewRows(prev => [...prev, ...parsed]);
+          handleIncomingExpenses(parsed);
           setIsParsing(false);
         };
         reader.readAsArrayBuffer(file);
@@ -330,25 +578,47 @@ export default function ExpensePage() {
           try {
             const base64Data = (e.target?.result as string).split(',')[1];
             const data = await extractDataFromDocument(base64Data, file.type, 'expense');
-            const ocrRow: ExpenseItem = {
-              id: `ocr-${Date.now()}`,
-              date: data.date || new Date().toISOString().split('T')[0],
-              member: 'Imported Vendor',
-              purpose: data.description || 'Parsed from AI',
-              requested: parseFloat(data.amount) || 0,
-              paid: parseFloat(data.amount) || 0,
-              taxStatus: 'Non-GST',
-              gstPercent: 0,
-              gstAmount: 0,
-              nonGstAmount: parseFloat(data.amount) || 0,
-              paymentMode: 'UPI',
-              billNo: '',
-              notes: (data.notes || 'AI OCR Extraction') + (data.category ? ` [Category: ${data.category}]` : '')
-            };
-            setPreviewRows(prev => [...prev, ocrRow]);
-          } catch(err) {
+            
+            // Handle both legacy format (single object) and new format (array of expenses)
+            const expensesList = data.expenses || (data.amount ? [data] : []);
+            
+            const newRows = expensesList.map((item: any, idx: number) => {
+              const paid = parseFloat(item.amount) || 0;
+              const rawTax = (item.taxStatus || item.tax_status || '').toString().toLowerCase();
+              const isGst = rawTax.includes('gst') && !rawTax.includes('non');
+              const taxStatus: 'GST' | 'Non-GST' = isGst ? 'GST' : 'Non-GST';
+              const gstPct = parseFloat(item.gstPercent || item.gst_percent || (isGst ? 18 : 0)) || 0;
+              const gstAmt = isGst ? exactRound((paid * gstPct) / (100 + gstPct)) : 0;
+              const nonGstAmt = isGst ? 0 : paid;
+              const extractedBillNo = (item.billNo || item.invoice_number || item.bill_no || item.invoiceNo || item.receiptNo || '').toString().trim();
+              const paymentMode = ['Cash', 'UPI', 'Bank', 'Card'].includes(item.paymentMode) ? item.paymentMode : 'UPI';
+
+              return {
+                id: `ocr-${Date.now()}-${idx}`,
+                date: item.date || new Date().toISOString().split('T')[0],
+                member: item.vendor || item.member || 'Imported Vendor',
+                purpose: item.description || item.purpose || 'Parsed from AI',
+                requested: paid,
+                paid: paid,
+                taxStatus,
+                gstPercent: gstPct,
+                gstAmount: gstAmt,
+                nonGstAmount: nonGstAmt,
+                paymentMode: paymentMode as any,
+                billNo: extractedBillNo,
+                notes: (item.notes || 'AI OCR Extraction') + (item.category ? ` [Category: ${item.category}]` : '')
+              };
+            });
+            
+            handleIncomingExpenses(newRows);
+          } catch(err: any) {
             console.error(err);
-            alert("Failed to extract data with AI.");
+            const msg = err?.message || String(err);
+            if (msg.includes('API key') || msg.includes('401') || msg.includes('402')) {
+              setShowApiKeyModal(true);
+            } else {
+              alert("Failed to extract data with AI.\n\nReason: " + msg);
+            }
           } finally {
             setIsParsing(false);
           }
@@ -382,11 +652,11 @@ export default function ExpensePage() {
       gstAmount: gstAmt,
       nonGstAmount: manualForm.taxStatus === 'Non-GST' ? paid : 0,
       paymentMode: manualForm.paymentMode,
-      billNo: manualForm.billNo,
+      billNo: manualForm.billNo.trim(),
       notes: manualForm.notes
     };
 
-    setPreviewRows(prev => [...prev, newItem]);
+    handleIncomingExpenses([newItem]);
     
     // Clear manual form (keep date)
     setManualForm(prev => ({
@@ -483,15 +753,82 @@ export default function ExpensePage() {
     }
   };
 
+  // Update saved expense in Firestore
+  const handleUpdateSavedExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingExpense) return;
+    if (!editingExpense.member || !editingExpense.purpose || !editingExpense.paid) {
+      alert("Please fill in Member Name, Purpose, and Paid Amount.");
+      return;
+    }
+    if (!db) {
+      alert("Database is not connected.");
+      return;
+    }
+
+    setIsUpdatingExpense(true);
+    try {
+      const paid = parseFloat(editingExpense.paid as any) || 0;
+      const requested = parseFloat(editingExpense.requested as any) || paid;
+      const gstPercent = editingExpense.taxStatus === 'GST' ? (parseFloat(editingExpense.gstPercent as any) || 18) : 0;
+      const gstAmount = editingExpense.taxStatus === 'GST' ? exactRound((paid * gstPercent) / (100 + gstPercent)) : 0;
+      const nonGstAmount = editingExpense.taxStatus === 'Non-GST' ? paid : 0;
+
+      await updateDoc(doc(db, 'expenses', editingExpense.id), {
+        date: editingExpense.date,
+        member: editingExpense.member,
+        purpose: editingExpense.purpose,
+        requested: requested,
+        paid: paid,
+        taxStatus: editingExpense.taxStatus,
+        gstPercent: gstPercent,
+        gstAmount: gstAmount,
+        nonGstAmount: nonGstAmount,
+        paymentMode: editingExpense.paymentMode,
+        billNo: editingExpense.billNo || '',
+        notes: editingExpense.notes || '',
+        updated_at: serverTimestamp()
+      });
+
+      setEditingExpense(null);
+    } catch (err: any) {
+      console.error("Error updating expense:", err);
+      alert("Failed to update expense: " + (err.message || "Unknown error"));
+    } finally {
+      setIsUpdatingExpense(false);
+    }
+  };
+
   // Delete saved expense from Firestore
   const handleDeleteSavedExpense = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this saved expense from the cloud ledger?")) return;
     if (!db) return;
     try {
       await deleteDoc(doc(db, 'expenses', id));
+      setSelectedExpenses(prev => prev.filter(selId => selId !== id));
     } catch (err: any) {
       console.error("Error deleting expense:", err);
       alert("Failed to delete expense: " + (err.message || "Unknown error"));
+    }
+  };
+
+  // Bulk Delete
+  const handleBulkDelete = async () => {
+    if (selectedExpenses.length === 0) return;
+    if (!window.confirm(`Are you sure you want to delete ${selectedExpenses.length} selected expenses?`)) return;
+    if (!db) return;
+    
+    try {
+      const batch = writeBatch(db);
+      selectedExpenses.forEach(id => {
+        batch.delete(doc(db, 'expenses', id));
+      });
+      await batch.commit();
+      setSelectedExpenses([]);
+      alert(`Successfully deleted ${selectedExpenses.length} expenses.`);
+    } catch (err: any) {
+      console.error("Error in bulk delete:", err);
+      alert("Failed to delete expenses: " + (err.message || "Unknown error"));
     }
   };
 
@@ -540,6 +877,10 @@ export default function ExpensePage() {
     if (filterFromDate && item.date < filterFromDate) return false;
     if (filterToDate && item.date > filterToDate) return false;
     if (filterMember !== 'all' && item.member.toLowerCase() !== filterMember.toLowerCase()) return false;
+    
+    // Exact or loose match on purpose based on filter
+    if (filterPurpose !== 'all' && item.purpose !== filterPurpose) return false;
+
     if (filterTaxStatus !== 'all' && item.taxStatus !== filterTaxStatus) return false;
     if (filterPaymentMode !== 'all' && item.paymentMode !== filterPaymentMode) return false;
     
@@ -558,8 +899,9 @@ export default function ExpensePage() {
   const filteredStats = getStats(filteredReportList);
   const filteredClosing = openingCash - filteredStats.totalPaid;
 
-  // Extract unique members for filter dropdown
+  // Extract unique members and purposes for filter dropdown
   const uniqueMembers = [...new Set(savedExpenses.map(item => item.member))];
+  const uniquePurposes = [...new Set(savedExpenses.map(item => item.purpose))];
 
   // Running cash for Staged Preview Table
   let previewRunningCash = openingCash;
@@ -568,58 +910,128 @@ export default function ExpensePage() {
     return { ...item, runningCash: previewRunningCash };
   });
 
-  // Export functions
-  const handleExportExcel = () => {
-    const dataToExport = filteredReportList.map(item => ({
-      Date: item.date,
-      Member: item.member,
-      Purpose: item.purpose,
-      'Requested Amount (₹)': item.requested,
-      'Paid Amount (₹)': item.paid,
-      'Tax Status': item.taxStatus,
-      'GST Amount (₹)': item.gstAmount,
-      'Non-GST Amount (₹)': item.nonGstAmount,
-      'Payment Mode': item.paymentMode,
-      'Bill Number': item.billNo || 'N/A',
-      Notes: item.notes || ''
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(dataToExport);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Expenses");
-    XLSX.writeFile(wb, "Expense_Report.xlsx");
-  };
-
-  const handleExportPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.text("Expense Ledger Report", 14, 22);
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
-    doc.text(`Opening Balance: Rs. ${openingCash.toLocaleString()}`, 14, 34);
-
-    const tableData = filteredReportList.map(item => [
-      item.date,
-      item.member,
-      item.purpose,
-      `Rs. ${item.requested.toLocaleString()}`,
-      `Rs. ${item.paid.toLocaleString()}`,
-      item.taxStatus,
-      `Rs. ${item.gstAmount.toLocaleString()}`,
-      item.paymentMode,
-      item.billNo || '-'
-    ]);
-
-    autoTable(doc, {
-      startY: 40,
-      head: [['Date', 'Member', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
-      body: tableData,
-      theme: 'striped',
-      headStyles: { fillColor: [0, 77, 64] },
+  // Group the filteredReportList by Purpose
+  const groupedLedger = React.useMemo(() => {
+    const groups: Record<string, typeof filteredReportList> = {};
+    filteredReportList.forEach(item => {
+      const p = item.purpose || 'Unknown';
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(item);
     });
+    // Sort by total paid descending
+    return Object.entries(groups).sort((a, b) => {
+      const sumA = a[1].reduce((acc, curr) => acc + curr.paid, 0);
+      const sumB = b[1].reduce((acc, curr) => acc + curr.paid, 0);
+      return sumB - sumA;
+    });
+  }, [filteredReportList]);
 
-    doc.save("Expense_Ledger_Report.pdf");
+  // Pagination for flat view
+  const totalPages = Math.ceil(filteredReportList.length / itemsPerPage) || 1;
+  const paginatedExpenses = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredReportList.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredReportList, currentPage, itemsPerPage]);
+
+  // Pagination for grouped view
+  const totalGroupedPages = Math.ceil(groupedLedger.length / groupedItemsPerPage) || 1;
+  const paginatedGroupedLedger = React.useMemo(() => {
+    const startIndex = (groupedCurrentPage - 1) * groupedItemsPerPage;
+    return groupedLedger.slice(startIndex, startIndex + groupedItemsPerPage);
+  }, [groupedLedger, groupedCurrentPage, groupedItemsPerPage]);
+
+  // Auto-adjust page if out of bounds
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+    if (groupedCurrentPage > totalGroupedPages) {
+      setGroupedCurrentPage(1);
+    }
+  }, [totalPages, currentPage, totalGroupedPages, groupedCurrentPage]);
+
+  // Export functions
+  const handleExportReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let listToExport = savedExpenses;
+    
+    if (options.type === 'month') {
+      const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+      const end = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59);
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= start && d <= end;
+      });
+    } else if (options.type === 'custom' && options.startDate && options.endDate) {
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= options.startDate! && d <= options.endDate!;
+      });
+    } else if (options.type === 'fy') {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+      const start = new Date(startYear, 3, 1);
+      const end = new Date(startYear + 1, 2, 31, 23, 59, 59);
+      listToExport = listToExport.filter(item => {
+        const d = new Date(item.date);
+        return d >= start && d <= end;
+      });
+    }
+
+    if (options.format === 'bulk_pdf') {
+      alert("Bulk PDF generation is not supported for expenses yet.");
+      return;
+    }
+
+    if (options.format === 'excel') {
+      const dataToExport = listToExport.map(item => ({
+        Date: item.date,
+        Member: item.member,
+        Purpose: item.purpose,
+        'Requested Amount (₹)': item.requested,
+        'Paid Amount (₹)': item.paid,
+        'Tax Status': item.taxStatus,
+        'GST Amount (₹)': item.gstAmount,
+        'Non-GST Amount (₹)': item.nonGstAmount,
+        'Payment Mode': item.paymentMode,
+        'Bill Number': item.billNo || 'N/A',
+        Notes: item.notes || ''
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(dataToExport);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Expenses");
+      XLSX.writeFile(wb, "Expense_Report.xlsx");
+    } else if (options.format === 'pdf') {
+      const doc = new jsPDF();
+      doc.setFontSize(18);
+      doc.text("Expense Ledger Report", 14, 22);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Generated on: ${new Date().toLocaleDateString('en-IN')}`, 14, 28);
+
+      const tableData = listToExport.map(item => [
+        item.date,
+        item.member,
+        item.purpose,
+        `Rs. ${item.requested.toLocaleString()}`,
+        `Rs. ${item.paid.toLocaleString()}`,
+        item.taxStatus,
+        `Rs. ${item.gstAmount.toLocaleString()}`,
+        item.paymentMode,
+        item.billNo || '-'
+      ]);
+
+      autoTable(doc, {
+        startY: 40,
+        head: [['Date', 'Member', 'Purpose', 'Requested', 'Paid', 'Tax', 'GST Amt', 'Mode', 'Bill No']],
+        body: tableData,
+        theme: 'striped',
+        headStyles: { fillColor: [0, 77, 64] },
+      });
+
+      doc.save("Expense_Ledger_Report.pdf");
+    }
   };
 
   // Analytics Helpers
@@ -656,16 +1068,30 @@ export default function ExpensePage() {
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b)).map(([month, total]) => ({ month, total }));
   };
 
+  const getPurposeWiseExpenses = () => {
+    const map: Record<string, { total: number; count: number; gst: number; nonGst: number }> = {};
+    savedExpenses.forEach(item => {
+      const p = item.purpose || 'Unknown';
+      if (!map[p]) map[p] = { total: 0, count: 0, gst: 0, nonGst: 0 };
+      map[p].total += item.paid;
+      map[p].count += 1;
+      map[p].gst += item.gstAmount;
+      map[p].nonGst += item.nonGstAmount;
+    });
+    return Object.entries(map).map(([purpose, val]) => ({ purpose, ...val })).sort((a,b) => b.total - a.total);
+  };
+
   const memberExpenses = getMemberWiseExpenses();
+  const purposeExpenses = getPurposeWiseExpenses();
   const taxBreakdown = getTaxBreakdown();
   const monthlyExpenses = getMonthlyBreakdown();
   const maxMonthlyExpense = Math.max(...monthlyExpenses.map(m => m.total), 1000);
 
   return (
-    <div className="space-y-8 animate-fade-in max-w-7xl mx-auto pb-16">
+    <div className="space-y-6 animate-fade-in">
       
       {/* 1. Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight text-primary-dark uppercase">Expense Tracking</h1>
           <p className="text-secondary mt-1">
@@ -673,6 +1099,18 @@ export default function ExpensePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setApiKeyInput(getApiKey());
+              setShowApiKeyModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-surface border border-shadow-dark/40 text-primary-dark text-xs font-bold hover:bg-primary/10 transition-colors shadow-xs"
+            title="Configure Gemini API Key"
+          >
+            <Key size={13} className="text-primary" />
+            AI Key Settings
+          </button>
           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 text-primary-dark text-xs font-bold shadow-xs">
             <Cloud size={14} className="text-primary" />
             Cloud Synced (Firestore)
@@ -680,9 +1118,10 @@ export default function ExpensePage() {
         </div>
       </div>
 
+
       {/* Legacy Migration Alert Banner */}
       {legacyLocalExpenses.length > 0 && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
+        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-800 flex items-center justify-center shrink-0">
               <CloudUpload size={22} />
@@ -707,325 +1146,525 @@ export default function ExpensePage() {
         </div>
       )}
 
-      {/* 2. Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        {/* Opening Cash Card */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary relative flex flex-col justify-between transition-all hover:shadow-md">
+      {/* 2. Bento Grid Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {/* Card 1: Money in Hand & Opening Cash Hero */}
+        <div className="neo-card p-5 relative overflow-hidden flex flex-col justify-between border border-primary/20 bg-gradient-to-br from-[#F5ECE0] to-[#EFE2D2] shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Opening Cash</span>
-            <Wallet size={16} className="text-primary" />
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Wallet size={15} className="text-primary" /> Net Cash in Hand
+              </span>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className={`text-2xl font-black tracking-tight ${moneyInHand < 0 ? 'text-red-700' : 'text-[#004D40]'}`}>
+                  ₹{moneyInHand.toLocaleString('en-IN')}
+                </span>
+                {moneyInHand < 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">Deficit</span>
+                )}
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <TrendingDown size={18} />
+            </div>
           </div>
-          <div className="mt-2">
+
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-xs">
+            <span className="text-secondary/80 font-medium">Opening Cash:</span>
             {isEditingOpeningCash ? (
               <div className="flex items-center gap-1">
                 <input 
                   type="number" 
-                  className="neo-input !p-1 text-xs w-20 font-bold" 
+                  className="neo-input !p-1 text-xs w-24 font-bold bg-white" 
                   value={tempOpeningCash} 
                   onChange={(e) => setTempOpeningCash(e.target.value)} 
+                  autoFocus
                 />
-                <button onClick={handleSaveOpeningCash} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200">
-                  <Check size={12} />
+                <button 
+                  onClick={handleSaveOpeningCash} 
+                  className="p-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                  title="Save"
+                >
+                  <Check size={13} />
+                </button>
+                <button 
+                  onClick={() => setIsEditingOpeningCash(false)} 
+                  className="p-1 text-secondary hover:text-primary-dark"
+                  title="Cancel"
+                >
+                  <X size={13} />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 group cursor-pointer" onClick={() => setIsEditingOpeningCash(true)}>
-                <span className="text-base font-black text-[#004D40]">₹{openingCash.toLocaleString('en-IN')}</span>
-                <Edit size={10} className="text-secondary opacity-0 group-hover:opacity-100 transition-opacity" />
+              <div 
+                className="flex items-center gap-1.5 group cursor-pointer hover:text-primary transition-colors" 
+                onClick={() => setIsEditingOpeningCash(true)}
+                title="Click to edit Opening Cash"
+              >
+                <span className="font-bold text-primary-dark">₹{openingCash.toLocaleString('en-IN')}</span>
+                <Edit size={11} className="text-secondary opacity-60 group-hover:opacity-100" />
               </div>
             )}
-            <span className="text-[9px] text-secondary/60 block mt-1">Starting balance (Cloud)</span>
           </div>
         </div>
 
-        {/* Money in Hand */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        {/* Card 2: Total Disbursed / Paid */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Money In Hand</span>
-            <ArrowDownRight size={16} className="text-primary" />
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <ArrowUpRight size={15} className="text-emerald-700" /> Total Paid / Disbursed
+              </span>
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.totalPaid.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-800">
+              <DollarSign size={18} />
+            </div>
           </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{moneyInHand.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Opening - Paid</span>
+          
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Non-GST: <strong className="text-primary-dark">₹{stats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
+            <span>Taxable: <strong className="text-primary-dark">₹{(stats.totalPaid - stats.nonGstTotal).toLocaleString('en-IN')}</strong></span>
           </div>
         </div>
 
-        {/* Total Requested */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        {/* Card 3: Demands & Claims */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Requested</span>
-            <Layers size={16} className="text-primary" />
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Layers size={15} className="text-primary" /> Total Requested
+              </span>
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.totalRequested.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <FileText size={18} />
+            </div>
           </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.totalRequested.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Aggregate demands</span>
+
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Variance vs Paid:</span>
+            <span className={`font-bold ${stats.totalRequested - stats.totalPaid !== 0 ? 'text-amber-700' : 'text-primary'}`}>
+              ₹{(stats.totalRequested - stats.totalPaid).toLocaleString('en-IN')}
+            </span>
           </div>
         </div>
 
-        {/* Total Paid */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
+        {/* Card 4: Input Tax Credit (GST) */}
+        <div className="neo-card p-5 flex flex-col justify-between border border-shadow-darker/10 shadow-sm">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total Paid</span>
-            <ArrowUpRight size={16} className="text-primary" />
+            <div>
+              <span className="text-[11px] font-bold text-secondary uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles size={15} className="text-primary" /> GST Input Credit
+              </span>
+              <div className="mt-2">
+                <span className="text-2xl font-black text-primary-dark tracking-tight">
+                  ₹{stats.gstTotal.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <Percent size={18} />
+            </div>
           </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.totalPaid.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Disbursed cash</span>
-          </div>
-        </div>
 
-        {/* Closing Balance */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Closing Bal.</span>
-            <Wallet size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{closingBalance.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Current session net</span>
-          </div>
-        </div>
-
-        {/* GST Total */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Total GST</span>
-            <Sparkles size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.gstTotal.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Input tax credit</span>
-          </div>
-        </div>
-
-        {/* Non-GST Total */}
-        <div className="bg-[#FCFAF7] border border-shadow-darker/10 shadow-sm rounded-2xl p-4 border-l-[5px] border-l-primary flex flex-col justify-between transition-all hover:shadow-md">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-secondary uppercase tracking-wider">Non-GST Exp.</span>
-            <FileText size={16} className="text-primary" />
-          </div>
-          <div className="mt-2">
-            <span className="text-base font-black text-[#004D40]">₹{stats.nonGstTotal.toLocaleString('en-IN')}</span>
-            <span className="text-[9px] text-secondary/60 block mt-1">Exempt / Cash</span>
+          <div className="mt-4 pt-3 border-t border-shadow-darker/10 flex items-center justify-between text-[11px] text-secondary">
+            <span>Claimable ITC</span>
+            <button 
+              type="button"
+              onClick={() => setShowDetailedStats(!showDetailedStats)}
+              className="text-primary hover:underline font-bold text-[10px] flex items-center gap-0.5"
+            >
+              {showDetailedStats ? 'Hide breakdown' : 'More stats'} {showDetailedStats ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
           </div>
         </div>
       </div>
 
-      {/* 3. Inputs Section (Dropzone + Manual Form) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* Upload Dropzone */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="neo-card p-6 flex flex-col justify-between min-h-[360px] border-2 border-dashed border-primary/20 hover:border-primary/50 transition-all">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <FileSpreadsheet className="text-primary" size={20} />
-                <h3 className="font-bold text-base text-primary-dark">Import Files & AI OCR Scan</h3>
-              </div>
-              <p className="text-xs text-secondary leading-relaxed mb-4">
-                Drag & drop or browse CSV, Excel spreadsheets, or scanned receipt images/PDFs for automated Gemini AI extraction.
-              </p>
-            </div>
+      {/* Expandable Detailed Stats Row */}
+      {showDetailedStats && (
+        <div className="neo-card p-5 border border-primary/20 bg-primary/5 rounded-2xl grid grid-cols-2 md:grid-cols-4 gap-4 animate-scale-up mb-6">
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Closing Session Net</span>
+            <div className="text-base font-bold text-primary-dark mt-1">₹{closingBalance.toLocaleString('en-IN')}</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Exempt / Non-GST Total</span>
+            <div className="text-base font-bold text-primary-dark mt-1">₹{stats.nonGstTotal.toLocaleString('en-IN')}</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Total Recorded Expenses</span>
+            <div className="text-base font-bold text-primary-dark mt-1">{allCurrentExpenses.length} entries</div>
+          </div>
+          <div>
+            <span className="text-[10px] font-bold text-secondary uppercase">Active Payees / Members</span>
+            <div className="text-base font-bold text-primary-dark mt-1">{uniqueMembers.length} members</div>
+          </div>
+        </div>
+      )}
 
-            <div 
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
-                dragActive ? 'border-primary bg-primary/5 scale-98' : 'border-shadow-darker/20 hover:bg-shadow-darker/5'
-              }`}
+      {/* 3. Primary Action Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-surface rounded-2xl shadow-neo-raised border border-shadow-darker/10">
+        <div className="flex items-center gap-3">
+          <button 
+            type="button"
+            onClick={() => setIsAddDrawerOpen(true)}
+            className="neo-btn-primary flex items-center gap-2 text-sm py-2.5 px-6 font-bold shadow-md hover:scale-[1.02] active:scale-100 transition-transform"
+          >
+            <Plus size={18} /> Add New Expense
+          </button>
+          <button 
+            type="button"
+            onClick={() => setIsScanCardOpen(!isScanCardOpen)}
+            className={`neo-btn flex items-center gap-2 text-sm py-2.5 px-5 font-semibold transition-all ${
+              isScanCardOpen ? 'border-primary text-primary bg-primary/5' : 'text-primary-dark'
+            }`}
+          >
+            <FileSpreadsheet size={17} className="text-primary" />
+            {isScanCardOpen ? 'Hide Import & AI OCR' : 'Import / AI OCR Scan'}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-secondary">
+          <span className="hidden sm:inline">Shortcuts:</span>
+          <span className="px-2 py-1 rounded bg-secondary/10 font-mono text-[11px] font-bold text-primary-dark">Click "+ Add New Expense" to record</span>
+        </div>
+      </div>
+
+      {/* Collapsible Dropzone & AI OCR Box */}
+      {isScanCardOpen && (
+        <div className="neo-card p-6 border-2 border-dashed border-primary/30 rounded-2xl bg-surface animate-fade-in">
+          <div className="flex justify-between items-start mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <FileSpreadsheet size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-primary-dark">Import Excel, CSV, or AI OCR Digital Scan</h3>
+                <p className="text-xs text-secondary">Drag & drop files or snap a receipt photo for automated extraction into your queue.</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsScanCardOpen(false)}
+              className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-secondary/10"
             >
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
-                accept=".csv, .xlsx, .xls, image/*, application/pdf" 
-                className="hidden" 
-              />
-              
-              {isParsing ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="animate-spin text-primary" size={32} />
-                  <span className="text-xs font-bold text-primary-dark">Parsing {parsedFileName}...</span>
-                  <span className="text-[10px] text-secondary">AI OCR / Spreadsheet processing</span>
-                </div>
-              ) : (
-                <>
-                  <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
+              <X size={18} />
+            </button>
+          </div>
+
+          <div 
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center justify-center ${
+              dragActive ? 'border-primary bg-primary/5 scale-[0.99]' : 'border-shadow-darker/20 hover:bg-primary/5'
+            }`}
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileChange} 
+              accept=".csv, .xlsx, .xls, image/*, application/pdf" 
+              className="hidden" 
+            />
+            <input 
+              type="file" 
+              ref={cameraInputRef} 
+              onChange={handleCameraChange} 
+              accept="image/*" 
+              capture="environment" 
+              className="hidden" 
+            />
+            
+            {isParsing ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="animate-spin text-primary" size={32} />
+                <span className="text-xs font-bold text-primary-dark">Processing {parsedFileName}...</span>
+                <span className="text-[10px] text-secondary">Extracting date, amounts, and tax breakdowns</span>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-4 mb-3">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center shadow-xs">
                     <Upload size={20} />
                   </div>
-                  <span className="text-xs font-bold text-primary-dark">Choose file or drag here</span>
-                  <span className="text-[10px] text-secondary mt-1">Supports CSV, Excel (.xlsx, .xls), Images, PDFs</span>
-                </>
-              )}
-            </div>
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cameraInputRef.current?.click();
+                    }}
+                    className="w-12 h-12 rounded-full bg-secondary/10 text-secondary hover:bg-secondary/20 hover:text-primary-dark flex items-center justify-center transition-colors"
+                    title="Take Photo"
+                  >
+                    <Camera size={20} />
+                  </button>
+                </div>
+                <span className="text-sm font-bold text-primary-dark">Choose file, drag & drop here, or use camera</span>
+                <span className="text-xs text-secondary mt-1">Supports Excel (.xlsx, .xls), CSV, Receipts (JPG, PNG, WebP), PDFs</span>
+              </>
+            )}
+          </div>
 
-            <div className="bg-primary/5 p-3 rounded-xl flex items-start gap-2 text-[11px] text-secondary mt-4">
-              <Info size={14} className="text-primary shrink-0 mt-0.5" />
-              <span>Columns matched: Date, Member/Name, Purpose/Description, Paid/Amount, TaxStatus, GST.</span>
+          <div className="bg-primary/5 p-3 rounded-xl flex items-start gap-2 text-xs text-secondary mt-4">
+            <Info size={15} className="text-primary shrink-0 mt-0.5" />
+            <span>Extracted items are staged into your preview queue below so you can inspect & fine-tune before committing to the cloud.</span>
+          </div>
+        </div>
+      )}
+
+      {/* Slide-over Drawer for Add Expense */}
+      {isAddDrawerOpen && (
+        <div className="fixed inset-0 z-[70] overflow-hidden">
+          {/* Backdrop */}
+          <div 
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs transition-opacity animate-fade-in"
+            onClick={() => setIsAddDrawerOpen(false)}
+          />
+
+          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+            <div className="w-screen max-w-lg bg-surface shadow-2xl border-l border-shadow-darker/10 flex flex-col justify-between animate-fade-in">
+              {/* Drawer Header */}
+              <div className="p-6 border-b border-shadow-darker/10 flex items-center justify-between bg-surface">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                    <Plus size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-primary-dark">New Expense Entry</h3>
+                    <p className="text-xs text-secondary">Record a transaction to your staged queue.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsAddDrawerOpen(false)}
+                  className="p-2 rounded-xl text-secondary hover:text-primary-dark hover:bg-secondary/10 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Drawer Body Form */}
+              <form 
+                id="expense-drawer-form"
+                onSubmit={(e) => {
+                  handleAddManualExpense(e);
+                  setIsAddDrawerOpen(false);
+                }}
+                className="p-6 space-y-5 overflow-y-auto flex-1 custom-sidebar-scrollbar"
+              >
+                {/* 1. Transaction Details Section */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                    <Receipt size={14} /> Transaction Details
+                  </h4>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
+                      <input 
+                        type="date" 
+                        value={manualForm.date} 
+                        onChange={(e) => setManualForm({...manualForm, date: e.target.value})} 
+                        className="neo-input w-full font-semibold" 
+                        required 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
+                      <select 
+                        value={manualForm.paymentMode} 
+                        onChange={(e) => setManualForm({...manualForm, paymentMode: e.target.value as any})} 
+                        className="neo-input w-full font-medium"
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank">Bank Transfer</option>
+                        <option value="Card">Debit/Credit Card</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Ramesh / Vendor Name" 
+                      value={manualForm.member} 
+                      onChange={(e) => setManualForm({...manualForm, member: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. Raw Material Acrylic Sheets, Fuel, etc." 
+                      value={manualForm.purpose} 
+                      onChange={(e) => setManualForm({...manualForm, purpose: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                      required 
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Invoice / Ref No.</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. INV-2026-091 (optional)" 
+                      value={manualForm.billNo} 
+                      onChange={(e) => setManualForm({...manualForm, billNo: e.target.value})} 
+                      className="neo-input w-full font-medium" 
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Amount & Tax Section */}
+                <div className="space-y-4 pt-4 border-t border-shadow-darker/10">
+                  <h4 className="text-xs font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+                    <DollarSign size={14} /> Financials & Tax
+                  </h4>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        placeholder="0.00" 
+                        value={manualForm.requested} 
+                        onChange={(e) => setManualForm({...manualForm, requested: e.target.value})} 
+                        className="neo-input w-full" 
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        placeholder="0.00" 
+                        value={manualForm.paid} 
+                        onChange={(e) => setManualForm({...manualForm, paid: e.target.value})} 
+                        className="neo-input w-full font-bold text-primary-dark" 
+                        required 
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
+                      <select 
+                        value={manualForm.taxStatus} 
+                        onChange={(e) => setManualForm({...manualForm, taxStatus: e.target.value as any})} 
+                        className="neo-input w-full font-medium"
+                      >
+                        <option value="GST">GST Included</option>
+                        <option value="Non-GST">Non-GST (Exempt)</option>
+                      </select>
+                    </div>
+
+                    {manualForm.taxStatus === 'GST' ? (
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                        <select 
+                          value={manualForm.gstPercent} 
+                          onChange={(e) => setManualForm({...manualForm, gstPercent: parseFloat(e.target.value)})} 
+                          className="neo-input w-full font-bold text-primary-dark"
+                        >
+                          <option value={5}>5%</option>
+                          <option value={12}>12%</option>
+                          <option value={18}>18%</option>
+                          <option value={28}>28%</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="space-y-1 opacity-50">
+                        <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                        <input type="text" disabled value="0% (Exempt)" className="neo-input w-full cursor-not-allowed text-xs" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dynamic calculation preview */}
+                  {manualForm.paid && (
+                    <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 text-xs space-y-1">
+                      <div className="flex justify-between text-secondary">
+                        <span>Net Base Amount:</span>
+                        <strong className="text-primary-dark">
+                          ₹{manualForm.taxStatus === 'GST' 
+                            ? ((parseFloat(manualForm.paid) || 0) - exactRound(((parseFloat(manualForm.paid) || 0) * manualForm.gstPercent) / (100 + manualForm.gstPercent))).toLocaleString('en-IN')
+                            : (parseFloat(manualForm.paid) || 0).toLocaleString('en-IN')
+                          }
+                        </strong>
+                      </div>
+                      {manualForm.taxStatus === 'GST' && (
+                        <div className="flex justify-between text-secondary">
+                          <span>Calculated GST ({manualForm.gstPercent}%):</span>
+                          <strong className="text-purple-800">
+                            ₹{exactRound(((parseFloat(manualForm.paid) || 0) * manualForm.gstPercent) / (100 + manualForm.gstPercent)).toLocaleString('en-IN')}
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
+                    <textarea 
+                      rows={2}
+                      placeholder="Optional notes or reference info..." 
+                      value={manualForm.notes} 
+                      onChange={(e) => setManualForm({...manualForm, notes: e.target.value})} 
+                      className="neo-input w-full text-xs font-medium resize-none" 
+                    />
+                  </div>
+                </div>
+              </form>
+
+              {/* Drawer Sticky Footer */}
+              <div className="p-4 border-t border-shadow-darker/10 bg-surface flex items-center justify-end gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setIsAddDrawerOpen(false)}
+                  className="neo-btn text-xs py-2.5 px-4 font-semibold text-secondary"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="button"
+                  onClick={(e) => {
+                    handleAddManualExpense(e);
+                  }}
+                  className="neo-btn text-xs py-2.5 px-4 font-bold text-primary hover:bg-primary/5"
+                >
+                  + Add & Another
+                </button>
+                <button 
+                  type="submit"
+                  form="expense-drawer-form"
+                  className="neo-btn-primary flex items-center gap-2 text-xs py-2.5 px-6 font-bold shadow-md"
+                >
+                  <Plus size={16} /> Add to Queue
+                </button>
+              </div>
             </div>
           </div>
         </div>
-
-        {/* Manual Input Form */}
-        <div className="lg:col-span-7">
-          <form onSubmit={handleAddManualExpense} className="neo-card p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-shadow-darker/10 pb-3">
-              <div className="flex items-center gap-2">
-                <Plus size={18} className="text-primary" />
-                <h3 className="font-bold text-base text-primary-dark">Manual Entry Form</h3>
-              </div>
-              <span className="text-[10px] font-bold text-secondary uppercase tracking-widest bg-primary/5 px-2.5 py-1 rounded-full">
-                Staged Row
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Date */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Date *</label>
-                <input 
-                  type="date" 
-                  value={manualForm.date} 
-                  onChange={(e) => setManualForm({...manualForm, date: e.target.value})} 
-                  className="neo-input w-full !text-xs font-semibold" 
-                  required 
-                />
-              </div>
-
-              {/* Member Name */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Member / Payee *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Ramesh" 
-                  value={manualForm.member} 
-                  onChange={(e) => setManualForm({...manualForm, member: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
-                  required 
-                />
-              </div>
-
-              {/* Payment Mode */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
-                <select 
-                  value={manualForm.paymentMode} 
-                  onChange={(e) => setManualForm({...manualForm, paymentMode: e.target.value as any})} 
-                  className="neo-input w-full !text-xs"
-                >
-                  <option value="UPI">UPI</option>
-                  <option value="Cash">Cash</option>
-                  <option value="Bank">Bank Transfer</option>
-                  <option value="Card">Debit/Credit Card</option>
-                </select>
-              </div>
-
-              {/* Purpose */}
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Purpose / Description *</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Raw Material Acrylic Sheets" 
-                  value={manualForm.purpose} 
-                  onChange={(e) => setManualForm({...manualForm, purpose: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
-                  required 
-                />
-              </div>
-
-              {/* Bill No */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
-                <input 
-                  type="text" 
-                  placeholder="Optional bill #" 
-                  value={manualForm.billNo} 
-                  onChange={(e) => setManualForm({...manualForm, billNo: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
-                />
-              </div>
-
-              {/* Requested Amount */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Requested (₹)</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  placeholder="0.00" 
-                  value={manualForm.requested} 
-                  onChange={(e) => setManualForm({...manualForm, requested: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
-                />
-              </div>
-
-              {/* Paid Amount */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  placeholder="0.00" 
-                  value={manualForm.paid} 
-                  onChange={(e) => setManualForm({...manualForm, paid: e.target.value})} 
-                  className="neo-input w-full !text-xs font-bold text-primary-dark" 
-                  required 
-                />
-              </div>
-
-              {/* Tax Status */}
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Tax Type</label>
-                <select 
-                  value={manualForm.taxStatus} 
-                  onChange={(e) => setManualForm({...manualForm, taxStatus: e.target.value as any})} 
-                  className="neo-input w-full !text-xs"
-                >
-                  <option value="GST">GST Included</option>
-                  <option value="Non-GST">Non-GST</option>
-                </select>
-              </div>
-
-              {/* GST Percent (Conditional) */}
-              {manualForm.taxStatus === 'GST' && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
-                  <select 
-                    value={manualForm.gstPercent} 
-                    onChange={(e) => setManualForm({...manualForm, gstPercent: parseFloat(e.target.value)})} 
-                    className="neo-input w-full !text-xs"
-                  >
-                    <option value={5}>5%</option>
-                    <option value={12}>12%</option>
-                    <option value={18}>18%</option>
-                    <option value={28}>28%</option>
-                  </select>
-                </div>
-              )}
-
-              {/* Notes */}
-              <div className={`space-y-1 ${manualForm.taxStatus === 'GST' ? 'md:col-span-2' : 'md:col-span-3'}`}>
-                <label className="text-[11px] font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
-                <input 
-                  type="text" 
-                  placeholder="Optional remarks" 
-                  value={manualForm.notes} 
-                  onChange={(e) => setManualForm({...manualForm, notes: e.target.value})} 
-                  className="neo-input w-full !text-xs" 
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button type="submit" className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-6">
-                <Plus size={16} /> Add to Staged Queue
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
+      )}
 
       {/* 4. Staged Preview Table */}
       {previewRows.length > 0 && (
@@ -1058,19 +1697,19 @@ export default function ExpensePage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left border-collapse hidden md:table">
               <thead>
-                <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Member</th>
-                  <th className="p-3">Purpose</th>
-                  <th className="p-3 text-right">Requested</th>
-                  <th className="p-3 text-right">Paid Amount</th>
-                  <th className="p-3">Tax Type</th>
-                  <th className="p-3 text-right">GST Amount</th>
-                  <th className="p-3">Mode</th>
-                  <th className="p-3 text-right">Running Cash</th>
-                  <th className="p-3 text-center">Action</th>
+                <tr className="bg-shadow-darker/5 border-b border-shadow-darker/10">
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Date</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Member</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Purpose</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Requested</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Paid Amount</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Tax Type</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">GST Amount</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider">Mode</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-right">Running Cash</th>
+                  <th className="p-4 font-bold text-secondary text-sm uppercase tracking-wider text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-shadow-darker/5 font-medium">
@@ -1085,12 +1724,19 @@ export default function ExpensePage() {
                       />
                     </td>
                     <td className="p-3">
-                      <input 
-                        type="text" 
-                        value={row.member} 
-                        onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
-                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-28 outline-none font-semibold text-primary-dark"
-                      />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <input 
+                          type="text" 
+                          value={row.member} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-28 outline-none font-semibold text-primary-dark"
+                        />
+                        {row.isDuplicateOverride && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30" title="User confirmed adding this repeated bill">
+                            Repeated
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-3">
                       <input 
@@ -1153,212 +1799,146 @@ export default function ExpensePage() {
                 ))}
               </tbody>
             </table>
+
+            {/* Mobile Card View for Staged Preview */}
+            <div className="md:hidden divide-y divide-shadow-darker/10 border-t border-shadow-darker/10">
+              {previewWithRunningCash.map((row) => (
+                <div key={row.id} className="p-4 space-y-3">
+                  <div className="flex justify-between items-start gap-4">
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <input 
+                        type="date" 
+                        value={row.date} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'date', e.target.value)} 
+                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-semibold text-primary-dark"
+                      />
+                      <div className="flex items-center gap-1.5">
+                        <input 
+                          type="text" 
+                          value={row.member} 
+                          placeholder="Member"
+                          onChange={(e) => handleEditPreviewRow(row.id, 'member', e.target.value)} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none font-bold text-primary-dark"
+                        />
+                        {row.isDuplicateOverride && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 shrink-0" title="User confirmed adding this repeated bill">
+                            Repeated
+                          </span>
+                        )}
+                      </div>
+                      <input 
+                        type="text" 
+                        value={row.purpose} 
+                        placeholder="Purpose"
+                        onChange={(e) => handleEditPreviewRow(row.id, 'purpose', e.target.value)} 
+                        className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full outline-none text-primary-dark"
+                      />
+                    </div>
+                    <div className="flex-shrink-0 text-right space-y-2 w-24">
+                      <div>
+                        <span className="text-[10px] text-secondary block">Req:</span>
+                        <input 
+                          type="number" 
+                          value={row.requested} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'requested', parseFloat(e.target.value))} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full text-right outline-none text-secondary"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-secondary block">Paid:</span>
+                        <input 
+                          type="number" 
+                          value={row.paid} 
+                          onChange={(e) => handleEditPreviewRow(row.id, 'paid', parseFloat(e.target.value))} 
+                          className="bg-transparent border-b border-dashed border-secondary/40 text-xs w-full text-right outline-none font-bold text-primary-dark"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-2">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-secondary">Tax Status</span>
+                      <select 
+                        value={row.taxStatus} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'taxStatus', e.target.value)}
+                        className="bg-transparent text-xs w-full outline-none border-b border-dashed border-secondary/40"
+                      >
+                        <option value="GST">GST</option>
+                        <option value="Non-GST">Non-GST</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-secondary">Mode</span>
+                      <select 
+                        value={row.paymentMode} 
+                        onChange={(e) => handleEditPreviewRow(row.id, 'paymentMode', e.target.value)}
+                        className="bg-transparent text-xs w-full outline-none border-b border-dashed border-secondary/40"
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="Cash">Cash</option>
+                        <option value="Bank">Bank</option>
+                        <option value="Card">Card</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-3 border-t border-shadow-darker/5">
+                    <div className="space-y-0.5">
+                      <div className="text-[10px] text-secondary">GST: ₹{row.gstAmount.toLocaleString('en-IN')}</div>
+                      <div className={`text-[11px] font-black ${row.runningCash < 0 ? 'text-error' : 'text-[#004D40]'}`}>
+                        Run: ₹{row.runningCash.toLocaleString('en-IN')}
+                      </div>
+                    </div>
+                    <button onClick={() => handleRemovePreviewRow(row.id)} className="neo-btn p-2 text-secondary hover:text-error transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* 5. Persistent Saved Database & Reports Section */}
-      <div className="neo-card p-6 space-y-6">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-shadow-darker/10 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <Clock size={18} className="text-primary" />
-              <h3 className="font-bold text-base text-primary-dark">Saved Expense Ledger ({filteredReportList.length} items)</h3>
-            </div>
-            <p className="text-xs text-secondary mt-0.5">Real-time cloud database ledger synced with Firestore.</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={handleExportExcel} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold">
-              <Download size={14} /> Excel
-            </button>
-            <button onClick={handleExportPDF} className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-primary-dark">
-              <FileText size={14} /> PDF Report
-            </button>
-          </div>
-        </div>
-
-        {/* Filter Controls Bar */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-4 bg-primary/5 rounded-2xl border border-primary/10">
-          {/* Search */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Search</label>
-            <div className="relative">
-              <Search size={12} className="absolute left-2.5 top-2.5 text-secondary" />
-              <input 
-                type="text" 
-                placeholder="Payee, purpose, bill..." 
-                value={searchQuery} 
-                onChange={(e) => setSearchQuery(e.target.value)} 
-                className="neo-input !pl-7 !py-1.5 !text-xs w-full" 
-              />
-            </div>
-          </div>
-
-          {/* From Date */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">From Date</label>
-            <input 
-              type="date" 
-              value={filterFromDate} 
-              onChange={(e) => setFilterFromDate(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full font-semibold" 
-            />
-          </div>
-
-          {/* To Date */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">To Date</label>
-            <input 
-              type="date" 
-              value={filterToDate} 
-              onChange={(e) => setFilterToDate(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full font-semibold" 
-            />
-          </div>
-
-          {/* Filter Member */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Member</label>
-            <select 
-              value={filterMember} 
-              onChange={(e) => setFilterMember(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Members</option>
-              {uniqueMembers.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Tax */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Tax Type</label>
-            <select 
-              value={filterTaxStatus} 
-              onChange={(e) => setFilterTaxStatus(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Tax Types</option>
-              <option value="GST">GST Included</option>
-              <option value="Non-GST">Non-GST</option>
-            </select>
-          </div>
-
-          {/* Filter Payment Mode */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
-            <select 
-              value={filterPaymentMode} 
-              onChange={(e) => setFilterPaymentMode(e.target.value)} 
-              className="neo-input !py-1.5 !text-xs w-full"
-            >
-              <option value="all">All Modes</option>
-              <option value="UPI">UPI</option>
-              <option value="Cash">Cash</option>
-              <option value="Bank">Bank</option>
-              <option value="Card">Card</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Filtered Summary KPIs */}
-        <div className="flex flex-wrap items-center gap-6 p-3.5 bg-[#FCFAF7] border border-shadow-darker/10 rounded-xl text-xs">
-          <div>
-            <span className="text-secondary text-[11px]">Filtered Total Paid:</span>
-            <span className="font-bold text-primary-dark ml-1.5">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Filtered GST Tax:</span>
-            <span className="font-bold text-primary ml-1.5">₹{filteredStats.gstTotal.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Filtered Non-GST:</span>
-            <span className="font-bold text-secondary ml-1.5">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</span>
-          </div>
-          <div className="h-4 w-[1px] bg-shadow-darker/20"></div>
-          <div>
-            <span className="text-secondary text-[11px]">Net Money After Filter:</span>
-            <span className="font-black text-[#004D40] ml-1.5">₹{filteredClosing.toLocaleString('en-IN')}</span>
-          </div>
-        </div>
-
-        {/* Persistent Ledger Table */}
-        <div className="overflow-x-auto">
-          {loadingExpenses ? (
-            <div className="py-16 flex flex-col items-center justify-center gap-2 text-secondary">
-              <Loader2 className="animate-spin text-primary" size={24} />
-              <span className="text-xs font-semibold">Connecting to Firestore ledger...</span>
-            </div>
-          ) : filteredReportList.length === 0 ? (
-            <div className="py-16 text-center text-secondary border border-dashed border-shadow-darker/20 rounded-2xl">
-              <Wallet size={32} className="mx-auto mb-2 opacity-30 text-primary" />
-              <p className="font-semibold text-sm">No expenses match the selected filters or database is empty.</p>
-              <p className="text-xs opacity-75 mt-1">Add a manual expense or import a spreadsheet above to begin.</p>
-            </div>
-          ) : (
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="bg-primary/5 text-primary-dark font-black uppercase text-[10px] tracking-wider border-b border-shadow-darker/10">
-                  <th className="p-3">Date</th>
-                  <th className="p-3">Member</th>
-                  <th className="p-3">Purpose</th>
-                  <th className="p-3 text-right">Requested</th>
-                  <th className="p-3 text-right">Paid Amount</th>
-                  <th className="p-3">Tax Type</th>
-                  <th className="p-3 text-right">GST Amount</th>
-                  <th className="p-3">Mode</th>
-                  <th className="p-3">Bill No</th>
-                  <th className="p-3">Notes</th>
-                  <th className="p-3 text-center">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-shadow-darker/5 font-medium">
-                {filteredReportList.map((item) => (
-                  <tr key={item.id} className="hover:bg-primary/5 transition-colors group">
-                    <td className="p-3 font-semibold text-primary-dark whitespace-nowrap">{item.date}</td>
-                    <td className="p-3 font-bold text-primary-dark">{item.member}</td>
-                    <td className="p-3 text-secondary max-w-[220px] truncate" title={item.purpose}>{item.purpose}</td>
-                    <td className="p-3 text-right text-secondary">₹{item.requested?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3 text-right font-black text-primary-dark">₹{item.paid?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        item.taxStatus === 'GST' ? 'bg-primary/10 text-primary border border-primary/20' : 'bg-shadow-darker/10 text-secondary'
-                      }`}>
-                        {item.taxStatus}
-                      </span>
-                    </td>
-                    <td className="p-3 text-right font-semibold text-primary">₹{item.gstAmount?.toLocaleString('en-IN') || '0'}</td>
-                    <td className="p-3">
-                      <span className="bg-shadow-darker/5 text-primary-dark px-1.5 py-0.5 rounded font-mono text-[10px]">
-                        {item.paymentMode}
-                      </span>
-                    </td>
-                    <td className="p-3 font-mono text-[10px] text-secondary">{item.billNo || '-'}</td>
-                    <td className="p-3 text-secondary max-w-[180px] truncate" title={item.notes}>{item.notes || '-'}</td>
-                    <td className="p-3 text-center">
-                      <button 
-                        onClick={() => handleDeleteSavedExpense(item.id)} 
-                        className="p-1 hover:text-error text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Delete from Firestore"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
-      {/* 6. Visual Analytics & Member Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Visual Analytics & Breakdown Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         
+        {/* Purpose Breakdown */}
+        <div className="neo-card p-6 space-y-4">
+          <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
+            <Layers size={18} className="text-primary" />
+            <h4 className="font-bold text-sm text-primary-dark">Purpose Breakdown</h4>
+          </div>
+          
+          <div className="space-y-3 max-h-[280px] overflow-y-auto pr-1">
+            {purposeExpenses.length === 0 ? (
+              <p className="text-xs text-secondary py-8 text-center">No purpose data recorded.</p>
+            ) : (
+              purposeExpenses.map(c => (
+                <div 
+                  key={c.purpose} 
+                  className="p-2.5 bg-primary/5 rounded-xl flex items-center justify-between text-xs cursor-pointer hover:bg-primary/10 transition-colors"
+                  onClick={() => {
+                    setFilterPurpose(c.purpose);
+                    window.scrollTo({ top: 400, behavior: 'smooth' });
+                  }}
+                  title={`Click to filter by ${c.purpose}`}
+                >
+                  <div>
+                    <span className="font-bold text-primary-dark block max-w-[120px] truncate" title={c.purpose}>{c.purpose}</span>
+                    <span className="text-[10px] text-secondary">{c.count} transaction(s)</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-black text-[#004D40] block">₹{c.total.toLocaleString('en-IN')}</span>
+                    <span className="text-[9px] text-primary">GST: ₹{c.gst.toLocaleString('en-IN')}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
         {/* Member-wise Disbursement Breakdown */}
         <div className="neo-card p-6 space-y-4">
           <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3">
@@ -1439,9 +2019,26 @@ export default function ExpensePage() {
               <p className="text-xs text-secondary py-8 text-center">No monthly trend data available.</p>
             ) : (
               monthlyExpenses.map(item => (
-                <div key={item.month} className="space-y-1">
+                <div 
+                  key={item.month} 
+                  className="space-y-1 cursor-pointer hover:bg-primary/5 p-2 rounded-xl transition-colors"
+                  onClick={() => {
+                    const y = parseInt(item.month.split('-')[0]);
+                    const m = parseInt(item.month.split('-')[1]);
+                    // Pad month and date with zero if needed
+                    const startStr = `${y}-${m.toString().padStart(2, '0')}-01`;
+                    const end = new Date(y, m, 0);
+                    const endStr = `${y}-${m.toString().padStart(2, '0')}-${end.getDate().toString().padStart(2, '0')}`;
+                    setFilterFromDate(startStr);
+                    setFilterToDate(endStr);
+                    window.scrollTo({ top: 400, behavior: 'smooth' });
+                  }}
+                  title="Click to view expenses for this month"
+                >
                   <div className="flex justify-between text-[11px] font-bold">
-                    <span className="text-secondary font-mono">{item.month}</span>
+                    <span className="text-secondary font-semibold group-hover:text-primary transition-colors">
+                      {new Date(item.month + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                    </span>
                     <span className="text-primary-dark">₹{item.total.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="w-full h-2 bg-shadow-darker/10 rounded-full overflow-hidden">
@@ -1458,6 +2055,922 @@ export default function ExpensePage() {
 
       </div>
 
+      {/* 5. Persistent Saved Database & Reports Section */}
+      <div className="neo-card p-6 space-y-5 border border-shadow-darker/10 shadow-sm">
+        {/* Ledger Header */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 border-b border-shadow-darker/10 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <Clock size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-xl text-primary-dark">Expense Ledger</h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-primary/10 text-primary">
+                  {filteredReportList.length} items
+                </span>
+              </div>
+              <p className="text-xs text-secondary mt-0.5">Real-time ledger synchronized with cloud database.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-between lg:justify-end">
+            {/* View Mode Switcher */}
+            <div className="inline-flex rounded-xl bg-primary/5 p-1 border border-primary/10">
+              <button
+                type="button"
+                onClick={() => setLedgerViewMode('flat')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  ledgerViewMode === 'flat'
+                    ? 'bg-white text-primary-dark shadow-xs'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+                title="Table List View"
+              >
+                <LayoutList size={14} />
+                Flat List
+              </button>
+              <button
+                type="button"
+                onClick={() => setLedgerViewMode('grouped')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  ledgerViewMode === 'grouped'
+                    ? 'bg-white text-primary-dark shadow-xs'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+                title="Grouped by Purpose View"
+              >
+                <FolderKanban size={14} />
+                By Purpose
+              </button>
+            </div>
+
+            {selectedExpenses.length > 0 && (
+              <button 
+                onClick={handleBulkDelete} 
+                className="neo-btn text-xs py-2 px-3 flex items-center gap-1.5 font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200"
+              >
+                <Trash2 size={14} /> Delete ({selectedExpenses.length})
+              </button>
+            )}
+
+            <button 
+              onClick={() => setIsExportModalOpen(true)} 
+              className="neo-btn text-xs py-2 px-3.5 flex items-center gap-1.5 font-bold text-primary-dark"
+            >
+              <Download size={14} className="text-primary" /> Export
+            </button>
+            <ExportReportModal 
+              isOpen={isExportModalOpen}
+              onClose={() => setIsExportModalOpen(false)}
+              onExport={handleExportReport}
+            />
+          </div>
+        </div>
+
+        {/* Compact Single-Row Filter Toolbar */}
+        <div className="space-y-3">
+          <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1 max-w-md">
+              <Search size={14} className="absolute left-3.5 top-3 text-secondary" />
+              <input 
+                type="text" 
+                placeholder="Search payee, purpose, bill #, remarks..." 
+                value={searchQuery} 
+                onChange={(e) => setSearchQuery(e.target.value)} 
+                className="neo-input !pl-9 !py-2 !text-xs w-full bg-surface/50 border border-shadow-dark/40 focus:border-primary" 
+              />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-2.5 text-secondary hover:text-primary-dark"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Quick Pills & Advanced Filter Toggle */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { label: 'All Modes', mode: 'all' },
+                { label: 'UPI', mode: 'UPI' },
+                { label: 'Cash', mode: 'Cash' },
+                { label: 'Bank', mode: 'Bank' }
+              ].map(pill => (
+                <button
+                  key={pill.mode}
+                  type="button"
+                  onClick={() => setFilterPaymentMode(pill.mode)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    filterPaymentMode === pill.mode
+                      ? 'bg-primary text-white shadow-xs font-bold'
+                      : 'bg-surface hover:bg-primary/10 text-secondary hover:text-primary-dark border border-shadow-dark/30'
+                  }`}
+                >
+                  {pill.label}
+                </button>
+              ))}
+
+              <div className="h-4 w-[1px] bg-shadow-darker/40 mx-1 hidden sm:block"></div>
+
+              {[
+                { label: 'All Tax', status: 'all' },
+                { label: 'GST', status: 'GST' },
+                { label: 'Non-GST', status: 'Non-GST' }
+              ].map(taxPill => (
+                <button
+                  key={taxPill.status}
+                  type="button"
+                  onClick={() => setFilterTaxStatus(taxPill.status)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                    filterTaxStatus === taxPill.status
+                      ? 'bg-primary-dark text-white shadow-xs font-bold'
+                      : 'bg-surface hover:bg-primary/10 text-secondary hover:text-primary-dark border border-shadow-dark/30'
+                  }`}
+                >
+                  {taxPill.label}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setIsAdvancedFiltersOpen(!isAdvancedFiltersOpen)}
+                className={`neo-btn !py-1.5 !px-3 text-xs flex items-center gap-1.5 font-bold transition-all ${
+                  isAdvancedFiltersOpen || filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all'
+                    ? 'border-primary text-primary bg-primary/10'
+                    : 'text-secondary hover:text-primary-dark'
+                }`}
+              >
+                <SlidersHorizontal size={13} />
+                Filters
+                {(filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all') && (
+                  <span className="w-2 h-2 rounded-full bg-primary" />
+                )}
+              </button>
+
+              {(filterFromDate || filterToDate || filterMember !== 'all' || filterPurpose !== 'all' || filterTaxStatus !== 'all' || filterPaymentMode !== 'all' || searchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterFromDate('');
+                    setFilterToDate('');
+                    setFilterMember('all');
+                    setFilterPurpose('all');
+                    setFilterTaxStatus('all');
+                    setFilterPaymentMode('all');
+                    setSearchQuery('');
+                  }}
+                  className="text-xs font-bold text-error hover:underline flex items-center gap-1 ml-1"
+                >
+                  <X size={12} /> Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Expandable Secondary Filter Box */}
+          {isAdvancedFiltersOpen && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 p-4 bg-surface/70 rounded-2xl border border-shadow-dark/40 animate-fade-in text-xs shadow-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">From Date</label>
+                <input 
+                  type="date" 
+                  value={filterFromDate} 
+                  onChange={(e) => setFilterFromDate(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full font-semibold bg-surface border border-shadow-dark/30" 
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">To Date</label>
+                <input 
+                  type="date" 
+                  value={filterToDate} 
+                  onChange={(e) => setFilterToDate(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full font-semibold bg-surface border border-shadow-dark/30" 
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Member / Payee</label>
+                <select 
+                  value={filterMember} 
+                  onChange={(e) => setFilterMember(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full bg-surface border border-shadow-dark/30 font-medium"
+                >
+                  <option value="all">All Members ({uniqueMembers.length})</option>
+                  {uniqueMembers.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-secondary uppercase tracking-wider">Purpose Category</label>
+                <select 
+                  value={filterPurpose} 
+                  onChange={(e) => setFilterPurpose(e.target.value)} 
+                  className="neo-input !py-1.5 !text-xs w-full bg-surface border border-shadow-dark/30 font-medium"
+                >
+                  <option value="all">All Purposes ({uniquePurposes.length})</option>
+                  {uniquePurposes.map(p => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Filtered Subtotal Ribbon */}
+        <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-2.5 bg-surface/80 rounded-xl border border-shadow-dark/40 shadow-neo-surface text-xs">
+          <div className="flex flex-wrap items-center gap-4 text-secondary">
+            <span>Filtered Paid: <strong className="text-primary-dark font-bold">₹{filteredStats.totalPaid.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-shadow-dark">•</span>
+            <span>Input GST: <strong className="text-primary font-bold">₹{filteredStats.gstTotal.toLocaleString('en-IN')}</strong></span>
+            <span className="hidden sm:inline text-shadow-dark">•</span>
+            <span>Non-GST: <strong className="text-primary-dark font-bold">₹{filteredStats.nonGstTotal.toLocaleString('en-IN')}</strong></span>
+          </div>
+          <div className="text-[11px] font-semibold text-secondary">
+            Showing <span className="font-bold text-primary-dark">{filteredReportList.length}</span> of {savedExpenses.length} transactions
+          </div>
+        </div>
+
+        {/* Table / Ledger Display */}
+        <div className="overflow-x-auto">
+          {loadingExpenses ? (
+            <div className="py-20 flex flex-col items-center justify-center gap-2 text-secondary">
+              <Loader2 className="animate-spin text-primary" size={26} />
+              <span className="text-xs font-semibold">Connecting to cloud ledger...</span>
+            </div>
+          ) : filteredReportList.length === 0 ? (
+            <div className="py-16 text-center text-secondary border border-dashed border-shadow-dark/40 rounded-2xl bg-surface/50">
+              <Wallet size={36} className="mx-auto mb-2 opacity-30 text-primary" />
+              <p className="font-bold text-sm text-primary-dark">No expense records match your current filters.</p>
+              <p className="text-xs opacity-75 mt-1">Try resetting filters or adding a new transaction.</p>
+            </div>
+          ) : ledgerViewMode === 'flat' ? (
+            /* FLAT CHRONOLOGICAL STREAMLINED TABLE */
+            <div className="space-y-3">
+              <div className="border border-shadow-dark/40 rounded-2xl overflow-hidden bg-surface shadow-neo-raised">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-surface/90 border-b border-shadow-dark/30 text-[11px] font-bold text-secondary uppercase tracking-wider">
+                      <th className="p-3.5 w-10 text-center">
+                        <input 
+                          type="checkbox" 
+                          className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                          checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedExpenses(filteredReportList.map(item => item.id));
+                            } else {
+                              setSelectedExpenses([]);
+                            }
+                          }}
+                          title="Select all on this list"
+                        />
+                      </th>
+                      <th className="p-3.5">Date</th>
+                      <th className="p-3.5">Payee & Purpose</th>
+                      <th className="p-3.5">Payment Mode</th>
+                      <th className="p-3.5 text-right">Amount & Tax</th>
+                      <th className="p-3.5">Reference / Notes</th>
+                      <th className="p-3.5 w-12 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-shadow-dark/20 font-medium text-xs">
+                    {paginatedExpenses.map((item) => {
+                      const isSelected = selectedExpenses.includes(item.id);
+                      return (
+                        <tr 
+                          key={item.id} 
+                          className={`hover:bg-primary/5 transition-colors group ${isSelected ? 'bg-primary/10' : ''}`}
+                        >
+                          {/* Checkbox */}
+                          <td className="p-3.5 text-center">
+                            <input 
+                              type="checkbox" 
+                              className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedExpenses(prev => [...prev, item.id]);
+                                } else {
+                                  setSelectedExpenses(prev => prev.filter(id => id !== item.id));
+                                }
+                              }}
+                            />
+                          </td>
+
+                          {/* Date */}
+                          <td className="p-3.5 whitespace-nowrap text-secondary font-mono text-[11px]">
+                            {item.date}
+                          </td>
+
+                          {/* Payee & Purpose */}
+                          <td className="p-3.5">
+                            <div className="font-bold text-primary-dark text-sm">{item.member}</div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="px-2 py-0.5 rounded-md bg-primary/15 text-primary-dark font-medium text-[10px] border border-primary/20">
+                                {item.purpose}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Payment Mode */}
+                          <td className="p-3.5 whitespace-nowrap">
+                            <span className="px-2.5 py-1 rounded-lg bg-surface shadow-neo-surface font-bold text-primary-dark text-[11px] inline-block">
+                              {item.paymentMode}
+                            </span>
+                          </td>
+
+                          {/* Amount & Tax */}
+                          <td className="p-3.5 text-right whitespace-nowrap">
+                            <div className="font-black text-primary-dark text-sm">
+                              ₹{item.paid?.toLocaleString('en-IN') || '0'}
+                            </div>
+                            <div className="text-[10px] mt-0.5">
+                              {item.taxStatus === 'GST' ? (
+                                <span className="text-primary font-bold">
+                                  GST ({item.gstPercent || 18}%): ₹{item.gstAmount?.toLocaleString('en-IN') || '0'}
+                                </span>
+                              ) : (
+                                <span className="text-secondary/80">Non-GST (Exempt)</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Reference / Notes */}
+                          <td className="p-3.5 text-secondary text-xs max-w-[220px]">
+                            {item.billNo && (
+                              <div className="font-mono text-[10px] text-primary-dark/90 font-bold">
+                                #{item.billNo}
+                              </div>
+                            )}
+                            <div className="truncate text-secondary" title={item.notes}>
+                              {item.notes || '-'}
+                            </div>
+                          </td>
+
+                          {/* Action */}
+                          <td className="p-3.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <button 
+                                onClick={() => setEditingExpense({ ...item })} 
+                                className="p-1.5 rounded-lg text-secondary hover:text-primary hover:bg-primary/10 transition-colors opacity-70 group-hover:opacity-100"
+                                title="Edit Expense"
+                              >
+                                <Edit size={15} />
+                              </button>
+                              <button 
+                                onClick={() => handleDeleteSavedExpense(item.id)} 
+                                className="p-1.5 rounded-lg text-secondary hover:text-error hover:bg-error/10 transition-colors opacity-70 group-hover:opacity-100"
+                                title="Delete Expense"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 pt-2 text-xs text-secondary">
+                <div className="flex items-center gap-2">
+                  <span>Show per page:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1);
+                    }}
+                    className="neo-input !py-1 !px-2 !text-xs bg-surface border border-shadow-dark/30 font-bold text-primary-dark"
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                  </select>
+                  <span>
+                    Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredReportList.length)}–
+                    {Math.min(currentPage * itemsPerPage, filteredReportList.length)} of {filteredReportList.length}
+                  </span>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Previous page"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="font-bold px-2 text-primary-dark">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Next page"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* GROUPED BY PURPOSE ACCORDION VIEW */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-3 bg-surface/80 rounded-xl border border-shadow-dark/40 shadow-neo-surface">
+                <label className="flex items-center gap-2 text-xs font-bold text-primary-dark cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                    checked={filteredReportList.length > 0 && selectedExpenses.length === filteredReportList.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedExpenses(filteredReportList.map(item => item.id));
+                      } else {
+                        setSelectedExpenses([]);
+                      }
+                    }}
+                  />
+                  Select All {filteredReportList.length} Expenses
+                </label>
+                <div className="text-xs text-secondary font-semibold">
+                  {groupedLedger.length} Purpose Categories
+                </div>
+              </div>
+
+              {paginatedGroupedLedger.map(([purpose, items]) => {
+                const totalPaid = items.reduce((sum, i) => sum + i.paid, 0);
+                const isExpanded = expandedPurpose === purpose;
+                const allSelected = items.every(i => selectedExpenses.includes(i.id));
+                const someSelected = items.some(i => selectedExpenses.includes(i.id));
+
+                return (
+                  <div key={purpose} className="neo-card !p-0 border border-shadow-dark/40 overflow-hidden shadow-neo-raised bg-surface transition-all">
+                    <div 
+                      className="p-4 cursor-pointer flex items-center justify-between gap-4 hover:bg-primary/5 transition-colors"
+                      onClick={() => setExpandedPurpose(isExpanded ? null : purpose)}
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <input 
+                            type="checkbox" 
+                            className="rounded border-shadow-dark text-primary focus:ring-primary cursor-pointer w-4 h-4 accent-primary"
+                            checked={allSelected}
+                            ref={input => {
+                              if (input) input.indeterminate = someSelected && !allSelected;
+                            }}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedExpenses(prev => [...new Set([...prev, ...items.map(i => i.id)])]);
+                              } else {
+                                setSelectedExpenses(prev => prev.filter(id => !items.find(i => i.id === id)));
+                              }
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-sm text-primary-dark">{purpose}</h4>
+                          <span className="inline-block mt-0.5 px-2 py-0.5 rounded-md bg-primary/10 text-primary-dark text-[10px] font-semibold border border-primary/20">
+                            {items.length} {items.length === 1 ? 'record' : 'records'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className="font-black text-[#004D40] text-base">₹{totalPaid.toLocaleString('en-IN')}</span>
+                        <div className="bg-surface shadow-neo-surface p-1.5 rounded-lg border border-shadow-dark/20 text-primary">
+                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                        </div>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="border-t border-shadow-dark/30 p-3 bg-surface/50">
+                        <div className="divide-y divide-shadow-dark/20">
+                          {items.map((item) => (
+                            <div key={item.id} className="p-2.5 flex items-center justify-between text-xs hover:bg-primary/5 rounded-lg transition-colors">
+                              <div>
+                                <div className="font-bold text-primary-dark">{item.member}</div>
+                                <div className="text-[10px] text-secondary flex items-center gap-2 mt-0.5">
+                                  <span>{item.date}</span>
+                                  <span>•</span>
+                                  <span>{item.paymentMode}</span>
+                                  {item.taxStatus === 'GST' && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="text-primary font-bold">GST ₹{item.gstAmount}</span>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-primary-dark">₹{item.paid?.toLocaleString('en-IN')}</span>
+                                <button 
+                                  onClick={() => setEditingExpense({ ...item })} 
+                                  className="text-secondary hover:text-primary p-1 rounded hover:bg-primary/10 transition-colors"
+                                  title="Edit Expense"
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSavedExpense(item.id)} 
+                                  className="text-secondary hover:text-error p-1 rounded hover:bg-error/10 transition-colors"
+                                  title="Delete Expense"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Grouped View Pagination Controls */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 pt-2 text-xs text-secondary">
+                <div className="flex items-center gap-2">
+                  <span>Categories per page:</span>
+                  <select
+                    value={groupedItemsPerPage}
+                    onChange={(e) => {
+                      setGroupedItemsPerPage(Number(e.target.value));
+                      setGroupedCurrentPage(1);
+                    }}
+                    className="neo-input !py-1 !px-2 !text-xs bg-surface border border-shadow-dark/30 font-bold text-primary-dark"
+                  >
+                    <option value={5}>5</option>
+                    <option value={8}>8</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                  </select>
+                  <span>
+                    Showing {Math.min((groupedCurrentPage - 1) * groupedItemsPerPage + 1, groupedLedger.length)}–
+                    {Math.min(groupedCurrentPage * groupedItemsPerPage, groupedLedger.length)} of {groupedLedger.length} categories
+                  </span>
+                </div>
+
+                {totalGroupedPages > 1 && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={groupedCurrentPage === 1}
+                      onClick={() => setGroupedCurrentPage(prev => Math.max(prev - 1, 1))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Previous page"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span className="font-bold px-2 text-primary-dark">
+                      Page {groupedCurrentPage} of {totalGroupedPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={groupedCurrentPage === totalGroupedPages}
+                      onClick={() => setGroupedCurrentPage(prev => Math.min(prev + 1, totalGroupedPages))}
+                      className="neo-btn !p-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                      title="Next page"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {cropImageUrl && (
+        <ImageCropperModal
+          isOpen={isCropModalOpen}
+          onClose={() => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+          }}
+          imageUrl={cropImageUrl}
+          originalFile={originalCropFile}
+          onCropComplete={(cropped) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            handleCropComplete(cropped);
+          }}
+          onSkipCrop={(raw) => {
+            setIsCropModalOpen(false);
+            setCropImageUrl(null);
+            setOriginalCropFile(null);
+            processFile(raw);
+          }}
+        />
+      )}
+
+      {/* DUPLICATE / REPEATED BILL MODAL */}
+      <DuplicateBillModal
+        isOpen={isDuplicateModalOpen}
+        duplicateMatches={duplicateMatches}
+        cleanItemsCount={pendingCleanItems.length}
+        onAddAnyway={handleAcceptDuplicates}
+        onDiscardDuplicates={handleDiscardDuplicates}
+        onCancelAll={handleCancelDuplicateModal}
+      />
+
+      {/* SEPARATE EDIT EXPENSE MODAL */}
+      {editingExpense && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-lg bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-primary/5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-primary/20 flex items-center justify-center text-primary-dark">
+                  <Edit size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary-dark">Edit Expense</h3>
+                  <p className="text-[11px] text-secondary">Update expense details in cloud ledger</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setEditingExpense(null)} 
+                className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form id="edit-expense-modal-form" onSubmit={handleUpdateSavedExpense} className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Date *</label>
+                  <input 
+                    type="date" 
+                    required 
+                    value={editingExpense.date} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, date: e.target.value })} 
+                    className="neo-input w-full font-semibold" 
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Payment Mode</label>
+                  <select 
+                    value={editingExpense.paymentMode} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, paymentMode: e.target.value as any })} 
+                    className="neo-input w-full font-bold text-primary-dark"
+                  >
+                    <option value="UPI">UPI</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Bank">Bank Transfer</option>
+                    <option value="Card">Card</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid To / Member Name *</label>
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="e.g. Ramesh, Office Stationery" 
+                  value={editingExpense.member} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, member: e.target.value })} 
+                  className="neo-input w-full font-semibold" 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Purpose / Category *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    placeholder="e.g. Refreshments, Rent" 
+                    value={editingExpense.purpose} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, purpose: e.target.value })} 
+                    className="neo-input w-full font-semibold" 
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Bill / Ref No.</label>
+                  <input 
+                    type="text" 
+                    placeholder="e.g. INV-1002" 
+                    value={editingExpense.billNo || ''} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, billNo: e.target.value })} 
+                    className="neo-input w-full font-mono text-xs" 
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Paid Amount (₹) *</label>
+                <input 
+                  type="number" 
+                  step="any"
+                  min="0"
+                  required 
+                  placeholder="0.00" 
+                  value={editingExpense.paid} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, paid: parseFloat(e.target.value) || 0, requested: parseFloat(e.target.value) || 0 })} 
+                  className="neo-input w-full font-black text-lg text-primary-dark" 
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-secondary uppercase tracking-wider">Tax Type</label>
+                  <select 
+                    value={editingExpense.taxStatus} 
+                    onChange={(e) => setEditingExpense({ ...editingExpense, taxStatus: e.target.value as any })} 
+                    className="neo-input w-full font-medium"
+                  >
+                    <option value="GST">GST Included</option>
+                    <option value="Non-GST">Non-GST (Exempt)</option>
+                  </select>
+                </div>
+
+                {editingExpense.taxStatus === 'GST' ? (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                    <select 
+                      value={editingExpense.gstPercent} 
+                      onChange={(e) => setEditingExpense({ ...editingExpense, gstPercent: parseFloat(e.target.value) })} 
+                      className="neo-input w-full font-bold text-primary-dark"
+                    >
+                      <option value={5}>5%</option>
+                      <option value={12}>12%</option>
+                      <option value={18}>18%</option>
+                      <option value={28}>28%</option>
+                    </select>
+                  </div>
+                ) : (
+                  <div className="space-y-1 opacity-50">
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">GST Rate (%)</label>
+                    <input type="text" disabled value="0% (Exempt)" className="neo-input w-full cursor-not-allowed text-xs" />
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic tax summary */}
+              {Number(editingExpense.paid) > 0 && (
+                <div className="p-3 rounded-xl bg-primary/5 border border-primary/10 text-xs space-y-1">
+                  <div className="flex justify-between text-secondary">
+                    <span>Net Base:</span>
+                    <strong className="text-primary-dark">
+                      ₹{editingExpense.taxStatus === 'GST' 
+                        ? ((Number(editingExpense.paid) || 0) - exactRound(((Number(editingExpense.paid) || 0) * (editingExpense.gstPercent || 18)) / (100 + (editingExpense.gstPercent || 18)))).toLocaleString('en-IN')
+                        : Number(editingExpense.paid).toLocaleString('en-IN')
+                      }
+                    </strong>
+                  </div>
+                  {editingExpense.taxStatus === 'GST' && (
+                    <div className="flex justify-between text-secondary">
+                      <span>Calculated GST ({editingExpense.gstPercent || 18}%):</span>
+                      <strong className="text-purple-800">
+                        ₹{exactRound(((Number(editingExpense.paid) || 0) * (editingExpense.gstPercent || 18)) / (100 + (editingExpense.gstPercent || 18))).toLocaleString('en-IN')}
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Notes / Remarks</label>
+                <textarea 
+                  rows={2}
+                  placeholder="Optional notes or reference info..." 
+                  value={editingExpense.notes || ''} 
+                  onChange={(e) => setEditingExpense({ ...editingExpense, notes: e.target.value })} 
+                  className="neo-input w-full text-xs font-medium resize-none" 
+                />
+              </div>
+            </form>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-shadow-dark/20 bg-surface flex items-center justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => setEditingExpense(null)}
+                className="neo-btn text-xs py-2 px-4 font-semibold text-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit"
+                form="edit-expense-modal-form"
+                disabled={isUpdatingExpense}
+                className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-5 font-bold shadow-md disabled:opacity-50"
+              >
+                {isUpdatingExpense ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GEMINI API KEY MODAL */}
+
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="w-full max-w-md bg-surface border border-shadow-dark/40 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-shadow-dark/20 flex items-center justify-between bg-amber-500/10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-700 dark:text-amber-300">
+                  <Key size={16} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-primary-dark">Configure Gemini API Key</h3>
+                  <p className="text-[11px] text-secondary">Required for OCR & receipt extraction</p>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowApiKeyModal(false)} 
+                className="p-1.5 rounded-lg text-secondary hover:text-primary-dark hover:bg-surface transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3 bg-amber-500/10 rounded-xl text-xs text-secondary leading-relaxed border border-amber-500/20">
+                The current Gemini API key is invalid, depleted, or expired.
+                <br />
+                Get a free API key at{' '}
+                <a 
+                  href="https://aistudio.google.com/app/apikey" 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-primary font-bold underline"
+                >
+                  aistudio.google.com
+                </a>{' '}
+                and paste it below. It will be saved securely in your browser.
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-secondary uppercase tracking-wider">Gemini API Key</label>
+                <input 
+                  type="password"
+                  placeholder="AIzaSy..." 
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  className="neo-input w-full font-mono text-xs" 
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-shadow-dark/20 bg-surface flex items-center justify-end gap-3">
+              <button 
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="neo-btn text-xs py-2 px-4 font-semibold text-secondary"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  if (!apiKeyInput.trim()) {
+                    alert("Please enter a valid Gemini API key.");
+                    return;
+                  }
+                  setApiKey(apiKeyInput.trim());
+                  setShowApiKeyModal(false);
+                  alert("Gemini API key saved successfully! Please try uploading the receipt image again.");
+                }}
+                className="neo-btn-primary flex items-center gap-2 text-xs py-2 px-5 font-bold shadow-md"
+              >
+                <Save size={15} /> Save & Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

@@ -1,12 +1,25 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-function getApiKey(): string {
+const DEFAULT_GEMINI_KEY = 'AIzaSyADF4qRiXl1HavHy8GAXVx6XaweqQkq6Yk';
+
+export function getApiKey(): string {
   if (typeof window !== 'undefined') {
     const customKey = localStorage.getItem('VITE_GEMINI_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
     if (customKey) return customKey;
   }
-  return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  const envKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY as string);
+  return envKey || DEFAULT_GEMINI_KEY;
 }
+
+
+export function setApiKey(key: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('VITE_GEMINI_API_KEY', key.trim());
+    localStorage.setItem('GEMINI_API_KEY', key.trim());
+  }
+}
+
+const CANDIDATE_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
 export async function extractDataFromDocument(
   base64Data: string,
@@ -15,39 +28,60 @@ export async function extractDataFromDocument(
 ): Promise<any> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured. Please configure your Gemini API Key or environment.');
+    throw new Error('Gemini API key is not configured. Please configure your API key in AI Key Settings or add VITE_GEMINI_API_KEY in .env.');
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-
-  // Use the flash model which is cost-effective and fast
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-flash-latest',
-    generationConfig: {
-      responseMimeType: 'application/json',
-    },
-  });
 
   const prompt = getPromptForType(type);
+  const genAI = new GoogleGenerativeAI(apiKey);
 
-  const imageParts = [
-    {
-      inlineData: {
-        data: base64Data,
-        mimeType: mimeType,
-      },
-    },
-  ];
+  const imagePart = {
+    inlineData: {
+      data: base64Data,
+      mimeType: mimeType
+    }
+  };
 
-  try {
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const response = await result.response;
-    const text = response.text();
-    return JSON.parse(text);
-  } catch (error) {
-    console.error('Gemini AI Extraction Error:', error);
-    throw new Error('Failed to extract data from document. Please verify the document format and quality.');
+  let lastError: any = null;
+
+  for (const modelName of CANDIDATE_MODELS) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.1
+        }
+      });
+
+      const result = await model.generateContent([prompt, imagePart]);
+      const text = result.response.text();
+      const cleaned = text
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+      return JSON.parse(cleaned);
+    } catch (error: any) {
+      lastError = error;
+      const msg = error?.message || '';
+      // If model not found or deprecated (404), try next candidate
+      if (msg.includes('404') || msg.includes('not found') || msg.includes('no longer available')) {
+        console.warn(`[AI] Model ${modelName} not available, trying next fallback...`);
+        continue;
+      }
+      // If payment (402) or auth (401), stop model looping
+      break;
+    }
   }
+
+  console.error('Gemini AI Extraction Error details:', lastError);
+  const errMsg = lastError?.message || 'Failed to extract data';
+  if (errMsg.includes('402') || errMsg.includes('prepayment') || errMsg.includes('credits are depleted')) {
+    throw new Error('AI Error (402): Prepayment credits are depleted for this Gemini API key in Google AI Studio. Please check your billing at ai.studio/projects or enter a new API key.');
+  }
+  if (errMsg.includes('401') || errMsg.includes('API key not valid') || errMsg.includes('API_KEY_INVALID')) {
+    throw new Error('AI Error: Gemini API key is invalid or expired. Please click "AI Key Settings" to update your key from Google AI Studio (aistudio.google.com).');
+  }
+  throw new Error('AI Error: ' + errMsg);
 }
 
 function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
@@ -87,34 +121,48 @@ function getPromptForType(type: 'purchase' | 'expense' | 'statement'): string {
   } else if (type === 'expense') {
     return `
       You are an expert OCR and data extraction system.
-      Extract the key details from this expense receipt.
+      Extract the key details from this expense receipt or handwritten list.
+      If there are multiple individual expenses listed (like a handwritten daily ledger), extract each one separately as its own item.
       Return the output as a JSON object matching this schema exactly:
       {
-        "date": "YYYY-MM-DD",
-        "description": "Short description of what was purchased (e.g. Office Supplies from Staples)",
-        "amount": 0.00,
-        "category": "General",
-        "notes": "Any extra details or vendor name"
+        "expenses": [
+          {
+            "date": "YYYY-MM-DD",
+            "billNo": "Bill number, Invoice number, or Receipt number if present, otherwise empty string",
+            "vendor": "Vendor, Store, Shop, or Member name if present, otherwise empty string",
+            "description": "Short description of what was purchased or service rendered",
+            "amount": 0.00,
+            "category": "General",
+            "taxStatus": "GST or Non-GST",
+            "gstPercent": 18,
+            "paymentMode": "Cash, UPI, Bank, or Card",
+            "notes": "Any extra details"
+          }
+        ]
       }
-      Important: Ensure amount is a number.
+      Important: Ensure amount is a number. If a date is written once at the top of a page, apply it to all items below it. Assume the current year is ${new Date().getFullYear()} if no year is specified.
     `;
   } else if (type === 'statement') {
     return `
       You are an expert financial data extraction system.
-      Extract the bank transactions from this bank statement document.
-      Return the output as a JSON object matching this schema exactly:
+      Extract all individual bank transactions from this bank statement document.
+      Return the output as a valid JSON object matching this schema exactly:
       {
         "transactions": [
           {
             "date": "YYYY-MM-DD",
-            "description": "Transaction Description/Narration",
+            "description": "Transaction Description or Narration",
             "amount": 100.00,
-            "type": "credit" or "debit",
-            "reference": "Reference number or cheque number if any"
+            "type": "credit",
+            "reference": "Reference number, UTR, or cheque number if any"
           }
         ]
       }
-      Important: Ensure amount is a positive number. Determine type based on withdrawal/deposit columns.
+      Important Rules:
+      1. Ensure amount is always a positive number (e.g. 1500.50, never negative).
+      2. The "type" field must be exactly "credit" for deposits/inward money, or "debit" for withdrawals/outward expenses.
+      3. Format all dates as YYYY-MM-DD.
+      4. Ensure valid strict JSON output matching the schema.
     `;
   }
   return '';

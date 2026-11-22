@@ -11,8 +11,8 @@ interface PropertiesPanelProps {
 export function PropertiesPanel({ selectedNode, onUpdateNodeData, allPipelines }: PropertiesPanelProps) {
   if (!selectedNode) {
     return (
-      <div className="w-80 bg-white border-l border-shadow-darker/10 flex flex-col h-full shrink-0 z-10 p-6 items-center justify-center text-center">
-        <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mb-3">
+      <div className="w-80 bg-transparent border-l border-shadow-darker/10 flex flex-col h-full shrink-0 z-10 p-6 items-center justify-center text-center">
+        <div className="w-12 h-12 rounded-2xl bg-transparent flex items-center justify-center mb-3">
           <Settings2 size={20} className="text-slate-400" />
         </div>
         <p className="text-sm font-semibold text-primary-dark">No Node Selected</p>
@@ -226,7 +226,7 @@ export function PropertiesPanel({ selectedNode, onUpdateNodeData, allPipelines }
   };
 
   return (
-    <div className="w-80 bg-white border-l border-shadow-darker/10 flex flex-col h-full shrink-0 z-10">
+    <div className="w-80 bg-transparent border-l border-shadow-darker/10 flex flex-col h-full shrink-0 z-10">
       <div className="p-4 border-b border-shadow-darker/10 flex items-center justify-between">
         <h2 className="text-sm font-bold text-primary-dark uppercase tracking-wider flex items-center gap-2">
           Properties
@@ -249,3 +249,4 @@ export function PropertiesPanel({ selectedNode, onUpdateNodeData, allPipelines }
     </div>
   );
 }
+

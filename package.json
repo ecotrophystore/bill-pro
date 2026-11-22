@@ -1,10 +1,19 @@
 {
   "name": "bill-pro",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "EcoBill Desktop CRM & WhatsApp Automation",
+  "author": "Ecotrophy Store <ecotrophystore@gmail.com>",
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
+    "desktop": "node electron/dev-launcher.mjs",
+    "desktop:prod": "npm run build && node electron/dev-launcher.mjs --prod",
+    "build:server": "node electron/build-server.mjs",
+    "dist:win": "npm run build:server && electron-builder --win",
+    "dist:mac": "npm run build:server && electron-builder --mac",
+    "whatsapp:service": "tsx server/whatsappService.ts",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -12,19 +21,39 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@google/genai": "^2.27.0",
     "@google/generative-ai": "^0.24.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.6",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "@xyflow/react": "^12.11.2",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.5",
+    "express": "^5.3.0",
+    "file-saver": "^2.0.5",
     "firebase": "^12.11.0",
     "html2pdf.js": "^0.14.0",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "jszip": "^3.10.2",
+    "nodemailer": "^10.4.0",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^6.5.438",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "react-easy-crop": "^6.2.4",
+    "react-hot-toast": "^2.6.1",
+    "recharts": "^3.10.1",
+    "tsx": "^4.23.15",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@types/file-saver": "^2.0.7",
     "@types/node": "^24.12.0",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19.2.14",
@@ -32,6 +61,8 @@
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
     "clsx": "^2.1.1",
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -45,5 +76,84 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.57.0",
     "vite": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.ecotrophy.ecobill",
+    "productName": "EcoBill Desktop",
+    "npmRebuild": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/main.cjs",
+      "electron/preload.cjs",
+      "electron/whatsappPreload.cjs",
+      "electron/dist-server/whatsappService.cjs",
+      "!node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "electron/dist-server/**"
+    ],
+    "protocols": [
+      {
+        "name": "EcoBill Protocol",
+        "schemes": [
+          "ecobill"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.business",
+      "artifactName": "EcoBill-${version}-mac-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "EcoBill Desktop Installer",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "EcoBill-Setup.exe",
+      "shortcutName": "EcoBill Desktop"
+    }
   }
 }

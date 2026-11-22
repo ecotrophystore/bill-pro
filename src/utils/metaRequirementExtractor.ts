@@ -29,11 +29,10 @@ export function extractMetaRequirements(text: string): ExtractedRequirement {
   const result: ExtractedRequirement = { confidence: 0 };
   let points = 0;
 
-  // 1. Quantity Extraction (e.g. "150 trophies", "50 pcs", "need 120", "qty: 30", "250 awards", "10 pieces")
+  // 1. Quantity Extraction (e.g. "150 crystal trophies", "50pcs", "need 120", "qty: 30")
   const qtyPatterns = [
-    /(?:need|want|require|order|for|qty|quantity|count|around|approx)?\s*[:=-]?\s*(\d{1,5})\s*(?:trophies|trophy|pieces|piece|pcs|pc|awards|award|medals|medal|mementos|memento|shields|shield|cups|cup)/i,
-    /(\d{1,5})\s*(?:nos|qty|units|sets)/i,
-    /(?:qty|quantity)\s*[:=-]\s*(\d{1,5})/i,
+    /\b(\d{1,5})(?:(?:\s+(?!inch|inches|cm|mm|ft|rs|inr|rupees|budget|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]+){0,2})\s*(?:trophies|trophy|pieces|piece|pcs|pc|awards|award|medals|medal|mementos|memento|shields|shield|plaques|plaque|cups|cup|nos|units|sets)\b/i,
+    /(?:qty|quantity)\s*[:=-]?\s*(\d{1,5})\b/i,
     /(?:total of|bulk of)\s*(\d{1,5})/i,
   ];
 

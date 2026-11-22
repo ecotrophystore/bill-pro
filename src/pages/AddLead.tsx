@@ -1,14 +1,19 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { collection, onSnapshot, query, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ArrowRight, Loader2, Save, Sparkles, UserPlus, Building, Phone, Mail, MapPin, Calendar, Clock, DollarSign } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
-import { type LeadPlatform, type Pipeline, DEFAULT_QUANTITY_PIPELINES, STANDARD_CRM_STAGES } from '../types';
+import { type LeadPlatform, type Pipeline, type User, DEFAULT_QUANTITY_PIPELINES, STANDARD_CRM_STAGES } from '../types';
 import { useCRMPermission } from '../hooks/useCRMPermission';
 import { classifyLeadPipeline } from '../utils/pipelineClassifier';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchTeamUsersForAssignment, resolveLeadAssignment } from '../services/leadAssignmentService';
+import { isAdminUser } from '../utils/leadVisibility';
 
 export default function AddLead() {
+  const locationState = useLocation();
   const [name, setName] = useState('');
-  const [company, setCompany] = useState('');
+  const [company, setCompany] = useState((locationState.state as any)?.predefinedCompany || '');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [location, setLocation] = useState('');
@@ -19,7 +24,12 @@ export default function AddLead() {
   const [deliveryDate, setDeliveryDate] = useState('');
   const [trophySize, setTrophySize] = useState('');
   const [salesPerson, setSalesPerson] = useState('');
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string>('auto');
+  const [teamUsers, setTeamUsers] = useState<User[]>([]);
   const [designPerson, setDesignPerson] = useState('');
+  const [productionPerson, setProductionPerson] = useState('');
+  const [artworkUrl, setArtworkUrl] = useState('');
+  const [designNotes, setDesignNotes] = useState('');
   const [campaign, setCampaign] = useState('');
   const [source, setSource] = useState('Manual');
   const [platform, setPlatform] = useState<LeadPlatform>('manual');
@@ -30,6 +40,14 @@ export default function AddLead() {
   const [feedback, setFeedback] = useState('');
   const [manualPipelineOverridden, setManualPipelineOverridden] = useState(false);
   const { hasPermission } = useCRMPermission();
+  const { dbUser } = useAuth();
+  const isAdmin = isAdminUser(dbUser);
+
+  useEffect(() => {
+    fetchTeamUsersForAssignment()
+      .then(setTeamUsers)
+      .catch(() => { });
+  }, []);
 
   useEffect(() => {
     if (!db) return;
@@ -39,10 +57,20 @@ export default function AddLead() {
       (snapshot) => {
         if (!snapshot.empty) {
           const loaded = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as Pipeline));
-          const existingIds = new Set(loaded.map((p) => p.id));
           const merged = [...loaded];
           DEFAULT_QUANTITY_PIPELINES.forEach((def) => {
-            if (!existingIds.has(def.id)) merged.push(def);
+            const hasMatch = loaded.some(p => {
+              if (p.id === def.id) return true;
+              const pName = p.name.toLowerCase();
+              if (def.id === 'unclassified' && (pName.includes('unclassified') || pName.includes('pending'))) return true;
+              if (def.id === 'small_order' && pName.includes('small')) return true;
+              if (def.id === 'regular_order' && pName.includes('regular')) return true;
+              if (def.id === 'bulk_order' && pName.includes('bulk')) return true;
+              return pName === def.name.toLowerCase().trim();
+            });
+            if (!hasMatch) {
+              merged.push(def);
+            }
           });
           setPipelines(merged);
         } else {
@@ -96,6 +124,41 @@ export default function AddLead() {
 
       const initialStage = STANDARD_CRM_STAGES[0]?.id || 'new_enquiry';
 
+      let resolvedOwnerId = '';
+      let resolvedOwnerName = salesPerson.trim();
+      let assignmentRuleUsed = '';
+
+      if (isAdmin && selectedOwnerId && selectedOwnerId !== 'auto') {
+        const pickedUser = teamUsers.find((u) => u.id === selectedOwnerId);
+        resolvedOwnerId = pickedUser?.id || '';
+        resolvedOwnerName = pickedUser?.name || pickedUser?.email || resolvedOwnerName;
+        assignmentRuleUsed = 'manual_admin';
+      } else {
+        const autoRes = await resolveLeadAssignment({
+          source: source.trim() || 'Manual',
+          platform,
+          pipelineId,
+          requiredQuantity: requiredQuantity ? Number(requiredQuantity) || requiredQuantity : '',
+          value: orderValue ? Number(orderValue) || 0 : 0,
+          location: location.trim(),
+          name: name.trim(),
+          company: company.trim(),
+          requirement: message.trim(),
+          campaign: campaign.trim(),
+          eventName: eventName.trim(),
+        }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
+
+        if (autoRes.assigned) {
+          resolvedOwnerId = autoRes.ownerId;
+          resolvedOwnerName = autoRes.ownerName;
+          assignmentRuleUsed = autoRes.ruleName || autoRes.mode;
+        } else if (!isAdmin && dbUser?.id) {
+          resolvedOwnerId = dbUser.id;
+          resolvedOwnerName = dbUser.name || dbUser.email || currentUserName;
+          assignmentRuleUsed = 'self_created';
+        }
+      }
+
       const newLeadData = {
         name: name.trim() || 'New Customer',
         company: company.trim(),
@@ -108,8 +171,14 @@ export default function AddLead() {
         event_date: eventDate.trim(),
         delivery_date: deliveryDate.trim(),
         trophy_size: trophySize.trim(),
-        sales_person: salesPerson.trim(),
+        owner_id: resolvedOwnerId,
+        ownerId: resolvedOwnerId,
+        sales_person: resolvedOwnerName,
+        ...(resolvedOwnerId ? { assigned_at: serverTimestamp(), assignment_rule_name: assignmentRuleUsed } : {}),
         design_person: designPerson.trim(),
+        production_person: productionPerson.trim(),
+        artwork_url: artworkUrl.trim(),
+        design_notes: designNotes.trim(),
         source: source.trim() || 'Manual',
         platform: platform || 'manual',
         campaign: campaign.trim(),
@@ -136,6 +205,16 @@ export default function AddLead() {
 
       const docRef = await addDoc(collection(db, 'leads'), newLeadData);
 
+      // Automatically add to Customer Library
+      await addDoc(collection(db, 'customers'), {
+        name: name.trim() || 'New Customer',
+        phone: phone.trim(),
+        email: email.trim(),
+        billing_address: location.trim(),
+        type: 'individual',
+        created_at: serverTimestamp()
+      });
+
       // Record activity
       await addDoc(collection(db, 'activities'), {
         lead_id: docRef.id,
@@ -159,7 +238,11 @@ export default function AddLead() {
       setDeliveryDate('');
       setTrophySize('');
       setSalesPerson('');
+      setSelectedOwnerId('auto');
       setDesignPerson('');
+      setProductionPerson('');
+      setArtworkUrl('');
+      setDesignNotes('');
       setCampaign('');
       setMessage('');
       setManualPipelineOverridden(false);
@@ -328,23 +411,91 @@ export default function AddLead() {
             />
           </div>
 
+          {isAdmin && (
+            <div className="space-y-1.5">
+              <label className="block font-bold text-primary-dark">Assign Lead To (Admin Control)</label>
+              <select
+                className="neo-input w-full font-semibold"
+                value={selectedOwnerId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setSelectedOwnerId(val);
+                  const picked = teamUsers.find((u) => u.id === val);
+                  setSalesPerson(picked ? picked.name || picked.email : '');
+                }}
+              >
+                <option value="auto">Auto-Assign (Use Team Split &amp; Routing Rules)</option>
+                {teamUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name || u.email} ({u.role.toUpperCase()})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label className="block font-bold text-primary-dark">Assigned Sales Person</label>
-            <input
-              className="neo-input w-full"
-              value={salesPerson}
-              onChange={(e) => setSalesPerson(e.target.value)}
-              placeholder="e.g. Monisha"
-            />
+            <label className="block font-bold text-primary-dark">Assigned Designer</label>
+            <select
+              className="neo-input w-full font-semibold"
+              value={designPerson}
+              onChange={(e) => setDesignPerson(e.target.value)}
+            >
+              <option value="">-- Unassigned (Select Designer) --</option>
+              {teamUsers
+                .filter((u) => u.role === 'design' && u.is_active !== false)
+                .map((u) => (
+                  <option key={u.id} value={u.name || u.email}>
+                    🎨 {u.name || u.email}
+                  </option>
+                ))}
+              {designPerson &&
+                !teamUsers.some(
+                  (u) => u.role === 'design' && (u.name === designPerson || u.email === designPerson)
+                ) && <option value={designPerson}>{designPerson} (Manual)</option>}
+            </select>
           </div>
 
           <div className="space-y-1.5">
-            <label className="block font-bold text-primary-dark">Assigned Design Person</label>
+            <label className="block font-bold text-primary-dark">Assigned Production Staff</label>
+            <select
+              className="neo-input w-full font-semibold"
+              value={productionPerson}
+              onChange={(e) => setProductionPerson(e.target.value)}
+            >
+              <option value="">-- Unassigned (Select Production) --</option>
+              {teamUsers
+                .filter((u) => u.role === 'production' && u.is_active !== false)
+                .map((u) => (
+                  <option key={u.id} value={u.name || u.email}>
+                    ⚙️ {u.name || u.email}
+                  </option>
+                ))}
+              {productionPerson &&
+                !teamUsers.some(
+                  (u) => u.role === 'production' && (u.name === productionPerson || u.email === productionPerson)
+                ) && <option value={productionPerson}>{productionPerson} (Manual)</option>}
+            </select>
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="block font-bold text-primary-dark">Customer Logo / Artwork Link (Optional)</label>
             <input
-              className="neo-input w-full"
-              value={designPerson}
-              onChange={(e) => setDesignPerson(e.target.value)}
-              placeholder="e.g. Karthik"
+              type="url"
+              className="neo-input w-full font-mono text-xs"
+              value={artworkUrl}
+              onChange={(e) => setArtworkUrl(e.target.value)}
+              placeholder="e.g. Google Drive folder or vector file link"
+            />
+          </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="block font-bold text-primary-dark">Engraving Text / Design Notes (Optional)</label>
+            <textarea
+              className="neo-input w-full min-h-[60px] resize-y text-xs"
+              value={designNotes}
+              onChange={(e) => setDesignNotes(e.target.value)}
+              placeholder="Customer award wording, recipient names, or special fabrication instructions..."
             />
           </div>
 

@@ -6,9 +6,9 @@ export async function downloadPDF(
   docData: Invoice | Quotation | CashMemo | ProformaInvoice,
   customer: string | Customer,
   docType: DocumentKind,
-  action: 'download' | 'view' = 'download',
+  action: 'download' | 'view' | 'share' | 'blob' = 'download',
   settings?: Settings
-) {
+): Promise<Blob | void> {
   const baseCtx = {
     docData: docData as DocumentData,
     customer: customer as DocumentCustomer,

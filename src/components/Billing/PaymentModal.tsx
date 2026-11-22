@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react';
-import { db } from '../../lib/firebase';
+import { db, auth } from '../../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
 import type { PaymentRecord, Invoice, CashMemo, ProformaInvoice } from '../../types';
 
@@ -40,17 +40,22 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
     }
   };
 
+  // Effective balance: use balance_amount if set, otherwise fall back to grand_total
+  const effectiveBalance = document.balance_amount !== undefined
+    ? document.balance_amount
+    : ((document as any).grand_total || 0);
+
   useEffect(() => {
     if (isOpen) {
       fetchPayments();
-      setAmount(document.balance_amount || 0);
+      setAmount(effectiveBalance);
     }
-  }, [isOpen, document.id, document.balance_amount]);
+  }, [isOpen, document.id, effectiveBalance]);
 
   if (!isOpen) return null;
 
   const handleAddPayment = async () => {
-    if (amount <= 0 || amount > (document.balance_amount || 0)) {
+    if (amount <= 0 || amount > effectiveBalance) {
       alert("Invalid payment amount.");
       return;
     }
@@ -70,12 +75,12 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
         reference_number: reference,
         status: 'completed',
         created_at: serverTimestamp() as any,
-        created_by: 'admin' // In a real app, use auth.currentUser.uid
+        created_by: auth?.currentUser?.uid || 'unknown'
       };
       
       batch.set(paymentRef, paymentData);
 
-      const newBalance = (document.balance_amount || 0) - amount;
+      const newBalance = effectiveBalance - amount;
       const newStatus = newBalance <= 0 ? 'paid' : 'partial';
 
       const collectionName = documentType === 'invoice' ? 'invoices' : (documentType === 'proforma_invoice' ? 'proforma_invoices' : 'cash_memos');
@@ -154,12 +159,12 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-      <div className="bg-surface w-full max-w-2xl rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center sm:p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
+      <div className="bg-surface w-full max-w-2xl sm:rounded-2xl shadow-neo-raised border border-shadow-darker/10 overflow-hidden flex flex-col h-[100dvh] sm:h-auto sm:max-h-[90vh]">
         <div className="p-6 border-b border-shadow-darker/10 flex justify-between items-center bg-primary-light/10">
           <div>
             <h2 className="text-xl font-bold text-primary-dark">Manage Payments</h2>
-            <p className="text-sm text-secondary">Document: {document.number} | Balance: ₹{(document.balance_amount || 0).toLocaleString()}</p>
+            <p className="text-sm text-secondary">Document: {document.number} | Balance: ₹{effectiveBalance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
           </div>
           <button onClick={onClose} className="p-2 text-secondary hover:text-error transition-colors rounded-full hover:bg-error/10">
             <X size={24} />
@@ -167,13 +172,13 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
-          {document.balance_amount !== undefined && document.balance_amount > 0 && (
+          {effectiveBalance > 0 && (
             <div className="bg-shadow-darker/5 p-5 rounded-xl border border-shadow-darker/10 space-y-4">
               <h3 className="font-semibold text-primary-dark">Record New Payment</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Amount</label>
-                  <input type="number" className="neo-input w-full" value={amount || ''} onChange={e => setAmount(parseFloat(e.target.value) || 0)} max={document.balance_amount} />
+                  <input type="number" inputMode="decimal" className="neo-input w-full text-base" value={amount || ''} onChange={e => setAmount(parseFloat(e.target.value) || 0)} max={effectiveBalance} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Method</label>
@@ -191,21 +196,23 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Date</label>
-                  <input type="date" className="neo-input w-full" value={date} onChange={e => setDate(e.target.value)} />
+                  <input type="date" className="neo-input w-full text-base" value={date} onChange={e => setDate(e.target.value)} />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-secondary">Reference</label>
-                  <input type="text" className="neo-input w-full" placeholder="Optional" value={reference} onChange={e => setReference(e.target.value)} />
+                  <input type="text" className="neo-input w-full text-base" placeholder="Optional" value={reference} onChange={e => setReference(e.target.value)} />
                 </div>
               </div>
-              <button 
-                onClick={handleAddPayment}
-                disabled={isSubmitting || amount <= 0}
-                className="neo-btn-primary w-full flex items-center justify-center gap-2"
-              >
-                {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
-                Add Payment
-              </button>
+              <div className="pt-2">
+                <button 
+                  onClick={handleAddPayment}
+                  disabled={isSubmitting || amount <= 0}
+                  className="neo-btn-primary w-full flex items-center justify-center gap-2 sticky bottom-4 z-10 shadow-xl min-h-[48px]"
+                >
+                  {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                  Add Payment
+                </button>
+              </div>
             </div>
           )}
 
@@ -218,7 +225,7 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
             ) : (
               <div className="space-y-3">
                 {payments.map(payment => (
-                  <div key={payment.id} className={`p-4 rounded-xl border flex justify-between items-center ${payment.status === 'voided' ? 'bg-error/5 border-error/20 opacity-75' : 'bg-surface border-shadow-darker/10'}`}>
+                  <div key={payment.id} className={`p-4 rounded-xl border flex justify-between items-center ${payment.status === 'voided' ? 'bg-error/5 border-error/20 opacity-75' : 'bg-transparent border-shadow-darker/10'}`}>
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-primary-dark">₹{payment.amount.toLocaleString()}</span>
@@ -249,7 +256,11 @@ export default function PaymentModal({ isOpen, onClose, document, documentType, 
             )}
           </div>
         </div>
+        <div className="p-4 border-t border-shadow-darker/10 flex justify-end bg-primary-light/5">
+          <button onClick={onClose} className="neo-btn">Close</button>
+        </div>
       </div>
     </div>
   );
 }
+

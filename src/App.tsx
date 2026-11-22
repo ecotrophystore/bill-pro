@@ -3,10 +3,15 @@ import { lazy, Suspense } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import { ReminderAlarmProvider } from './contexts/ReminderAlarmContext';
+import { AiProvider } from './contexts/AiContext';
 import { AppLayout } from './components/Layout/AppLayout';
-import Login from './pages/Login';
-
+import { VoiceAssistantButton } from './components/AI/VoiceAssistantButton';
+import { VoiceAssistantPanel } from './components/AI/VoiceAssistantPanel';
+import { getDefaultRouteForRole } from './config/roleAccess';
+const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+
+// Lazy loaded routes
 const AddLead = lazy(() => import('./pages/AddLead'));
 const Leads = lazy(() => import('./pages/Leads'));
 const LeadDetail = lazy(() => import('./pages/LeadDetail'));
@@ -23,29 +28,60 @@ const CustomerLibrary = lazy(() => import('./pages/CustomerLibrary'));
 const Purchases = lazy(() => import('./pages/Purchases'));
 const CreatePurchase = lazy(() => import('./pages/CreatePurchase'));
 const Settings = lazy(() => import('./pages/Settings'));
+const StageAutomation = lazy(() => import('./pages/StageAutomation'));
 const Reconciliation = lazy(() => import('./pages/Reconciliation'));
 const AuditorPage = lazy(() => import('./pages/AuditorPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const ProformaInvoices = lazy(() => import('./pages/ProformaInvoices'));
 const CreateProformaInvoice = lazy(() => import('./pages/CreateProformaInvoice'));
 const ExpensePage = lazy(() => import('./pages/Expense'));
-const MessageTemplates = lazy(() => import('./pages/MessageTemplates'));
-const MessageQueue = lazy(() => import('./pages/MessageQueue'));
 const CRMDashboard = lazy(() => import('./pages/CRMDashboard'));
 const AuditLogs = lazy(() => import('./pages/AuditLogs'));
 const WhatsAppAutomation = lazy(() => import('./pages/WhatsAppAutomation'));
+const PurchaseAnalytics = lazy(() => import('./pages/PurchaseAnalytics'));
+const CompanyIntelligence = lazy(() => import('./pages/CompanyIntelligence'));
+const TrophyCreator = lazy(() => import('./pages/TrophyCreator'));
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, dbUser, loading, logout } = useAuth();
   const location = useLocation();
 
-  if (loading) return <div className="min-h-screen bg-surface flex items-center justify-center font-semibold text-primary">Loading...</div>;
+  if (loading) return <div className="min-h-screen bg-transparent flex items-center justify-center font-semibold text-primary">Loading...</div>;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
+
+  if (dbUser && dbUser.is_active === false) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center p-4">
+        <div className="neo-card max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-bold text-primary-dark">Account Access Suspended</h2>
+          <p className="text-xs text-secondary leading-relaxed">
+            Your account ({dbUser.email}) is currently inactive. Please contact your Administrator or HR team to reactivate access.
+          </p>
+          <button onClick={logout} className="neo-btn-primary text-xs w-full">
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return <>{children}</>;
 }
 
+function RoleHomeRedirect() {
+  const { dbUser } = useAuth();
+  return <Navigate to={getDefaultRouteForRole(dbUser?.role)} replace />;
+}
+
 function RouteFallback() {
-  return <div className="min-h-[50vh] flex items-center justify-center text-secondary font-semibold">Loading page...</div>;
+  return (
+    <div className="h-full min-h-[calc(100vh-64px)] w-full flex items-center justify-center text-secondary font-semibold">
+      <div className="flex flex-col items-center gap-3 animate-fade-in">
+        <div className="w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
+        <span>Loading...</span>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -54,7 +90,8 @@ export default function App() {
       <SettingsProvider>
         <ReminderAlarmProvider>
           <BrowserRouter>
-            <Suspense fallback={<RouteFallback />}>
+            <AiProvider>
+              <Suspense fallback={<RouteFallback />}>
               <Routes>
               <Route path="/login" element={<Login />} />
 
@@ -66,17 +103,19 @@ export default function App() {
                   </RequireAuth>
                 }
               >
-                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route index element={<RoleHomeRedirect />} />
                 <Route path="dashboard" element={<Dashboard />} />
+                <Route path="hr" element={<Navigate to="/settings?tab=hr_team" replace />} />
                 <Route path="leads" element={<Leads />} />
                 <Route path="leads/new" element={<AddLead />} />
                 <Route path="leads/:id" element={<LeadDetail />} />
                 <Route path="pipeline" element={<PipelineBoard />} />
                 <Route path="lead-intake" element={<LeadIntake />} />
-                <Route path="message-templates" element={<MessageTemplates />} />
-                <Route path="message-queue" element={<MessageQueue />} />
                 <Route path="whatsapp-automation" element={<WhatsAppAutomation />} />
                 <Route path="crm-dashboard" element={<CRMDashboard />} />
+                <Route path="company-intelligence" element={<CompanyIntelligence />} />
+                <Route path="trophy-creator" element={<TrophyCreator />} />
+                <Route path="stage-automation" element={<StageAutomation />} />
                 <Route path="audit-logs" element={<AuditLogs />} />
 
                 <Route path="quotations" element={<Quotations />} />
@@ -100,6 +139,7 @@ export default function App() {
 
                 <Route path="purchases" element={<Purchases />} />
                 <Route path="purchases/new" element={<CreatePurchase />} />
+                <Route path="purchase-analytics" element={<PurchaseAnalytics />} />
                 <Route path="reconciliation" element={<Reconciliation />} />
                 <Route path="reports" element={<ReportsPage />} />
                 <Route path="auditor" element={<AuditorPage />} />
@@ -107,12 +147,16 @@ export default function App() {
                 <Route path="settings" element={<Settings />} />
               </Route>
 
-              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+              <Route path="*" element={<RoleHomeRedirect />} />
             </Routes>
           </Suspense>
+          <VoiceAssistantButton />
+          <VoiceAssistantPanel />
+          </AiProvider>
         </BrowserRouter>
         </ReminderAlarmProvider>
       </SettingsProvider>
     </AuthProvider>
   );
 }
+

@@ -218,7 +218,7 @@ export function FacebookIntegrationCard({ isAdmin, facebookTokenConfigured, init
         )}
 
         {showPageDropdown && pages.length > 0 && (
-          <div className="border border-shadow-darker/20 rounded-lg overflow-hidden shadow-md bg-surface z-10">
+          <div className="border border-shadow-darker/20 rounded-lg overflow-hidden shadow-md bg-transparent z-10">
             {pages.map(p => (
               <button key={p.id} onClick={() => handleSelectPage(p)}
                 className="w-full text-left px-4 py-2.5 hover:bg-primary/5 transition-colors text-sm border-b border-shadow-darker/5 last:border-0">
@@ -251,7 +251,7 @@ export function FacebookIntegrationCard({ isAdmin, facebookTokenConfigured, init
             ) : <span className="text-secondary">No form selected</span>}
           </div>
           {showFormDropdown && forms.length > 0 && (
-            <div className="border border-shadow-darker/20 rounded-lg overflow-hidden shadow-md bg-surface z-10">
+            <div className="border border-shadow-darker/20 rounded-lg overflow-hidden shadow-md bg-transparent z-10">
               {forms.map(f => (
                 <button key={f.id} onClick={() => handleSelectForm(f)}
                   className="w-full text-left px-4 py-2.5 hover:bg-primary/5 transition-colors text-sm border-b border-shadow-darker/5 last:border-0">
@@ -329,3 +329,4 @@ export function FacebookIntegrationCard({ isAdmin, facebookTokenConfigured, init
     </div>
   );
 }
+

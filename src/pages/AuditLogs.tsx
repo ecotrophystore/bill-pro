@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { collection, query, orderBy, limit, onSnapshot, startAfter, getDocs } from "firebase/firestore";
 import { ShieldAlert, Loader2, XCircle, ChevronDown, Filter } from "lucide-react";
 import { db } from "../lib/firebase";
@@ -152,9 +152,9 @@ export default function AuditLogs() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm hidden md:table">
                 <thead>
-                  <tr className="text-left text-secondary text-xs uppercase tracking-widest border-b border-shadow-darker/10 bg-surface/80">
+                  <tr className="text-left text-secondary text-xs uppercase tracking-widest border-b border-shadow-darker/10 bg-transparent">
                     <th className="px-5 py-3 font-semibold">Timestamp</th>
                     <th className="px-5 py-3 font-semibold">Action</th>
                     <th className="px-5 py-3 font-semibold">Type</th>
@@ -176,12 +176,50 @@ export default function AuditLogs() {
                         {DOC_TYPE_LABEL[log.document_type] || log.document_type}
                       </td>
                       <td className="px-5 py-3.5 text-secondary font-mono text-xs truncate max-w-[140px]">{log.document_id}</td>
-                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[120px]">{log.user_id || "—"}</td>
-                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[200px]">{log.notes || "—"}</td>
+                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[120px]">{log.user_id || "-"}</td>
+                      <td className="px-5 py-3.5 text-secondary text-xs truncate max-w-[200px]">{log.notes || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden divide-y divide-shadow-darker/10">
+                {filtered.map((log) => (
+                  <div key={log.id} className="p-4 space-y-3">
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <div className="font-medium text-primary-dark capitalize text-sm">
+                          {DOC_TYPE_LABEL[log.document_type] || log.document_type}
+                        </div>
+                        <div className="text-[10px] text-secondary mt-0.5">{formatDate(log.timestamp)}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${ACTION_BADGE[log.action] || "bg-secondary/10 text-secondary border-secondary/20"}`}>
+                          {log.action.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-shadow-darker/5 p-2 rounded-lg text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">Doc ID:</span>
+                        <span className="font-mono text-primary-dark truncate max-w-[150px]">{log.document_id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-secondary font-medium">User:</span>
+                        <span className="text-secondary truncate max-w-[150px]">{log.user_id || "-"}</span>
+                      </div>
+                    </div>
+
+                    {log.notes && (
+                      <div className="text-xs text-secondary bg-white p-2 border border-shadow-darker/10 rounded-lg">
+                        {log.notes}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
             {hasMore && (
               <div className="flex justify-center py-5 border-t border-shadow-darker/10">
@@ -201,3 +239,4 @@ export default function AuditLogs() {
     </div>
   );
 }
+

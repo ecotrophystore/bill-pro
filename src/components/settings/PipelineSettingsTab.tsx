@@ -35,6 +35,7 @@ import {
   type PipelineStage,
   type PipelineRule,
   type StageMessageConfig,
+  type StageMovePromptMode,
   STANDARD_CRM_STAGES,
   DEFAULT_QUANTITY_PIPELINES,
 } from '../../types';
@@ -86,10 +87,21 @@ export default function PipelineSettingsTab() {
         setPipelines(DEFAULT_QUANTITY_PIPELINES);
       } else {
         const loaded = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Pipeline));
-        const existingIds = new Set(loaded.map((p) => p.id));
         const merged = [...loaded];
         DEFAULT_QUANTITY_PIPELINES.forEach((def) => {
-          if (!existingIds.has(def.id)) merged.push(def);
+          const hasMatch = loaded.some(p => {
+            if (p.id === def.id) return true;
+            const pName = p.name.toLowerCase();
+            if (def.id === 'unclassified' && (pName.includes('unclassified') || pName.includes('pending'))) return true;
+            if (def.id === 'small_order' && pName.includes('small')) return true;
+            if (def.id === 'regular_order' && pName.includes('regular')) return true;
+            if (def.id === 'bulk_order' && pName.includes('bulk')) return true;
+            if (def.id === 'design_pipeline' && (pName.includes('design') || p.id === 'design_pipeline')) return true;
+            return pName === def.name.toLowerCase().trim();
+          });
+          if (!hasMatch) {
+            merged.push(def);
+          }
         });
         setPipelines(merged);
       }
@@ -124,7 +136,10 @@ export default function PipelineSettingsTab() {
     const existing = stageMessages[stage.id];
 
     if (existing) {
-      setEditingConfig({ ...existing });
+      setEditingConfig({
+        ...existing,
+        move_prompt_mode: existing.move_prompt_mode || 'ask',
+      });
     } else {
       const preset = DEFAULT_STAGE_MESSAGES[stage.id] || {};
       setEditingConfig({
@@ -141,6 +156,7 @@ export default function PipelineSettingsTab() {
         email_template: preset.email_template || '',
         delay_minutes: 0,
         is_active: true,
+        move_prompt_mode: 'ask',
       });
     }
   }, [selectedStageId, stageMessages]);
@@ -280,33 +296,30 @@ export default function PipelineSettingsTab() {
       <div className="flex items-center gap-2 border-b border-shadow-darker/10 pb-3 flex-wrap">
         <button
           onClick={() => setSubTab('stage_messages')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            subTab === 'stage_messages'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${subTab === 'stage_messages'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
-          }`}
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
         >
           <MessageSquare size={14} /> Stage Messages & Notifications
         </button>
 
         <button
           onClick={() => setSubTab('pipelines')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            subTab === 'pipelines'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${subTab === 'pipelines'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
-          }`}
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
         >
           <Sliders size={14} /> Manage Pipelines ({pipelines.length})
         </button>
 
         <button
           onClick={() => setSubTab('rules')}
-          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-            subTab === 'rules'
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${subTab === 'rules'
               ? 'bg-primary text-white shadow-sm'
-              : 'text-secondary hover:text-primary-dark hover:bg-slate-100'
-          }`}
+              : 'text-secondary hover:text-primary-dark hover:bg-transparent'
+            }`}
         >
           <Sparkles size={14} /> Automatic Pipeline Rules ({rules.length})
         </button>
@@ -314,11 +327,10 @@ export default function PipelineSettingsTab() {
 
       {statusMessage && (
         <div
-          className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between border ${
-            statusMessage.type === 'success'
+          className={`p-3 rounded-xl text-xs font-semibold flex items-center justify-between border ${statusMessage.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
               : 'bg-rose-50 text-rose-800 border-rose-200'
-          }`}
+            }`}
         >
           <span>{statusMessage.text}</span>
           <button onClick={() => setStatusMessage(null)}>
@@ -331,7 +343,7 @@ export default function PipelineSettingsTab() {
       {subTab === 'stage_messages' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
           {/* Stage Selector Sidebar */}
-          <div className="md:col-span-4 neo-card space-y-2 p-3 bg-slate-50/50">
+          <div className="md:col-span-4 neo-card space-y-2 p-3 bg-transparent">
             <span className="text-[10px] font-bold uppercase tracking-wider text-secondary px-2 block">
               Select Stage to Configure
             </span>
@@ -343,20 +355,18 @@ export default function PipelineSettingsTab() {
                   <button
                     key={s.id}
                     onClick={() => setSelectedStageId(s.id)}
-                    className={`w-full text-left p-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 ${
-                      isSelected
+                    className={`w-full text-left p-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-between gap-2 ${isSelected
                         ? 'bg-primary text-white shadow-sm scale-[1.02]'
                         : 'text-slate-700 hover:bg-slate-200/70'
-                    }`}
+                      }`}
                   >
                     <span>
                       {idx + 1}. {s.label}
                     </span>
                     {isConfigured && (
                       <span
-                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
-                          isSelected ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
-                        }`}
+                        className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${isSelected ? 'bg-transparent text-white' : 'bg-emerald-100 text-emerald-800'
+                          }`}
                       >
                         Active
                       </span>
@@ -397,12 +407,96 @@ export default function PipelineSettingsTab() {
                       key={v.variable}
                       type="button"
                       onClick={() => handleInsertVariable(v.variable)}
-                      className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-slate-100 border border-shadow-darker/10 text-primary-dark hover:bg-primary/10 hover:border-primary/30 transition-colors"
+                      className="text-[10px] font-semibold px-2 py-1 rounded-lg bg-transparent border border-shadow-darker/10 text-primary-dark hover:bg-primary/10 hover:border-primary/30 transition-colors"
                       title={v.label}
                     >
                       {v.variable}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Stage Move Option: Ask With/Without Message, Auto-Send, or No Message */}
+              <div className="space-y-2 p-3.5 rounded-2xl bg-primary/5 border border-primary/20">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-primary-dark flex items-center gap-1.5">
+                    <MessageSquare size={14} className="text-primary" />
+                    Stage Move Option (When moving lead to this stage)
+                  </label>
+                  <span className="text-[10px] font-bold text-primary uppercase tracking-wider">
+                    Move Behavior
+                  </span>
+                </div>
+                <p className="text-[11px] text-secondary">
+                  Choose how the CRM handles customer notifications when a lead is moved to <strong>{editingConfig.stage_name}</strong>.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                  <label
+                    className={`p-2.5 rounded-xl border cursor-pointer flex flex-col gap-1 transition-all ${(editingConfig.move_prompt_mode || 'ask') === 'ask'
+                        ? 'bg-surface border-primary shadow-xs ring-1 ring-primary'
+                        : 'bg-transparent border-shadow-darker/10 hover:border-primary/40'
+                      }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="move_prompt_mode"
+                        value="ask"
+                        checked={(editingConfig.move_prompt_mode || 'ask') === 'ask'}
+                        onChange={() => setEditingConfig({ ...editingConfig, move_prompt_mode: 'ask' })}
+                        className="text-primary focus:ring-primary"
+                      />
+                      <span className="text-xs font-bold text-primary-dark">Ask Each Time</span>
+                    </div>
+                    <span className="text-[10px] text-secondary leading-tight pl-6">
+                      Prompts: <em>With Message</em> or <em>Without Message</em>
+                    </span>
+                  </label>
+
+                  <label
+                    className={`p-2.5 rounded-xl border cursor-pointer flex flex-col gap-1 transition-all ${editingConfig.move_prompt_mode === 'auto_send'
+                        ? 'bg-surface border-emerald-500 shadow-xs ring-1 ring-emerald-500'
+                        : 'bg-transparent border-shadow-darker/10 hover:border-emerald-500/40'
+                      }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="move_prompt_mode"
+                        value="auto_send"
+                        checked={editingConfig.move_prompt_mode === 'auto_send'}
+                        onChange={() => setEditingConfig({ ...editingConfig, move_prompt_mode: 'auto_send' })}
+                        className="text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">Auto-Send Message</span>
+                    </div>
+                    <span className="text-[10px] text-secondary leading-tight pl-6">
+                      Immediately sends WhatsApp message on move
+                    </span>
+                  </label>
+
+                  <label
+                    className={`p-2.5 rounded-xl border cursor-pointer flex flex-col gap-1 transition-all ${editingConfig.move_prompt_mode === 'without_message'
+                        ? 'bg-surface border-slate-500 shadow-xs ring-1 ring-slate-500'
+                        : 'bg-transparent border-shadow-darker/10 hover:border-slate-500/40'
+                      }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="move_prompt_mode"
+                        value="without_message"
+                        checked={editingConfig.move_prompt_mode === 'without_message'}
+                        onChange={() => setEditingConfig({ ...editingConfig, move_prompt_mode: 'without_message' })}
+                        className="text-slate-600 focus:ring-slate-500"
+                      />
+                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Without Message</span>
+                    </div>
+                    <span className="text-[10px] text-secondary leading-tight pl-6">
+                      Moves stage silently without sending message
+                    </span>
+                  </label>
                 </div>
               </div>
 
@@ -432,7 +526,7 @@ export default function PipelineSettingsTab() {
                 />
 
                 {/* WhatsApp Live Preview */}
-                <div className="p-3 rounded-xl bg-white border border-emerald-100 text-xs">
+                <div className="p-3 rounded-xl bg-transparent border border-emerald-100 text-xs">
                   <span className="text-[10px] font-bold text-secondary block mb-1">Live WhatsApp Preview:</span>
                   <p className="text-slate-800 leading-relaxed font-sans whitespace-pre-wrap">
                     {renderTemplateText(editingConfig.whatsapp_template, sampleContext)}
@@ -533,6 +627,120 @@ export default function PipelineSettingsTab() {
               </div>
             </div>
 
+            {/* Stages Editor for Pipeline */}
+            <div className="space-y-3 pt-3 border-t border-shadow-darker/10">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-primary-dark">Pipeline Stages ({(pipelineDraft.stages || []).length})</h4>
+                  <p className="text-[11px] text-secondary">Customize, reorder, add, or remove stages for this pipeline.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const stageNum = (pipelineDraft.stages || []).length + 1;
+                    const newStage: PipelineStage = {
+                      id: `custom_stage_${Date.now()}`,
+                      label: `New Stage ${stageNum}`,
+                    };
+                    setPipelineDraft({
+                      ...pipelineDraft,
+                      stages: [...(pipelineDraft.stages || []), newStage],
+                    });
+                  }}
+                  className="neo-btn text-xs px-3 py-1 font-bold text-primary flex items-center gap-1"
+                >
+                  <Plus size={13} /> Add Stage
+                </button>
+              </div>
+
+              <div className="space-y-2 max-h-[320px] overflow-y-auto custom-sidebar-scrollbar pr-1">
+                {(pipelineDraft.stages || []).map((stg, idx) => (
+                  <div
+                    key={stg.id || idx}
+                    className="p-2.5 rounded-xl border border-shadow-darker/10 bg-surface flex items-center justify-between gap-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">
+                        #{idx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={stg.label}
+                        onChange={(e) => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          updated[idx] = { ...updated[idx], label: e.target.value };
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="neo-input !py-1 !px-2 text-xs font-semibold flex-1"
+                        placeholder="Stage name (e.g. Payment Pending)"
+                      />
+                      <select
+                        value={stg.move_prompt_mode || 'ask'}
+                        onChange={(e) => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          updated[idx] = { ...updated[idx], move_prompt_mode: e.target.value as StageMovePromptMode };
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="neo-input !py-1 !px-2 text-[10px] font-semibold text-secondary shrink-0 hidden sm:block"
+                        title="Move Stage Notification Option"
+                      >
+                        <option value="ask">Ask: With/Without Message</option>
+                        <option value="auto_send">Auto-Send Message</option>
+                        <option value="without_message">Without Message</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          const [item] = updated.splice(idx, 1);
+                          updated.splice(idx - 1, 0, item);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-shadow-darker/10 disabled:opacity-30 hover:text-primary"
+                        title="Move Up"
+                      >
+                        <MoveUp size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === (pipelineDraft.stages || []).length - 1}
+                        onClick={() => {
+                          const updated = [...(pipelineDraft.stages || [])];
+                          const [item] = updated.splice(idx, 1);
+                          updated.splice(idx + 1, 0, item);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-shadow-darker/10 disabled:opacity-30 hover:text-primary"
+                        title="Move Down"
+                      >
+                        <MoveDown size={12} />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={(pipelineDraft.stages || []).length <= 2}
+                        onClick={() => {
+                          if ((pipelineDraft.stages || []).length <= 2) {
+                            alert('A pipeline must have at least 2 stages.');
+                            return;
+                          }
+                          const updated = (pipelineDraft.stages || []).filter((_, i) => i !== idx);
+                          setPipelineDraft({ ...pipelineDraft, stages: updated });
+                        }}
+                        className="p-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-30"
+                        title="Remove Stage"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="flex items-center justify-end gap-2 pt-2">
               {editingPipelineId && (
                 <button
@@ -590,7 +798,7 @@ export default function PipelineSettingsTab() {
                           stages: pipe.stages || STANDARD_CRM_STAGES,
                         });
                       }}
-                      className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 text-primary-dark hover:bg-slate-200"
+                      className="text-xs font-semibold px-2.5 py-1 rounded bg-transparent text-primary-dark hover:bg-slate-200"
                     >
                       Edit
                     </button>
@@ -711,7 +919,7 @@ export default function PipelineSettingsTab() {
                 {rules.map((rule) => (
                   <div
                     key={rule.id}
-                    className="p-3 rounded-xl bg-slate-50 border border-shadow-darker/10 flex items-center justify-between gap-3 text-xs"
+                    className="p-3 rounded-xl bg-transparent border border-shadow-darker/10 flex items-center justify-between gap-3 text-xs"
                   >
                     <div>
                       <span className="font-bold text-primary-dark">{rule.name}</span>
@@ -740,3 +948,6 @@ export default function PipelineSettingsTab() {
     </div>
   );
 }
+
+
+

@@ -114,7 +114,7 @@ export default function AuditorPage() {
                       <select 
                         value={docTypeFilter} 
                         onChange={(e) => setDocTypeFilter(e.target.value)}
-                        className="neo-input w-full text-xs !py-1 bg-surface border-shadow-darker/20 text-primary-dark"
+                        className="neo-input w-full text-xs !py-1 bg-transparent border-shadow-darker/20 text-primary-dark"
                       >
                         <option value="all">All Documents</option>
                         <option value="invoice">Invoice</option>
@@ -128,7 +128,7 @@ export default function AuditorPage() {
                       <select 
                         value={actionFilter} 
                         onChange={(e) => setActionFilter(e.target.value)}
-                        className="neo-input w-full text-xs !py-1 bg-surface border-shadow-darker/20 text-primary-dark"
+                        className="neo-input w-full text-xs !py-1 bg-transparent border-shadow-darker/20 text-primary-dark"
                       >
                         <option value="all">All Actions</option>
                         <option value="create">Create</option>
@@ -162,7 +162,7 @@ export default function AuditorPage() {
           ) : filteredLogs.map((log) => (
             <div key={log.id} className="p-4 hover:bg-shadow-darker/5 transition-colors flex items-start justify-between">
               <div className="flex gap-4">
-                <div className={`p-2 rounded-lg bg-surface shadow-neo-raised ${
+                <div className={`p-2 rounded-lg bg-transparent shadow-neo-raised ${
                   log.action === 'create' ? 'text-primary' : 'text-warning'
                 }`}>
                    <Clock size={16} />
@@ -190,3 +190,4 @@ export default function AuditorPage() {
     </div>
   );
 }
+

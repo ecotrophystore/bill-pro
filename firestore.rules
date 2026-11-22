@@ -24,6 +24,22 @@ service cloud.firestore {
     function isSales() {
       return getUserRole() == 'sales';
     }
+
+    function isHR() {
+      return getUserRole() == 'hr';
+    }
+
+    function isDesign() {
+      return getUserRole() == 'design';
+    }
+
+    function isProduction() {
+      return getUserRole() == 'production';
+    }
+
+    function isStandardUser() {
+      return getUserRole() == 'user';
+    }
     
     function isUnchanged(field) {
       return !(field in request.resource.data) || request.resource.data[field] == resource.data[field];
@@ -35,12 +51,33 @@ service cloud.firestore {
 
     // Role Isolation: Strict Firestore security rules
     
+    // USER INVITES (keyed by lowercase email for cryptographic role assignment on signup)
+    match /user_invites/{inviteEmail} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() || (isHR() && request.resource.data.role != 'admin');
+      allow delete: if isAdmin() || (isHR() && resource.data.role != 'admin') || (isAuthenticated() && request.auth.token.email == inviteEmail);
+    }
+
     // USERS COLLECTION
-    // Users can read profiles; users can initialize their own profile as 'sales'; admins can manage all roles
+    // Users can read profiles; self-signup defaults to 'user' unless a valid invite exists in user_invites; Admin manages all; HR manages non-admin roles
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if (isAuthenticated() && request.auth.uid == userId && request.resource.data.role == 'sales') || isAdmin();
-      allow update, delete: if isAdmin();
+      allow create: if isAdmin()
+        || (isHR() && request.resource.data.role != 'admin')
+        || (isAuthenticated() && request.auth.uid == userId && (
+              request.resource.data.role == 'user'
+              || (
+                request.auth.token.email != null
+                && exists(/databases/$(database)/documents/user_invites/$(request.auth.token.email))
+                && get(/databases/$(database)/documents/user_invites/$(request.auth.token.email)).data.role == request.resource.data.role
+              )
+           ));
+      allow update: if isAdmin() || (isHR() && resource.data.role != 'admin' && request.resource.data.role != 'admin');
+      allow delete: if isAdmin();
+
+      match /ai_conversations/{sessionId} {
+        allow read, write: if isAuthenticated() && request.auth.uid == userId;
+      }
     }
     
     // CUSTOMERS COLLECTION
@@ -60,13 +97,19 @@ service cloud.firestore {
     // SETTINGS COLLECTION
     match /settings/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin(); 
+      allow write: if isAuthenticated(); 
+    }
+
+    // SYSTEM SETTINGS & AUTOMATIONS
+    match /system_settings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
     // QUOTATIONS COLLECTION
     match /quotations/{quotationId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow create, update: if isAdmin() || isAccounts() || isSales() || isStandardUser();
       allow delete: if isAdmin() || isAccounts();
     }
     
@@ -74,7 +117,19 @@ service cloud.firestore {
     match /invoices/{invoiceId} {
       allow read: if isAuthenticated();
       allow create: if isAdmin() || isAccounts() || isSales();
-      allow update: if (isAdmin() || isAccounts()) && (!isLocked() || isAdmin());
+      allow update: if (isAdmin() || isAccounts()) && (
+        !isLocked()
+        || isAdmin()
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'manual_paid_amount',
+             'reconciled_bank_amount',
+             'paid_amount',
+             'balance_amount',
+             'payment_status',
+             'status',
+             'updated_at'
+           ])
+      );
       allow delete: if isAdmin();
     }
     
@@ -88,23 +143,23 @@ service cloud.firestore {
     // CASH MEMOS COLLECTION
     match /cash_memos/{memoId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdmin() || isAccounts() || isSales();
+      allow create, update: if isAdmin() || isAccounts() || isSales() || isStandardUser();
       allow delete: if isAdmin() || isAccounts();
     }
     
     // PURCHASES COLLECTION
     match /purchases/{purchaseId} {
-      allow read: if isAdmin() || isAccounts() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow create: if isAdmin() || isAccounts() || (isAuthenticated() && request.resource.data.userId == request.auth.uid);
-      allow update: if isAdmin() || isAccounts() || (isAuthenticated() && resource.data.userId == request.auth.uid);
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || isAccounts() || isSales() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update: if isAdmin() || isAccounts() || isSales();
+      allow delete: if isAdmin();
     }
 
     // EXPENSES COLLECTION
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAdmin() || isAccounts() || isSales();
-      allow delete: if isAdmin();
+      allow create, update: if isAdmin() || isAccounts() || isSales() || isHR() || isStandardUser();
+      allow delete: if isAdmin() || isHR();
     }
 
     // PURCHASE ATTACHMENTS
@@ -132,24 +187,41 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
     }
     
+    // PAYMENTS COLLECTION
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
     // TRANSACTIONS COLLECTION (Bank Recon)
     match /transactions/{transactionId} {
-      allow read: if isAdmin() || isAccounts();
-      allow write: if isAdmin() || isAccounts();
+      allow read: if isAdmin() || isAccounts() || isSales();
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update, delete: if isAdmin() || isAccounts();
     }
     
     // STATEMENT LOGS (Bank Recon)
     match /statement_logs/{logId} {
       allow read: if isAdmin() || isAccounts();
-      allow create: if isAdmin() || isAccounts();
-      allow update: if isAdmin() || isAccounts();
+      allow create, update, delete: if isAdmin() || isAccounts();
+    }
+
+    // RECONCILIATION SETTINGS & MONTHLY REPORT LOGS (Admin & Accounts)
+    match /reconciliation_settings/{docId} {
+      allow read, write: if isAdmin() || isAccounts();
+    }
+
+    match /reconciliation_report_logs/{monthKey} {
+      allow read, write: if isAdmin() || isAccounts();
     }
     
     // REPORTS & NOTIFICATIONS
     match /reports/{reportId} { allow read: if isAuthenticated(); }
     match /notifications/{notifId} { 
-      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
-      allow update: if isAuthenticated() && resource.data.user_id == request.auth.uid; // for marking read
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || isAccounts();
+      allow update: if isAuthenticated(); // for marking read
+      allow delete: if isAuthenticated();
     }
 
     // SYSTEM CONFIG COLLECTION
@@ -166,17 +238,49 @@ service cloud.firestore {
     
     match /leads/{leadId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow create: if isAdmin() || isAccounts() || isSales();
+      allow update: if isAdmin() || (
+        (isAccounts() || isSales() || isDesign() || isProduction()) &&
+        isUnchanged('owner_id') &&
+        isUnchanged('ownerId') &&
+        isUnchanged('sales_person')
+      );
+      allow delete: if isAdmin() || (
+        (isSales() || isAccounts()) &&
+        (resource.data.owner_id == request.auth.uid || resource.data.ownerId == request.auth.uid)
+      );
+    }
+
+    match /lead_assignment/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
     }
 
     match /pipelines/{pipelineId} {
       allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales() || isDesign() || isProduction();
+    }
+
+    match /stage_messages/{stageId} {
+      allow read: if isAuthenticated();
       allow write: if isAdmin() || isAccounts() || isSales();
+    }
+
+    match /lead_notes/{noteId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /messages/{messageId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    match /conversations/{convId} {
+      allow read, write: if isAuthenticated();
     }
 
     match /message_templates/{templateId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts();
+      allow write: if isAdmin() || isAccounts() || isSales();
     }
 
     match /message_queue/{queueId} {
@@ -187,12 +291,17 @@ service cloud.firestore {
 
     match /activities/{activityId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin() || isAccounts() || isSales();
+      allow write: if isAdmin() || isAccounts() || isSales() || isDesign() || isProduction();
     }
 
     match /whatsapp_automations/{docId} {
       allow read: if isAuthenticated();
       allow write: if isAdmin() || isSales();
+    }
+
+    match /whatsapp_welcome_kit/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAccounts() || isSales();
     }
 
     match /automation_enrollments/{docId} {
@@ -215,9 +324,20 @@ service cloud.firestore {
     
     // AUDIT LOG
     match /audit_logs/{logId} {
-      allow read: if isAdmin() || isAccounts();
+      allow read: if isAdmin() || isAccounts() || isHR();
       allow create: if isAuthenticated();
       allow update, delete: if false;
+    }
+    
+    // TROPHY STUDIO & DESIGN BRAIN
+    match /trophy_brain_knowledge/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    match /trophy_generated_designs/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
     }
     
   }

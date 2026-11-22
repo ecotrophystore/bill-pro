@@ -14,6 +14,7 @@ import { matchOrCreateCustomer, normalizePhoneNumber } from '../utils/customerMa
 import { extractMetaRequirements, type ExtractedRequirement } from '../utils/metaRequirementExtractor';
 import { classifyLeadPipeline, type ClassificationResult } from '../utils/pipelineClassifier';
 import { DEFAULT_QUANTITY_PIPELINES, type Pipeline, type PipelineRule, type Lead } from '../types';
+import { resolveLeadAssignment } from '../services/leadAssignmentService';
 
 export type MetaLeadChannel = 'whatsapp' | 'facebook_messenger' | 'facebook_lead_ad' | 'instagram';
 
@@ -154,6 +155,19 @@ export async function processMetaInboundEnquiry(
   };
   const channelLabel = channelLabels[channel] || channel;
 
+  const autoAssignment = await resolveLeadAssignment({
+    source: channelLabel,
+    platform: 'meta',
+    pipelineId: classification.pipeline_id,
+    requiredQuantity: extracted.required_quantity,
+    location: extracted.location || '',
+    name: leadDisplayName,
+    company: extracted.organization || customer.name || '',
+    requirement: messageText,
+    campaign: campaignName || '',
+    eventName: extracted.event_name || '',
+  }).catch(() => ({ assigned: false, ownerId: '', ownerName: '', ruleName: undefined, mode: 'unassigned' as const }));
+
   // 5. Create New Lead Document
   const leadPayload: any = {
     name: leadDisplayName,
@@ -188,6 +202,16 @@ export async function processMetaInboundEnquiry(
     customer_lifecycle: isExisting ? (customerType === 'repeat' ? 'repeat_customer' : 'existing_customer') : 'new_customer',
     pipeline_id: classification.pipeline_id,
     status: initialStageId,
+    owner_id: autoAssignment.assigned ? autoAssignment.ownerId : '',
+    ownerId: autoAssignment.assigned ? autoAssignment.ownerId : '',
+    sales_person: autoAssignment.assigned ? autoAssignment.ownerName : '',
+    ...(autoAssignment.assigned
+      ? {
+          assigned_at: serverTimestamp(),
+          assigned_by: 'auto_assignment',
+          assignment_rule_name: autoAssignment.ruleName || autoAssignment.mode,
+        }
+      : {}),
     last_message: messageText,
     last_message_channel: channel,
     last_message_time: serverTimestamp(),

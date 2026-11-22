@@ -1,15 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, FileText, Download, Filter, Loader2, User, Trash2, Edit, ChevronDown } from 'lucide-react';
+import { Plus, Search, FileText, Download, Filter, Loader2, User, Trash2, Edit, ChevronDown, Share2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import type { CashMemo, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
 
 export default function CashMemos() {
   const navigate = useNavigate();
@@ -19,9 +21,29 @@ export default function CashMemos() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedMemo, setSelectedMemo] = useState<CashMemo | null>(null);
+  const [shareMemo, setShareMemo] = useState<CashMemo | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const { settings } = useSettings();
+
+  const getMemoDate = (memo: CashMemo): Date => {
+    const custom = (memo as any).custom_date || (memo as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d;
+    }
+    return memo.created_at?.toDate ? memo.created_at.toDate() : new Date();
+  };
+
+  const formatMemoDate = (memo: CashMemo): string => {
+    const custom = (memo as any).custom_date || (memo as any).date;
+    if (custom) {
+      const d = new Date(custom);
+      if (!isNaN(d.getTime())) return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return memo.created_at?.toDate ? memo.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...';
+  };
 
   useEffect(() => {
     if (!db) return;
@@ -111,20 +133,80 @@ export default function CashMemos() {
     setIsPaymentModalOpen(true);
   };
 
+  const openShareModal = (memo: CashMemo) => {
+    setShareMemo(memo);
+    setIsShareModalOpen(true);
+  };
+
   const handleVoiceCashMemo = (customerName: string | null, items: any[], customerType?: string | null) => {
     navigate('/cash-memos/new', { state: { voiceData: { customerName, items, customerType } } });
   };
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredMemos = memos
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filteredMemos = memos
       .filter(memo => memo.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[memo.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (memo.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(memo => statusFilter === 'all' || (memo.payment_status || 'unpaid') === statusFilter);
+
+    const now = new Date();
+    filteredMemos = filteredMemos.filter(memo => {
+      const date = getMemoDate(memo);
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filteredMemos.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              const { downloadPDF } = await import('../utils/pdfGenerator');
+              for (const item of filteredMemos) {
+                const blob = await downloadPDF(item, customers[item.customer_id] || 'Unknown Customer', 'Cash Memo', 'blob', settings);
+                if (blob) {
+                  const customerName = customers[item.customer_id]?.name || item.customer_name || 'Unknown';
+                  const filename = `CashMemo_${item.number}_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                  zip.file(filename, blob);
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'CashMemos_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
 
     if (format === 'excel') {
       const reportData = filteredMemos.map(memo => ({
         'Memo Number': memo.number,
         'Customer': memo.walk_in_customer ? (memo.customer_name || 'Walk-in Customer') : (customers[memo.customer_id]?.name || 'Unknown Customer'),
-        'Date': memo.created_at ? memo.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+        'Date': formatMemoDate(memo),
         'Subtotal (₹)': memo.subtotal || 0,
         'Grand Total (₹)': memo.grand_total || 0,
         'Payment Status': (memo.payment_status || 'unpaid').toUpperCase()
@@ -148,7 +230,7 @@ export default function CashMemos() {
         body: filteredMemos.map(memo => [
           memo.number,
           memo.walk_in_customer ? (memo.customer_name || 'Walk-in Customer') : (customers[memo.customer_id]?.name || 'Unknown Customer'),
-          memo.created_at ? memo.created_at.toDate().toLocaleDateString('en-IN') : 'Syncing...',
+          formatMemoDate(memo),
           `Rs. ${memo.grand_total?.toLocaleString() || '0'}`,
           (memo.payment_status || 'unpaid').toUpperCase()
         ]),
@@ -158,6 +240,10 @@ export default function CashMemos() {
     }
   };
 
+  const displayMemos = memos
+    .filter(m => m.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[m.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(m => statusFilter === 'all' || (m.payment_status || 'unpaid') === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -166,33 +252,17 @@ export default function CashMemos() {
           <p className="text-secondary mt-1">Non-GST quick billing with separate sequential numbering.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button onClick={() => navigate('/cash-memos/new')} className="neo-btn-primary flex items-center gap-2">
             <Plus size={18} /> New Cash Memo
           </button>
@@ -212,7 +282,7 @@ export default function CashMemos() {
         </div>
         <div className="relative">
           <select 
-            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -227,9 +297,10 @@ export default function CashMemos() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
-              <tr className="bg-surface border-b border-shadow-darker/10">
+              <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Cash Memo Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer / Type</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
@@ -243,12 +314,9 @@ export default function CashMemos() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Indexing memos...
                 </td></tr>
-              ) : memos.length === 0 ? (
+              ) : displayMemos.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No cash memos found.</td></tr>
-              ) : memos
-                  .filter(m => m.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[m.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(m => statusFilter === 'all' || (m.payment_status || 'unpaid') === statusFilter)
-                  .map((memo) => (
+              ) : displayMemos.map((memo) => (
                 <tr key={memo.id} className="hover:bg-shadow-darker/5 transition-colors">
                   <td className="p-4 font-medium text-primary-dark">{memo.number}</td>
                   <td className="p-4 text-secondary">
@@ -260,8 +328,10 @@ export default function CashMemos() {
                       customers[memo.customer_id]?.name || 'Loading Profile...'
                     )}
                   </td>
-                  <td className="p-4 text-secondary">{memo.created_at?.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                  <td className="p-4 text-right font-medium text-primary-dark">₹ {memo.grand_total?.toLocaleString()}</td>
+                  <td className="p-4 text-secondary">{formatMemoDate(memo)}</td>
+                  <td className="p-4 text-right font-medium text-primary-dark">
+                    ₹ {memo.grand_total ? memo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </td>
                   <td className="p-4 text-center">
                     <select 
                       value={memo.payment_status || 'unpaid'}
@@ -280,7 +350,7 @@ export default function CashMemos() {
                           alert("Failed to update payment status.");
                         }
                       }}
-                      className={`px-2 py-1 rounded-full text-xs font-semibold cursor-pointer border-none focus:ring-2 focus:ring-primary bg-surface ${
+                      className={`px-2 py-1 rounded-full text-xs font-semibold cursor-pointer border-none focus:ring-2 focus:ring-primary bg-transparent ${
                         memo.payment_status === 'paid' ? 'bg-green-100 text-green-700' : memo.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
@@ -291,48 +361,83 @@ export default function CashMemos() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center items-center gap-2">
-                      <button 
-                        onClick={() => navigate(`/cash-memos/edit/${memo.id}`)}
-                        className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Cash Memo"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      {memo.payment_status === 'paid' ? (
-                        <>
-                          <button 
-                            onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)}
-                            className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                            title="View PDF"
-                          >
-                            <FileText size={18} />
-                          </button>
-                          <button 
-                            onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)}
-                            className="p-2 text-secondary hover:text-primary-dark transition-colors"
-                            title="Download"
-                          >
-                            <Download size={18} />
-                          </button>
-                        </>
-                      ) : (
-                        <span className="text-xs text-secondary/60 italic max-w-[200px] leading-tight">
-                          Mark this Cash Memo as Paid to enable PDF download.
-                        </span>
-                      )}
-                      <button 
-                        onClick={() => deleteCashMemo(memo.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Cash Memo"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Cash Memo"><Edit size={18} /></button>
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                      <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                      <button onClick={() => openShareModal(memo)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
+                      <button onClick={() => deleteCashMemo(memo.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Cash Memo"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Indexing memos...
+              </div>
+            ) : displayMemos.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No cash memos found.</div>
+            ) : displayMemos.map((memo) => (
+              <div key={memo.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-bold text-primary-dark text-lg leading-tight">{memo.number}</h3>
+                    <p className="text-secondary font-medium mt-0.5">
+                      {memo.customer_id === 'walk_in' ? (
+                        <span className="flex items-center gap-1 italic"><User size={12} /> {memo.customer_name || 'Walk-in Customer'}</span>
+                      ) : (
+                        customers[memo.customer_id]?.name || 'Loading Profile...'
+                      )}
+                    </p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {formatMemoDate(memo)}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {memo.grand_total ? memo.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
+                    <select 
+                      value={memo.payment_status || 'unpaid'}
+                      onChange={async (e) => {
+                        const newStatus = e.target.value;
+                        const isPaid = newStatus === 'paid';
+                        try {
+                          await updateDoc(doc(db, 'cash_memos', memo.id), {
+                            payment_status: newStatus,
+                            payment_date: isPaid ? new Date().toISOString().split('T')[0] : null,
+                            advance_amount: isPaid ? (memo.grand_total || 0) : 0,
+                            balance_amount: isPaid ? 0 : (memo.grand_total || 0),
+                          });
+                        } catch (err) {
+                          alert("Failed to update payment status.");
+                        }
+                      }}
+                      className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider cursor-pointer border-none bg-transparent ${
+                        memo.payment_status === 'paid' ? 'bg-green-100 text-green-700' : memo.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      <option value="unpaid">UNPAID</option>
+                      <option value="paid">PAID</option>
+                      <option value="partial">PARTIAL</option>
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-1 pt-2 border-t border-shadow-darker/5">
+                  <button onClick={() => navigate(`/cash-memos/edit/${memo.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors" title="Edit"><Edit size={16} /></button>
+                  <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={16} /></button>
+                  <button onClick={() => downloadPDF(memo, customers[memo.customer_id] || memo.customer_name || 'Walk-in Customer', 'Cash Memo', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={16} /></button>
+                  <button onClick={() => openShareModal(memo)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
+                  <button onClick={() => deleteCashMemo(memo.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors" title="Delete"><Trash2 size={16} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -348,6 +453,21 @@ export default function CashMemos() {
           onPaymentUpdated={() => {}}
         />
       )}
+
+      {shareMemo && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareMemo(null);
+          }}
+          document={shareMemo}
+          documentType="Cash Memo"
+          customer={customers[shareMemo.customer_id] || shareMemo.customer_name}
+          settings={settings}
+        />
+      )}
     </div>
   );
 }
+

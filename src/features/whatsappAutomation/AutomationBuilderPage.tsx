@@ -1,4 +1,4 @@
-ï»¿// @ts-nocheck
+// @ts-nocheck
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
@@ -25,7 +25,7 @@ const emptyForm = {
 const presetLabel = new Map(AUTOMATION_PRESETS.map((item) => [item.key, item.label]));
 const initialBlueprint = createPresetBlueprint('custom');
 
-function fmt(v: any) { if (!v) return 'â€”'; if (typeof v.toDate === 'function') return v.toDate().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); if (typeof v.seconds === 'number') return new Date(v.seconds * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); return 'â€”'; }
+function fmt(v: any) { if (!v) return '—'; if (typeof v.toDate === 'function') return v.toDate().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); if (typeof v.seconds === 'number') return new Date(v.seconds * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }); return '—'; }
 function newNode(type: WorkflowNodeType, summary = '', config: Record<string, any> = {}): WorkflowNodeConfig { const titles: Record<string, string> = { trigger: 'Trigger', condition: 'Condition', delay: 'Delay', whatsapp: 'WhatsApp Message', payment_condition: 'Payment Check', production_condition: 'Production Check', dispatch_condition: 'Dispatch Check', review_delay: 'Repeat Follow-up', stop_condition: 'Stop Condition', end: 'End Workflow', add: 'Add Step' }; return { id: `${type}-${Math.random().toString(36).slice(2, 10)}`, type, data: { title: titles[type] || type, summary, icon: type, config } }; }
 
 export default function AutomationBuilderPage() {
@@ -178,7 +178,7 @@ export default function AutomationBuilderPage() {
           <div className="neo-card flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap gap-2 text-xs text-secondary">
               <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Preset: {presetLabel.get(presetKey) || 'Custom'}</span>
-              <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Pipeline: {pipeline?.name || 'â€”'}</span>
+              <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Pipeline: {pipeline?.name || '—'}</span>
               <span className="rounded-full border border-shadow-darker/10 px-3 py-1">Warnings: {validation.criticalErrors.length + Object.keys(validation.warningsByNodeId).length}</span>
             </div>
             <select className="neo-input min-w-72" value={selectedAutomationId} onChange={(event) => setSelectedAutomationId(event.target.value)}>
@@ -202,7 +202,7 @@ export default function AutomationBuilderPage() {
           <div className="neo-card space-y-3">
             <h2 className="font-bold text-primary-dark flex items-center gap-2"><Bot size={18} /> Automations</h2>
             <div className="grid gap-2 md:grid-cols-2">
-              {topAutomations.map((automation) => <button key={automation.id} type="button" onClick={() => setSelectedAutomationId(automation.id)} className={`rounded-2xl border px-3 py-2 text-left ${selectedAutomationId === automation.id ? 'border-primary/30 bg-primary/5' : 'border-shadow-darker/10 bg-surface'}`}><div className="flex items-center justify-between gap-2"><span className="font-semibold text-primary-dark">{automation.name}</span><span className="text-xs text-secondary">{automation.status}</span></div><div className="text-xs text-secondary mt-1">{automation.pipelineId} Â· {automation.stageId} Â· {fmt(automation.updatedAt || automation.createdAt)}</div></button>)}
+              {topAutomations.map((automation) => <button key={automation.id} type="button" onClick={() => setSelectedAutomationId(automation.id)} className={`rounded-2xl border px-3 py-2 text-left ${selectedAutomationId === automation.id ? 'border-primary/30 bg-primary/5' : 'border-shadow-darker/10 bg-transparent'}`}><div className="flex items-center justify-between gap-2"><span className="font-semibold text-primary-dark">{automation.name}</span><span className="text-xs text-secondary">{automation.status}</span></div><div className="text-xs text-secondary mt-1">{automation.pipelineId} · {automation.stageId} · {fmt(automation.updatedAt || automation.createdAt)}</div></button>)}
             </div>
           </div>
         </div>
@@ -242,7 +242,7 @@ export default function AutomationBuilderPage() {
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="neo-card w-full max-w-lg space-y-4">
             <div className="flex items-center justify-between"><h3 className="text-xl font-bold text-primary-dark">Test Workflow</h3><button type="button" className="neo-btn !px-3 !py-2" onClick={() => setTestOpen(false)}><X size={14} /></button></div>
-            <label className="block text-sm font-semibold text-primary-dark">Test lead<select className="neo-input w-full mt-1" value={testLeadId} onChange={(event) => { setTestLeadId(event.target.value); const lead = leads.find((item) => item.id === event.target.value); setTestPhone(lead?.phone || ''); }}><option value="">Select lead</option>{leads.filter((lead) => lead.phone).map((lead) => <option key={lead.id} value={lead.id}>{lead.name} Â· {lead.phone}</option>)}</select></label>
+            <label className="block text-sm font-semibold text-primary-dark">Test lead<select className="neo-input w-full mt-1" value={testLeadId} onChange={(event) => { setTestLeadId(event.target.value); const lead = leads.find((item) => item.id === event.target.value); setTestPhone(lead?.phone || ''); }}><option value="">Select lead</option>{leads.filter((lead) => lead.phone).map((lead) => <option key={lead.id} value={lead.id}>{lead.name} · {lead.phone}</option>)}</select></label>
             <label className="block text-sm font-semibold text-primary-dark">Manual number<input className="neo-input w-full mt-1" value={testPhone} onChange={(event) => setTestPhone(event.target.value)} /></label>
             <div className="flex justify-end gap-2"><button type="button" className="neo-btn" onClick={() => setTestOpen(false)}>Cancel</button><button type="button" className="neo-btn-primary inline-flex items-center gap-2" onClick={runTest}><Send size={14} /> Run Test</button></div>
           </div>
@@ -253,5 +253,6 @@ export default function AutomationBuilderPage() {
     </div>
   );
 }
+
 
 

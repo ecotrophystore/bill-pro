@@ -1,4 +1,12 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import {
+  WHATSAPP_PAYMENT_TERM_RE,
+  WHATSAPP_SPAM_OR_ALERT_RE,
+  WHATSAPP_VENDOR_OR_INDIAMART_RE,
+  hasCommercialEnquirySignal,
+  isMediaOrSystemNoise,
+  extractCustomerAndCompanyInfo,
+} from '../utils/whatsappEnquiryQualifier';
 
 export interface ExtractedLeadDetails {
   name: string;
@@ -12,6 +20,11 @@ export interface ExtractedLeadDetails {
   location: string;
   urgency: 'low' | 'medium' | 'high';
   recommended_next_action: string;
+  trophy_type?: string;
+  trophy_size?: string;
+  event_name?: string;
+  event_date?: string;
+  delivery_date?: string;
 }
 
 export type MessageClassification = 
@@ -29,6 +42,7 @@ export type QualificationStatus = 'Qualified' | 'Not Qualified' | 'Needs Follow-
 export interface WhatsAppAiAnalysisResult {
   classification: MessageClassification;
   qualification_status: QualificationStatus;
+  is_business_lead?: boolean;
   extracted_details: ExtractedLeadDetails;
   qualification_reason: string;
   recommended_pipeline_stage: 'new' | 'contacted' | 'qualified' | 'lost' | 'needs_review';
@@ -38,55 +52,76 @@ export interface WhatsAppAiAnalysisResult {
   internal_audit_log: string;
 }
 
+const DEFAULT_GEMINI_KEY = 'AIzaSyADF4qRiXl1HavHy8GAXVx6XaweqQkq6Yk';
+
 function getGeminiApiKey(): string {
   if (typeof window !== 'undefined') {
     const customKey = localStorage.getItem('VITE_GEMINI_API_KEY') || localStorage.getItem('GEMINI_API_KEY');
     if (customKey) return customKey;
   }
-  return ((import.meta as any).env?.VITE_GEMINI_API_KEY as string) || '';
+  const envKey = ((import.meta as any).env?.VITE_GEMINI_API_KEY as string);
+  return envKey || DEFAULT_GEMINI_KEY;
 }
+
 
 /**
  * Robust fallback analyzer if Gemini API is offline/unreachable
  */
 function heuristicAnalysis(messageText: string, senderPhone: string, senderName: string): WhatsAppAiAnalysisResult {
   const text = (messageText || '').toLowerCase();
+  const identity = extractCustomerAndCompanyInfo({
+    text: messageText,
+    senderName,
+    phone: senderPhone
+  });
 
-  // Spam detection
-  if (text.includes('click here') || text.includes('earn money') || text.includes('lottery') || text.includes('work from home')) {
+  // 1. Vendor pitches, IndiaMART broadcasts, machinery/raw material suppliers, and spam/noise
+  if (
+    WHATSAPP_VENDOR_OR_INDIAMART_RE.test(text) ||
+    WHATSAPP_SPAM_OR_ALERT_RE.test(text) ||
+    isMediaOrSystemNoise(messageText)
+  ) {
+    const isVendor = WHATSAPP_VENDOR_OR_INDIAMART_RE.test(text);
+    const isSpamAlert = WHATSAPP_SPAM_OR_ALERT_RE.test(text);
     return {
-      classification: 'spam',
+      classification: isVendor ? 'other' : isSpamAlert ? 'spam' : 'other',
       qualification_status: 'Not Qualified',
+      is_business_lead: false,
       extracted_details: {
-        name: senderName || 'Unknown',
-        company: '',
+        name: isVendor ? 'Vendor / IndiaMART Pitch' : senderName || 'Unknown',
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
-        requirement: 'Spam/Advertisement',
+        requirement: isVendor ? 'Vendor / Supplier / IndiaMART Broadcast' : isSpamAlert ? 'Spam / Advertisement' : messageText,
         quantity: '',
         budget: '',
         timeline: '',
         location: '',
         urgency: 'low',
-        recommended_next_action: 'Block or archive spam'
+        recommended_next_action: isVendor ? 'Ignore vendor pitch / IndiaMART broadcast' : 'Archive non-customer chat'
       },
-      qualification_reason: 'Message identified as spam or unsolicited advertisement.',
+      qualification_reason: isVendor
+        ? 'Vendor / Supplier / IndiaMART broadcast offering raw materials, machines, or B2B supply to us. Not a customer buying enquiry.'
+        : isSpamAlert
+          ? 'Message identified as spam, advertisement, OTP, bank alert, or promotional broadcast.'
+          : 'Media placeholder or casual non-enquiry chat without commercial intent.',
       recommended_pipeline_stage: 'lost',
       confidence_score: 0.95,
       flag_for_review: false,
       suggested_reply: '',
-      internal_audit_log: `Lead Name: ${senderName || 'Unknown'}\nWhatsApp Number: ${senderPhone}\nStatus: Not Qualified\nKey Details Extracted:\n• Requirement: Spam\nReason for Status: Unsolicited promotional message.\nPipeline Updated: Yes (Stage: Lost)`
+      internal_audit_log: `Lead Name: ${senderName || 'Unknown'}\nWhatsApp Number: ${senderPhone}\nStatus: Not Qualified\nReason: Vendor / IndiaMART / Non-enquiry\nPipeline Updated: No`
     };
   }
 
-  // Payment detection
-  if (text.includes('payment') || text.includes('paid') || text.includes('gpay') || text.includes('upi') || text.includes('transfer') || text.includes('screenshot') || text.includes('invoice')) {
+  // 2. Payment confirmation / invoice query detection
+  if (WHATSAPP_PAYMENT_TERM_RE.test(text)) {
     return {
       classification: 'payment_related',
       qualification_status: 'Qualified',
+      is_business_lead: true,
       extracted_details: {
-        name: senderName || 'Valued Customer',
-        company: '',
+        name: identity.name,
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
         requirement: 'Payment Confirmation / Invoice Query',
@@ -101,28 +136,24 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
       recommended_pipeline_stage: 'contacted',
       confidence_score: 0.88,
       flag_for_review: false,
-      suggested_reply: `Hi ${senderName || 'there'}, thank you for sharing the payment update! Our accounts team is verifying it and will share the confirmed receipt shortly.`,
-      internal_audit_log: `Lead Name: ${senderName || 'Valued Customer'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: Payment update / Invoice inquiry\n• Urgency: High\nReason for Status: Active customer communicating regarding payment.\nPipeline Updated: Yes (Stage: Contacted)`
+      suggested_reply: `Hi ${identity.name || 'there'}, thank you for sharing the payment update! Our accounts team is verifying it and will share the confirmed receipt shortly.`,
+      internal_audit_log: `Lead Name: ${identity.name}\nCompany: ${identity.company || 'N/A'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: Payment update / Invoice inquiry\n• Urgency: High\nReason for Status: Active customer communicating regarding payment.\nPipeline Updated: Yes (Stage: Contacted)`
     };
   }
 
-  // Buying Intent / New inquiry (supports Tamil/Tanglish keywords like 'venum', 'theva', 'rate', 'price', 'pieces', 'trophy', 'memento', 'awards', 'urgent')
-  const hasBuyingKeywords = text.includes('trophy') || text.includes('memento') || text.includes('award') || 
-    text.includes('price') || text.includes('rate') || text.includes('cost') || text.includes('quote') || 
-    text.includes('quotation') || text.includes('order') || text.includes('venum') || text.includes('theva') || 
-    text.includes('pieces') || text.includes('pcs') || text.includes('kulla') || text.includes('budget');
-
-  if (hasBuyingKeywords) {
+  // 3. Buying Intent / New enquiry (English + Tamil/Tanglish commercial keywords)
+  if (hasCommercialEnquirySignal(messageText)) {
     return {
       classification: 'new_lead',
       qualification_status: 'Qualified',
+      is_business_lead: true,
       extracted_details: {
-        name: senderName || 'Prospective Lead',
-        company: '',
+        name: identity.name,
+        company: identity.company || '',
         email: '',
         phone: senderPhone,
         requirement: messageText,
-        quantity: text.match(/\d+\s*(pieces|pcs|nos|nos\.)/i)?.[0] || '',
+        quantity: text.match(/\d+\s*(pieces|pcs|nos\.?|units|sets|troph(y|ies)|medals?|mementos?)/i)?.[0] || '',
         budget: text.match(/(\d+k|\d+\s*(rupees|rs|inr))/i)?.[0] || '',
         timeline: text.includes('urgent') ? 'Urgent' : 'Standard',
         location: '',
@@ -133,18 +164,19 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
       recommended_pipeline_stage: 'qualified',
       confidence_score: 0.85,
       flag_for_review: false,
-      suggested_reply: `Hi ${senderName || 'there'}, thank you for reaching out to EcoTrophy! We would be delighted to assist with your requirements. We are preparing our best options and catalog for you right now.`,
-      internal_audit_log: `Lead Name: ${senderName || 'Prospective Lead'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: ${messageText}\n• Urgency: ${text.includes('urgent') ? 'High' : 'Medium'}\nReason for Status: Clear buying intent for trophies/awards.\nPipeline Updated: Yes (Stage: Qualified)`
+      suggested_reply: `Hi ${identity.name || 'there'}, thank you for reaching out to EcoTrophy! We would be delighted to assist with your requirements. We are preparing our best options and catalog for you right now.`,
+      internal_audit_log: `Lead Name: ${identity.name}\nCompany: ${identity.company || 'N/A'}\nWhatsApp Number: ${senderPhone}\nStatus: Qualified\nKey Details Extracted:\n• Requirement: ${messageText}\n• Urgency: ${text.includes('urgent') ? 'High' : 'Medium'}\nReason for Status: Clear buying intent for trophies/awards.\nPipeline Updated: Yes (Stage: Qualified)`
     };
   }
 
-  // Ambiguous / Short greeting (e.g. 'hi', 'hello', 'vanakkam')
+  // 4. Ambiguous / Short greeting or casual personal message (NOT a qualified business lead)
   return {
-    classification: 'customer_query',
+    classification: 'other',
     qualification_status: 'Needs Follow-up',
+    is_business_lead: false,
     extracted_details: {
-      name: senderName || 'Contact',
-      company: '',
+      name: identity.name,
+      company: identity.company || '',
       email: '',
       phone: senderPhone,
       requirement: messageText,
@@ -153,16 +185,18 @@ function heuristicAnalysis(messageText: string, senderPhone: string, senderName:
       timeline: '',
       location: '',
       urgency: 'low',
-      recommended_next_action: 'Send friendly greeting and ask about requirements'
+      recommended_next_action: 'Wait for product/order requirement or reply politely'
     },
-    qualification_reason: 'Initial greeting received without specific product or quantity requirements specified.',
+    qualification_reason: 'Greeting or casual message without clear commercial buying intent.',
     recommended_pipeline_stage: 'new',
-    confidence_score: 0.65,
+    confidence_score: 0.6,
     flag_for_review: true,
-    suggested_reply: `Vanakkam ${senderName || ''}! Welcome to EcoTrophy Innovations — India's Premier Sustainable Trophy & Awards maker. How can we help you today?`,
-    internal_audit_log: `Lead Name: ${senderName || 'Contact'}\nWhatsApp Number: ${senderPhone}\nStatus: Needs Follow-up\nKey Details Extracted:\n• Requirement: Unspecified greeting\nReason for Status: Initial contact requiring further discovery of requirement.\nPipeline Updated: Yes (Stage: New)`
+    suggested_reply: `Vanakkam ${identity.name || ''}! Welcome to EcoTrophy Innovations — India's Premier Sustainable Trophy & Awards maker. How can we help you today?`,
+    internal_audit_log: `Lead Name: ${identity.name}\nWhatsApp Number: ${senderPhone}\nStatus: Needs Follow-up\nKey Details Extracted:\n• Requirement: Unspecified message\nReason for Status: No clear sales lead intent detected yet.\nPipeline Updated: Skipped`
   };
 }
+
+const GEMINI_MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 
 /**
  * Main AI Analyzer using Google Gemini with Tamil + Tanglish + English understanding
@@ -182,30 +216,31 @@ export async function analyzeIncomingWhatsAppMessage(
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.2,
-      },
-    });
-
     const historyFormatted = chatHistory.slice(-6).map(m => `[${m.direction.toUpperCase()}]: ${m.content}`).join('\n');
 
     const prompt = `
-You are an expert AI Sales Qualification and CRM Assistant for "EcoTrophy Innovations" (a company specializing in custom eco-friendly corporate trophies, mementos, and awards).
+You are an expert AI Sales Qualification and CRM Assistant for "EcoTrophy Innovations" (a company specializing in custom eco-friendly corporate trophies, mementos, medals, plaques, and awards).
 
-Your task is to analyze incoming WhatsApp messages from prospective clients or existing customers, accurately interpret Tamil, Tanglish (Tamil written in English script), and English, extract key sales details, make a qualification decision, and formulate a suggested professional reply.
+Your task is to analyze incoming WhatsApp messages from prospective clients or existing customers, accurately interpret Tamil, Tanglish (Tamil written in English script), and English, extract key sales details, determine whether this is a potential sales lead, make a qualification decision, and formulate a suggested professional reply.
 
 RULES:
 1. Multi-Lingual Understanding: Accurately understand colloquial Tamil & Tanglish (e.g. "50 pcs venum", "budget 25k kulla", "memento model anupunga", "naalai ku kidaikuma", "payment panniten").
 2. Store ALL extracted fields and reasoning in CLEAN, PROFESSIONAL ENGLISH.
-3. Strict Qualification:
-   - "Qualified": Matches our business ICP (trophies, mementos, plaques, event awards) with clear intent, quantity, or budget.
-   - "Not Qualified": Clear mismatch, spam, student projects without budget, unsolicited marketing.
-   - "Needs Follow-up": Ambiguous greetings ("hi", "hello"), unclear requirements, or missing key details.
-4. If confidence is below 0.70 or intent is ambiguous, set flag_for_review: true.
-5. Suggested reply: Draft a polite, concise response acknowledging their specific need. (DO NOT send automatically, this is for human approval).
+3. "is_business_lead":
+   - true ONLY if the conversation clearly shows a prospective customer enquiry wanting to purchase custom trophies, awards, medals, mementos, plaques, or corporate gifts, or a customer following up on an existing order or payment.
+   - FALSE for ALL VENDOR / SUPPLIER pitches (e.g. suppliers selling acrylic sheets, MDF, raw materials, trophy blanks, laser machines, UV printers, machinery, courier services, loans, digital marketing, website development). EcoTrophy is the SELLER; anyone trying to sell TO EcoTrophy is NOT a business lead.
+   - FALSE for ALL IndiaMART, TradeIndia, JustDial broadcasts, alerts ("buy lead", "view enquiry"), advertisements, spam, job seekers, and promotional broadcasts.
+   - FALSE for ALL regular personal conversations ("Hi", "Hello", "Call me", "Where are you", casual friend/family chats), greetings, acknowledgements ("Ok", "Thanks"), media-only placeholders ("Photo", "Video"), OTPs, bank alerts.
+4. Name & Company Extraction:
+   - Extract real personal name into "name" (e.g. from "I am Rajesh", "Name: Suresh", "Regards, Anand", or sender profile name if not a phone number).
+   - Extract company / institution name into "company" (e.g. from "ABC School", "Infosys", "Company: Tech Corp").
+   - NEVER set "name" to a phone number or generic "Customer" if an actual name or company name is found. If only a company is mentioned, use the company name in "name".
+5. Strict Qualification:
+   - "Qualified": Matches our business ICP (trophies, mementos, plaques, medals, corporate gifts) with clear customer buying intent, quantity, or budget.
+   - "Not Qualified": Vendor/supplier pitches, IndiaMART broadcasts, advertisements, spam, or non-business message.
+   - "Needs Follow-up": Customer buyer inquiry with incomplete specs (e.g. asking for catalog or prices without quantity yet).
+6. If confidence is below 0.70 or intent is ambiguous, set flag_for_review: true.
+7. Suggested reply: Draft a polite, concise response acknowledging their specific need. (DO NOT send automatically, this is for human approval).
 
 Incoming Message Details:
 Sender Phone: ${senderPhone}
@@ -217,6 +252,7 @@ ${historyFormatted || '(No prior history)'}
 
 Respond with a JSON object strictly matching this schema:
 {
+  "is_business_lead": true,
   "classification": "new_lead" | "follow_up" | "customer_query" | "support_issue" | "payment_related" | "meeting_request" | "spam" | "other",
   "qualification_status": "Qualified" | "Not Qualified" | "Needs Follow-up",
   "extracted_details": {
@@ -240,9 +276,37 @@ Respond with a JSON object strictly matching this schema:
 }
 `;
 
-    const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-    const parsed = JSON.parse(responseText);
+    let responseText = '';
+    let lastErr: any = null;
+    for (const modelName of GEMINI_MODEL_CANDIDATES) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+          },
+        });
+        const result = await model.generateContent(prompt);
+        responseText = result.response.text();
+        if (responseText) break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!responseText) {
+      throw lastErr || new Error('Empty Gemini response');
+    }
+
+    const cleanJson = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(cleanJson);
+
+    const inferredBusinessLead =
+      typeof parsed.is_business_lead === 'boolean'
+        ? parsed.is_business_lead
+        : parsed.classification !== 'spam' &&
+          parsed.classification !== 'other' &&
+          parsed.recommended_pipeline_stage !== 'lost';
 
     // Build the exact required audit log format
     const auditLog = `Lead Name: ${parsed.extracted_details?.name || senderName || 'Prospective Lead'}
@@ -256,11 +320,12 @@ Key Details Extracted:
 • Urgency: ${parsed.extracted_details?.urgency || 'Medium'}
 • Location: ${parsed.extracted_details?.location || 'Not specified'}
 Reason for Status: ${parsed.qualification_reason}
-Pipeline Updated: Yes (Stage: ${parsed.recommended_pipeline_stage.toUpperCase()})`;
+Pipeline Updated: ${inferredBusinessLead ? `Yes (Stage: ${(parsed.recommended_pipeline_stage || 'new').toUpperCase()})` : 'No'}`;
 
     return {
       classification: parsed.classification || 'new_lead',
       qualification_status: parsed.qualification_status || 'Needs Follow-up',
+      is_business_lead: inferredBusinessLead,
       extracted_details: {
         name: parsed.extracted_details?.name || senderName || '',
         company: parsed.extracted_details?.company || '',

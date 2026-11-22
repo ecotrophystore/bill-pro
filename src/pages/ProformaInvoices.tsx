@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown, Sparkles } from 'lucide-react';
+import { Plus, Search, FileText, Download, Filter, Loader2, Trash2, Edit, ChevronDown, Sparkles, Share2 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db, functions } from '../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
@@ -7,10 +7,13 @@ import { collection, query, orderBy, onSnapshot, doc, getDoc, deleteDoc, updateD
 import type { ProformaInvoice, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
 import PaymentModal from '../components/Billing/PaymentModal';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
+import ConvertDocumentModal, { type ConvertSourceDoc } from '../components/Billing/ConvertDocumentModal';
 
 export default function ProformaInvoices() {
   const navigate = useNavigate();
@@ -24,9 +27,12 @@ export default function ProformaInvoices() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [selectedInvoice, setSelectedInvoice] = useState<ProformaInvoice | null>(null);
+  const [shareInvoice, setShareInvoice] = useState<ProformaInvoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [convertModalDoc, setConvertModalDoc] = useState<ConvertSourceDoc | null>(null);
   const { settings } = useSettings();
 
   useEffect(() => {
@@ -72,6 +78,11 @@ export default function ProformaInvoices() {
   const openPaymentModal = (inv: ProformaInvoice) => {
     setSelectedInvoice(inv);
     setIsPaymentModalOpen(true);
+  };
+
+  const openShareModal = (inv: ProformaInvoice) => {
+    setShareInvoice(inv);
+    setIsShareModalOpen(true);
   };
 
   const deleteInvoice = async (id: string) => {
@@ -136,32 +147,86 @@ export default function ProformaInvoices() {
     }
   };
 
-  const handleConvertToInvoice = async (inv: ProformaInvoice) => {
+  const handleOpenConvertModal = (inv: ProformaInvoice) => {
     if (inv.payment_status !== 'paid') {
-      alert("Proforma Invoice can only be converted to a Tax Invoice when it is FULLY PAID.");
-      return;
+      const proceed = window.confirm("Proforma Invoice is not marked as fully paid. Do you still want to proceed with conversion?");
+      if (!proceed) return;
     }
-    const confirm = window.confirm(`Convert Proforma "${inv.number}" to a Tax Invoice? This cannot be undone.`);
-    if (!confirm) return;
-    setConvertingId(inv.id);
-    try {
-      const { clientConvertProformaToInvoice, deriveInvoiceNumberFromProforma } = await import('../utils/clientBillingCreator');
-      const result = await clientConvertProformaToInvoice(inv.id);
-      const invoiceNumber = (result as any).invoiceNumber || deriveInvoiceNumberFromProforma(inv.number);
-      alert(`Successfully converted! Tax Invoice created: ${invoiceNumber}`);
-      navigate('/invoices');
-    } catch (fallbackErr: any) {
-      console.error("Conversion failed:", fallbackErr);
-      alert('Failed to convert: ' + (fallbackErr.message || 'Unknown error'));
-    } finally {
-      setConvertingId(null);
-    }
+    setConvertModalDoc({
+      id: inv.id,
+      number: inv.number,
+      customer_id: inv.customer_id,
+      customer_name: customers[inv.customer_id]?.name,
+      customer_type: 'gst',
+      grand_total: inv.grand_total,
+      payment_status: inv.payment_status,
+    });
   };
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredInvoices = proformaInvoices
+  const handleConvertedSuccess = (_targetType: 'invoice' | 'proforma' | 'memo', docNumber: string) => {
+    alert(`Tax Invoice ${docNumber} created successfully!`);
+    navigate('/invoices');
+  };
+
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filteredInvoices = proformaInvoices
       .filter(inv => inv.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
+    const now = new Date();
+    filteredInvoices = filteredInvoices.filter(inv => {
+      const date = inv.created_at ? inv.created_at.toDate() : new Date();
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filteredInvoices.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              const { downloadPDF } = await import('../utils/pdfGenerator');
+              for (const item of filteredInvoices) {
+                const blob = await downloadPDF(item, customers[item.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'blob', settings);
+                if (blob) {
+                  const customerName = customers[item.customer_id]?.name || 'Unknown';
+                  const filename = `ProformaInvoice_${item.number}_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                  zip.file(filename, blob);
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'ProformaInvoices_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
 
     if (format === 'excel') {
       const reportData = filteredInvoices.map(inv => ({
@@ -202,6 +267,10 @@ export default function ProformaInvoices() {
     }
   };
 
+  const displayInvoices = proformaInvoices
+    .filter(inv => (inv.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || (inv as any).customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -210,33 +279,17 @@ export default function ProformaInvoices() {
           <p className="text-secondary mt-1">Manage proforma invoices, tracked by separate sequence.</p>
         </div>
         <div className="flex gap-4 items-center w-full sm:w-auto">
-          <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button onClick={() => navigate('/proforma-invoices/new')} className="neo-btn-primary flex items-center gap-2">
             <Plus size={18} /> New Proforma Invoice
           </button>
@@ -256,7 +309,7 @@ export default function ProformaInvoices() {
         </div>
         <div className="relative">
           <select 
-            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+            className="neo-btn w-full sm:w-auto !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -271,9 +324,10 @@ export default function ProformaInvoices() {
 
       <div className="neo-card overflow-hidden !p-0">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
-              <tr className="bg-surface border-b border-shadow-darker/10">
+              <tr className="bg-transparent border-b border-shadow-darker/10">
                 <th className="p-4 font-semibold text-primary-dark">Proforma Number</th>
                 <th className="p-4 font-semibold text-primary-dark">Customer</th>
                 <th className="p-4 font-semibold text-primary-dark">Date</th>
@@ -287,27 +341,53 @@ export default function ProformaInvoices() {
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Loading proforma invoices...
                 </td></tr>
-              ) : proformaInvoices.length === 0 ? (
+              ) : displayInvoices.length === 0 ? (
                 <tr><td colSpan={6} className="p-8 text-center text-secondary">No proforma invoices found.</td></tr>
-              ) : proformaInvoices
-                  .filter(inv => (inv.number || '').toLowerCase().includes(searchTerm.toLowerCase()) || (customers[inv.customer_id]?.name || (inv as any).customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(inv => statusFilter === 'all' || (inv.payment_status || 'unpaid') === statusFilter)
-                  .map((inv) => (
+              ) : displayInvoices.map((inv) => (
                 <tr key={inv.id} className="hover:bg-shadow-darker/5 transition-colors">
-                  <td className="p-4 font-medium text-primary-dark">{inv.number}</td>
+                  <td className="p-4 font-medium text-primary-dark">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>{inv.number}</span>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold" title={`Active version: v${inv.version || 1}`}>
+                        v{inv.version || 1}
+                      </span>
+                    </div>
+                    {inv.versions && inv.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {inv.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/proforma-invoices/edit/${inv.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (inv.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary hover:bg-shadow-darker/20 hover:text-primary-dark'
+                            }`}
+                            title={`Click to edit Version ${v.versionNumber}`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="p-4 text-secondary">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</td>
                   <td className="p-4 text-secondary">{inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
                   <td className="p-4 text-right font-medium text-primary-dark">
-                    <div>₹ {inv.grand_total?.toLocaleString() || '0'}</div>
+                    <div>₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}</div>
                     {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
                       <div className="text-xs text-orange-600 font-semibold mt-0.5">
-                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                        Bal: ₹ {inv.balance_amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </div>
                     )}
                   </td>
                   <td className="p-4 text-center">
                     {(inv as any).conversion_status === 'converted' ? (
-                      <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+                      <span className="neo-badge text-success bg-transparent shadow-neo-surface">Converted</span>
                     ) : (
                       <button 
                         onClick={() => openPaymentModal(inv)}
@@ -320,51 +400,109 @@ export default function ProformaInvoices() {
                   </td>
                   <td className="p-4 text-center">
                     <div className="flex justify-center gap-2">
-                      {(inv as any).conversion_status !== 'converted' && inv.payment_status === 'paid' && (
-                        <button 
-                          onClick={() => handleConvertToInvoice(inv)}
-                          disabled={convertingId === inv.id}
-                          className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold"
-                          title="Convert to Tax Invoice"
-                        >
-                          {convertingId === inv.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                          Convert
+                      {(inv as any).conversion_status !== 'converted' && (
+                        <button onClick={() => handleOpenConvertModal(inv)} className="neo-btn !p-2 !px-3 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold" title="Convert to Tax Invoice">
+                          <Sparkles size={14} /> Convert
                         </button>
                       )}
-                      <button 
-                        onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)}
-                        className="p-2 text-secondary hover:text-primary transition-colors" 
-                        title="Edit Proforma Invoice"
-                      >
-                        <Edit size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="View PDF"
-                      >
-                        <FileText size={18} />
-                      </button>
-                      <button 
-                        onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)}
-                        className="p-2 text-secondary hover:text-primary-dark transition-colors" 
-                        title="Download"
-                      >
-                        <Download size={18} />
-                      </button>
-                      <button 
-                        onClick={() => deleteInvoice(inv.id)}
-                        className="p-2 text-secondary hover:text-red-600 transition-colors" 
-                        title="Delete Proforma Invoice"
-                      >
-                        <Trash2 size={18} />
-                      </button>
+                      <button onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Proforma Invoice"><Edit size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="View PDF"><FileText size={18} /></button>
+                      <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)} className="p-2 text-secondary hover:text-primary-dark transition-colors" title="Download"><Download size={18} /></button>
+                      <button onClick={() => openShareModal(inv)} className="p-2 text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={18} /></button>
+                      <button onClick={() => deleteInvoice(inv.id)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Proforma Invoice"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Loading proforma invoices...
+              </div>
+            ) : displayInvoices.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No proforma invoices found.</div>
+            ) : displayInvoices.map((inv) => (
+              <div key={inv.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-primary-dark text-lg leading-tight">{inv.number}</h3>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold">
+                        v{inv.version || 1}
+                      </span>
+                    </div>
+                    {inv.versions && inv.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {inv.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/proforma-invoices/edit/${inv.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (inv.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary'
+                            }`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-secondary font-medium mt-0.5">{customers[inv.customer_id]?.name || (inv as any).customer_name || 'Loading...'}</p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {inv.created_at ? inv.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {inv.grand_total ? inv.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
+                    <div className="mt-1">
+                      {(inv as any).conversion_status === 'converted' ? (
+                        <span className="neo-badge text-success bg-transparent shadow-neo-surface">Converted</span>
+                      ) : (
+                        <button 
+                          onClick={() => openPaymentModal(inv)}
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+                          inv.payment_status === 'paid' ? 'bg-green-100 text-green-700' : inv.payment_status === 'partial' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {inv.payment_status?.toUpperCase() || 'UNPAID'}
+                        </button>
+                      )}
+                    </div>
+                    {inv.payment_status !== 'paid' && inv.balance_amount !== undefined && (
+                      <div className="text-xs text-orange-600 font-bold mt-1">
+                        Bal: ₹ {inv.balance_amount.toLocaleString()}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex flex-col gap-2 pt-2 border-t border-shadow-darker/5">
+                  {(inv as any).conversion_status !== 'converted' && (
+                    <button onClick={() => handleOpenConvertModal(inv)} className="neo-btn !p-2 w-full text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex justify-center items-center gap-1 text-xs font-bold mb-1">
+                      <Sparkles size={14} /><span>Convert to Tax Invoice</span>
+                    </button>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => navigate(`/proforma-invoices/edit/${inv.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
+                    <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
+                    <button onClick={() => downloadPDF(inv, customers[inv.customer_id] || 'Unknown Customer', 'Proforma Invoice', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
+                    <button onClick={() => openShareModal(inv)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
+                    <button onClick={() => deleteInvoice(inv.id)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -378,6 +516,30 @@ export default function ProformaInvoices() {
           document={selectedInvoice}
           documentType="proforma_invoice"
           onPaymentUpdated={() => {}}
+        />
+      )}
+
+      {shareInvoice && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareInvoice(null);
+          }}
+          document={shareInvoice}
+          documentType="Proforma Invoice"
+          customer={customers[shareInvoice.customer_id]}
+          settings={settings}
+        />
+      )}
+
+      {convertModalDoc && (
+        <ConvertDocumentModal
+          isOpen={!!convertModalDoc}
+          onClose={() => setConvertModalDoc(null)}
+          sourceDoc={convertModalDoc}
+          sourceType="proforma"
+          onConverted={handleConvertedSuccess}
         />
       )}
     </div>

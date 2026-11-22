@@ -59,7 +59,7 @@ export function ReminderAlarmProvider({ children }: { children: React.ReactNode 
 
   // Listen to active reminders from Firestore
   useEffect(() => {
-    if (!db) return;
+    if (!db || !user) return;
 
     const q = query(
       collection(db, 'lead_notes'),
@@ -91,6 +91,9 @@ export function ReminderAlarmProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
+
+      // Check daily 10:00 AM - 10:30 AM sales follow-up window
+      checkDailyFollowupWindow();
 
       activeReminders.forEach((note) => {
         const scheduledMs = getNoteTimeMs(note);
@@ -137,6 +140,45 @@ export function ReminderAlarmProvider({ children }: { children: React.ReactNode 
       tag: note.id,
       requireInteraction: true,
     });
+  };
+
+  // Daily Sales Team Follow-up window check (10:00 AM - 10:30 AM local time)
+  const checkDailyFollowupWindow = () => {
+    if (!user) return;
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+
+    // Active between 10:00 AM and 10:30 AM
+    const inWindow = hours === 10 && minutes <= 30;
+    if (!inWindow) return;
+
+    const todayDateKey = `ecobill_daily_followup_${now.getFullYear()}_${now.getMonth() + 1}_${now.getDate()}`;
+    if (typeof window !== 'undefined' && window.localStorage.getItem(todayDateKey)) return;
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(todayDateKey, 'true');
+    }
+
+    const dailyRoutineNote: LeadNote = {
+      id: `daily_followup_${now.toISOString().slice(0, 10)}`,
+      lead_id: 'pipeline',
+      lead_name: 'Sales Team Daily Routine',
+      company: 'Client Follow-ups',
+      content: '⏰ Daily Client Follow-up Time (10:00 AM - 10:30 AM): Please message and follow up with clients on pending enquiries, sent quotations, and design mockups.',
+      category: 'task',
+      priority: 'urgent',
+      stage_name: 'Follow-up Window (10:00 AM - 10:30 AM)',
+      tagged_users: [],
+      has_reminder: true,
+      alarm_enabled: true,
+      alarm_sound: 'urgent',
+      author_id: 'system',
+      author_name: 'Sales Team Follow-up Reminder',
+      created_at: new Date() as any,
+    };
+
+    triggerAlarmForNote(dailyRoutineNote);
   };
 
   const muteAlarmSound = () => {

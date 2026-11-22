@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -17,6 +18,8 @@ import {
 import clsx from 'clsx';
 import { db } from '../../lib/firebase';
 import { collection, query, orderBy, limit, onSnapshot, updateDoc, doc, writeBatch, getDocs } from 'firebase/firestore';
+import { useAuth } from '../../contexts/AuthContext';
+import { fetchScopedLeads } from '../../utils/leadVisibility';
 
 export interface AppNotification {
   id: string;
@@ -35,6 +38,7 @@ interface NotificationDrawerProps {
 }
 
 export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: NotificationDrawerProps) {
+  const { dbUser } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -84,6 +88,24 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
           const unread = items.filter((n) => !n.is_read).length;
           onUnreadCountChange?.(unread);
           setLoading(false);
+
+          // Alert user to new notifications via toast
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              if (!data.is_read) {
+                const now = Date.now();
+                const ts = typeof data.created_at?.toMillis === 'function' ? data.created_at.toMillis() : 0;
+                // Only toast if created in the last 15 seconds (prevents spam on initial load)
+                if (ts > now - 15000) {
+                  toast.success(`New Activity: ${data.title}`, {
+                    duration: 5000,
+                    icon: '🔔'
+                  });
+                }
+              }
+            }
+          });
         } else {
           // If no stored notification docs exist yet, check live invoice/leads to provide useful system alerts
           try {
@@ -106,17 +128,16 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
               }
             });
 
-            // Check recent leads
-            const leadsSnap = await getDocs(query(collection(db, 'leads'), limit(5)));
-            leadsSnap.forEach((d) => {
-              const data = d.data();
+            // Check recent leads (scoped by role/assignment)
+            const scopedLeads = await fetchScopedLeads(db, dbUser, [limit(5)]);
+            scopedLeads.forEach((data) => {
               if (data.status === 'New' || data.status === 'Intake' || !data.status) {
                 defaultNotifs.push({
-                  id: `lead-${d.id}`,
+                  id: `lead-${data.id}`,
                   title: `New Lead: ${data.name || 'Inbound Lead'}`,
                   message: `Source: ${data.source || data.platform || 'Direct'} • Phone: ${data.phone || 'N/A'}`,
                   type: 'lead',
-                  link: `/leads/${d.id}`,
+                  link: `/leads/${data.id}`,
                   is_read: false,
                   timestamp: data.created_at || new Date(),
                 });
@@ -229,7 +250,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       className="absolute right-0 top-14 w-80 sm:w-96 neo-card !p-0 shadow-2xl border border-shadow-darker/20 z-50 animate-scale-up overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-shadow-darker/10 bg-surface">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-shadow-darker/10 bg-transparent">
         <div className="flex items-center gap-2">
           <Bell size={18} className="text-primary" />
           <span className="font-bold text-sm text-primary-dark">Notifications</span>
@@ -268,7 +289,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       </div>
 
       {/* Notifications List */}
-      <div className="max-h-[360px] overflow-y-auto divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-surface/95">
+      <div className="max-h-[360px] overflow-y-auto divide-y divide-shadow-darker/5 custom-sidebar-scrollbar bg-transparent">
         {loading ? (
           <div className="py-12 flex items-center justify-center text-secondary">
             <Loader2 size={24} className="animate-spin text-primary mr-2" />
@@ -290,7 +311,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
                 notif.is_read ? 'hover:bg-shadow-darker/5 opacity-75' : 'bg-primary/5 hover:bg-primary/10'
               )}
             >
-              <div className="w-8 h-8 rounded-lg bg-surface shadow-neo-surface flex items-center justify-center shrink-0 mt-0.5">
+              <div className="w-8 h-8 rounded-lg bg-transparent shadow-neo-surface flex items-center justify-center shrink-0 mt-0.5">
                 {getIcon(notif.type)}
               </div>
               <div className="flex-1 min-w-0">
@@ -313,7 +334,7 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-2 border-t border-shadow-darker/10 bg-surface/80 flex items-center justify-between text-[11px] text-secondary">
+      <div className="px-4 py-2 border-t border-shadow-darker/10 bg-transparent flex items-center justify-between text-[11px] text-secondary">
         <span>System updates & live reminders</span>
         <button
           onClick={() => {
@@ -328,3 +349,4 @@ export function NotificationDrawer({ isOpen, onClose, onUnreadCountChange }: Not
     </div>
   );
 }
+

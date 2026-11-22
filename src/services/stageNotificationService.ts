@@ -10,13 +10,133 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage } from '../types';
+import { httpsCallable } from 'firebase/functions';
+import { db, auth, functions } from '../lib/firebase';
+import { resolveApiUrl } from '../lib/apiBase';
+import type { Lead, StageHistoryEntry, NotificationHistoryEntry, StageMessageConfig, PipelineStage, StageMovePromptMode } from '../types';
+export type { StageMovePromptMode };
 import { buildTemplateContext, renderTemplateText, DEFAULT_STAGE_MESSAGES } from '../utils/templateVariables';
+import { fetchAllSessions } from './whatsappMultiSessionService';
+import {
+  doesWhatsAppNumberMatch,
+  formatWhatsAppNumberDisplay,
+  normalizeWhatsAppDigits
+} from '../utils/whatsappNumberUtils';
+import toast from 'react-hot-toast';
 
-const PERMANENT_TOKEN =
-  'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
-const PHONE_NUMBER_ID = '1292217613971980';
+async function sendViaElectronWhatsAppWeb(params: {
+  targetPhone: string;
+  contactName?: string;
+  message: string;
+  sourceWhatsappNumber?: string;
+  sourceSessionId?: string;
+}): Promise<{ ok: boolean; error?: string; fromNumber?: string; resolvedPhone?: string }> {
+  if (typeof window === 'undefined') {
+    return { ok: false, error: 'Browser window unavailable' };
+  }
+
+  // When invoked from Chrome/external browser, bridge through running EcoBill Desktop on localhost control port
+  if (!window.electronAPI?.isElectron) {
+    try {
+      const res = await fetch(resolveApiUrl('/api/desktop/send-whatsapp'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok) {
+        return { ok: true, fromNumber: data.fromNumber, resolvedPhone: data.resolvedPhone };
+      }
+      return {
+        ok: false,
+        error: data?.error || 'Open EcoBill Desktop window and connect your WhatsApp tab'
+      };
+    } catch {
+      return { ok: false, error: 'EcoBill Desktop app is not open on this PC' };
+    }
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (res: { ok: boolean; error?: string; fromNumber?: string; resolvedPhone?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(guardTimer);
+      resolve(res);
+    };
+
+    const guardTimer = setTimeout(() => {
+      finish({ ok: false, error: 'WhatsApp Web tab did not respond in time' });
+    }, 38000);
+
+    window.dispatchEvent(
+      new CustomEvent('ecobill:wa-send-message', {
+        detail: {
+          ...params,
+          callback: (res: { ok: boolean; error?: string; fromNumber?: string; resolvedPhone?: string }) => finish(res)
+        }
+      })
+    );
+  });
+}
+
+async function sendViaBaileysSession(params: {
+  targetPhone: string;
+  message: string;
+  sourceWhatsappNumber?: string;
+  sourceSessionId?: string;
+}): Promise<{ ok: boolean; error?: string; fromNumber?: string }> {
+  try {
+    const sessions = await fetchAllSessions();
+    const connected = sessions.filter((s) => s.status === 'connected');
+    if (connected.length === 0) {
+      return { ok: false, error: 'No connected WhatsApp session in Multi-Account backend' };
+    }
+
+    let matched = undefined;
+    if (params.sourceWhatsappNumber) {
+      matched =
+        connected.find((s) => doesWhatsAppNumberMatch(s.phoneNumber, params.sourceWhatsappNumber)) ||
+        connected.find(
+          (s) =>
+            s.id === params.sourceSessionId &&
+            (!s.phoneNumber || doesWhatsAppNumberMatch(s.phoneNumber, params.sourceWhatsappNumber))
+        );
+
+      if (!matched) {
+        return {
+          ok: false,
+          error: `Originating WhatsApp ${formatWhatsAppNumberDisplay(params.sourceWhatsappNumber)} is not connected`
+        };
+      }
+    } else {
+      matched =
+        (params.sourceSessionId && connected.find((s) => s.id === params.sourceSessionId)) ||
+        connected[0];
+    }
+
+    const res = await fetch(resolveApiUrl('/api/whatsapp/send'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: matched.id,
+        phone: params.targetPhone,
+        message: params.message
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.success) {
+      return { ok: false, error: data?.error || 'Baileys send failed' };
+    }
+
+    return {
+      ok: true,
+      fromNumber: normalizeWhatsAppDigits(matched.phoneNumber || params.sourceWhatsappNumber || '')
+    };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Baileys backend unreachable' };
+  }
+}
 
 export interface StageMoveResult {
   success: boolean;
@@ -27,6 +147,62 @@ export interface StageMoveResult {
     email?: 'sent' | 'pending' | 'failed' | 'disabled';
   };
   error?: string;
+}
+
+export const STAGE_MOVE_MODE_KEY = 'ecobill.stageMoveMode';
+export const STAGE_MOVE_MODE_EVENT = 'ecobill:stage-move-mode-changed';
+export const AUTO_SEND_STAGE_WA_KEY = 'ecobill.autoSendStageWhatsApp';
+export const AUTO_SEND_STAGE_WA_EVENT = 'ecobill:auto-send-stage-wa-changed';
+
+export function getStageMoveMode(): StageMovePromptMode {
+  if (typeof window === 'undefined') return 'ask';
+  const val = window.localStorage.getItem(STAGE_MOVE_MODE_KEY) as StageMovePromptMode | null;
+  if (val === 'ask' || val === 'auto_send' || val === 'without_message') {
+    return val;
+  }
+  // Default to 'ask' so the user is always prompted "with message" or "without message"
+  return 'ask';
+}
+
+export function setStageMoveMode(mode: StageMovePromptMode): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(STAGE_MOVE_MODE_KEY, mode);
+  window.localStorage.setItem(AUTO_SEND_STAGE_WA_KEY, String(mode === 'auto_send'));
+  window.dispatchEvent(new CustomEvent(STAGE_MOVE_MODE_EVENT, { detail: mode }));
+  window.dispatchEvent(new CustomEvent(AUTO_SEND_STAGE_WA_EVENT, { detail: mode === 'auto_send' }));
+}
+
+export function subscribeStageMoveModeChange(callback: (mode: StageMovePromptMode) => void): () => void {
+  if (typeof window === 'undefined') return () => { };
+  const handler = (ev: Event) => {
+    const custom = ev as CustomEvent<StageMovePromptMode>;
+    callback(custom.detail || getStageMoveMode());
+  };
+  window.addEventListener(STAGE_MOVE_MODE_EVENT, handler);
+  return () => window.removeEventListener(STAGE_MOVE_MODE_EVENT, handler);
+}
+
+export function getAutoSendOnStageMoveEnabled(): boolean {
+  return getStageMoveMode() === 'auto_send';
+}
+
+export function setAutoSendOnStageMoveEnabled(enabled: boolean): void {
+  setStageMoveMode(enabled ? 'auto_send' : 'ask');
+}
+
+export function subscribeAutoSendOnStageMoveChange(callback: (enabled: boolean) => void): () => void {
+  if (typeof window === 'undefined') return () => { };
+  const handler = (ev: Event) => {
+    const custom = ev as CustomEvent<boolean>;
+    callback(typeof custom.detail === 'boolean' ? custom.detail : getAutoSendOnStageMoveEnabled());
+  };
+  window.addEventListener(AUTO_SEND_STAGE_WA_EVENT, handler);
+  return () => window.removeEventListener(AUTO_SEND_STAGE_WA_EVENT, handler);
+}
+
+export function stageRequiresReason(stage?: PipelineStage | null): boolean {
+  if (!stage) return false;
+  return (stage.required_fields || []).includes('reason') || stage.id === 'lost_cancelled';
 }
 
 /**
@@ -50,7 +226,7 @@ export function checkDuplicateStageNotification(lead: Partial<Lead>, targetStage
 } {
   const history = lead.notification_history || [];
   const existing = history.find(
-    (n) => n.stage_id === targetStageId && (n.status === 'sent' || n.status === 'pending')
+    (n) => n.stage_id === targetStageId && n.channel === 'whatsapp' && n.status === 'sent'
   );
 
   if (existing) {
@@ -132,6 +308,7 @@ export async function executeManualStageMove(params: {
   pipelineId: string;
   pipelineName: string;
   sendMessage: boolean;
+  skipDuplicateSend?: boolean;
   customReason?: string;
   userNote?: string;
   currentUserId?: string;
@@ -144,6 +321,7 @@ export async function executeManualStageMove(params: {
     pipelineId,
     pipelineName,
     sendMessage,
+    skipDuplicateSend = false,
     customReason,
     userNote,
     currentUserId = auth?.currentUser?.uid || 'user',
@@ -156,7 +334,11 @@ export async function executeManualStageMove(params: {
 
   const notificationStatus: StageMoveResult['notificationStatus'] = {};
   const notificationHistoryEntries: NotificationHistoryEntry[] = [];
+  let whatsappFailureReason = '';
   const now = new Date();
+  const duplicateCheck = skipDuplicateSend ? checkDuplicateStageNotification(lead, toStage.id) : { isDuplicate: false };
+  const skippedDueToDuplicate = Boolean(sendMessage && duplicateCheck.isDuplicate);
+  const effectiveSendMessage = Boolean(sendMessage && !skippedDueToDuplicate);
 
   // 1. Stage History Entry
   const stageHistoryEntry: StageHistoryEntry = {
@@ -166,23 +348,25 @@ export async function executeManualStageMove(params: {
     changed_by_name: currentUserName,
     changed_at: now,
     note: customReason || userNote || `Moved to ${toStage.label}`,
-    notification_triggered: sendMessage,
+    notification_triggered: effectiveSendMessage,
   };
 
   // 2. Resolve Notification Messages if enabled
-  if (sendMessage) {
+  if (effectiveSendMessage) {
     const config = await getStageMessageConfig(toStage.id, toStage.label, pipelineId);
     const context = buildTemplateContext(lead, toStage.label, fromStage.label);
 
     // A. WhatsApp Notification
     if (config.whatsapp_enabled && config.whatsapp_template) {
       const renderedMessage = renderTemplateText(config.whatsapp_template, context);
-      const phone = lead.phone || (lead as any).senderPhone || '';
+      const phone = lead.phone || (lead as any).whatsapp_number || (lead as any).senderPhone || '';
       const cleanPhone = String(phone).replace(/\D/g, '');
       const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      const contactLookupName = (lead.name || '').trim();
 
-      if (!finalPhone) {
+      if (!finalPhone && !contactLookupName) {
         notificationStatus.whatsapp = 'failed';
+        whatsappFailureReason = 'Customer has no valid phone number or contact name saved on this lead.';
         notificationHistoryEntries.push({
           id: `wa_${Date.now()}`,
           stage_id: toStage.id,
@@ -196,82 +380,198 @@ export async function executeManualStageMove(params: {
           error: 'Customer has no valid phone number.',
         });
       } else {
-        try {
-          // Attempt dispatch via WhatsApp API
-          const url = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${PERMANENT_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              messaging_product: 'whatsapp',
-              recipient_type: 'individual',
-              to: finalPhone,
-              type: 'text',
-              text: { body: renderedMessage },
-            }),
+        let sentWhatsApp = false;
+        let lastWaError = '';
+        const sourceWhatsappNumber = normalizeWhatsAppDigits(lead.source_whatsapp_number || '');
+        const sourceSessionId = lead.source_session_id || '';
+        let sentFromNumber = sourceWhatsappNumber;
+        let resolvedRecipientPhone = finalPhone;
+
+        // 1. Prefer Electron logged-in WhatsApp Web tab matching the lead's originating number
+        // Supports both phone-number routing and saved WhatsApp contact-name lookup (when phone was not in sidebar DOM)
+        const electronRes = await sendViaElectronWhatsAppWeb({
+          targetPhone: finalPhone,
+          contactName: contactLookupName,
+          message: renderedMessage,
+          sourceWhatsappNumber,
+          sourceSessionId
+        });
+
+        if (electronRes.ok) {
+          sentWhatsApp = true;
+          if (electronRes.fromNumber) {
+            sentFromNumber = normalizeWhatsAppDigits(electronRes.fromNumber);
+          }
+          if (electronRes.resolvedPhone && !finalPhone) {
+            resolvedRecipientPhone = normalizeWhatsAppDigits(electronRes.resolvedPhone);
+          }
+        } else {
+          lastWaError = electronRes.error || '';
+        }
+
+        // 2. Try connected Baileys session matching the exact originating number (requires numeric phone)
+        if (!sentWhatsApp && finalPhone) {
+          const baileysRes = await sendViaBaileysSession({
+            targetPhone: finalPhone,
+            message: renderedMessage,
+            sourceWhatsappNumber,
+            sourceSessionId
           });
 
-          const resData = await res.json();
-
-          if (resData.messages?.[0]?.id) {
-            notificationStatus.whatsapp = 'sent';
-            notificationHistoryEntries.push({
-              id: `wa_${resData.messages[0].id}`,
-              stage_id: toStage.id,
-              stage_name: toStage.label,
-              channel: 'whatsapp',
-              recipient: finalPhone,
-              message: renderedMessage,
-              status: 'sent',
-              sent_at: now,
-              sent_by: currentUserName,
-            });
-
-            // Record in messages collection
-            await addDoc(collection(db, 'messages'), {
-              leadId: lead.id,
-              senderPhone: finalPhone,
-              direction: 'outbound',
-              type: 'text',
-              content: renderedMessage,
-              metaMessageId: resData.messages[0].id,
-              platform: 'whatsapp',
-              created_at: serverTimestamp(),
-            });
-          } else {
-            // Log as pending/configured fallback if API returns error/unconfigured
-            console.warn('WhatsApp API response notice:', resData);
-            notificationStatus.whatsapp = 'pending';
-            notificationHistoryEntries.push({
-              id: `wa_pending_${Date.now()}`,
-              stage_id: toStage.id,
-              stage_name: toStage.label,
-              channel: 'whatsapp',
-              recipient: finalPhone,
-              message: renderedMessage,
-              status: 'pending',
-              sent_at: now,
-              sent_by: currentUserName,
-              error: resData.error?.message || 'WhatsApp message pending – integration not configured',
-            });
+          if (baileysRes.ok) {
+            sentWhatsApp = true;
+            if (baileysRes.fromNumber) {
+              sentFromNumber = normalizeWhatsAppDigits(baileysRes.fromNumber);
+            }
+          } else if (baileysRes.error) {
+            lastWaError = lastWaError ? `${lastWaError}; ${baileysRes.error}` : baileysRes.error;
           }
-        } catch (apiErr: any) {
-          console.warn('WhatsApp dispatch warning:', apiErr);
-          notificationStatus.whatsapp = 'pending';
+        }
+
+        if (sentWhatsApp && db) {
+          await addDoc(collection(db, 'messages'), {
+            leadId: lead.id,
+            senderPhone: resolvedRecipientPhone || contactLookupName,
+            sourceWhatsappNumber: sentFromNumber,
+            direction: 'outbound',
+            type: 'text',
+            content: renderedMessage,
+            platform: 'whatsapp',
+            triggeredBy: 'stage_change',
+            created_at: serverTimestamp(),
+          }).catch(() => { });
+        }
+
+        // 3. Only fall back to Cloud Function / Meta Cloud API if phone exists and no specific WhatsApp Web source number recorded
+        if (!sentWhatsApp && finalPhone && !sourceWhatsappNumber && functions) {
+          try {
+            const sendFn = httpsCallable(functions, 'sendStageWhatsApp');
+            await sendFn({
+              leadId: lead.id,
+              message: renderedMessage,
+              phone: finalPhone,
+              stageId: toStage.id,
+              stageName: toStage.label,
+            });
+            sentWhatsApp = true;
+          } catch (fnErr: any) {
+            lastWaError = fnErr?.details?.message || fnErr?.message || 'Cloud function error';
+            console.warn('[sendStageWhatsApp] Cloud function failed, trying direct Meta Cloud API fallback:', fnErr);
+          }
+        }
+
+        // 4. Direct Meta Graph API Fallback (only when phone exists and no specific logged-in WhatsApp number is bound)
+        if (!sentWhatsApp && finalPhone && !sourceWhatsappNumber) {
+          try {
+            let phoneId = '1263075550230396';
+            let token = 'EAAP5CXj9PZA0BSZArJ0rvk8MMj0L90vBkzBNs6lhFeYwCEFv4ko0dj49kmqxRKwTZBsWhO18Ecsk4ZCQ4V6xLJtZCD2h2NAb3U9eakgQZCYELZAkQqPY300LngHx9DmeoOE3WBGTtASRr5XfjfBp1x0vmjKS6sf8dsKdDGIOvbtTM2QZBccvuBxS6hZCdg5QmhAZDZD';
+            let version = 'v18.0';
+
+            if (db) {
+              try {
+                const metaDoc = await getDoc(doc(db, 'meta_integrations', 'default'));
+                if (metaDoc.exists()) {
+                  const data = metaDoc.data();
+                  if (data?.whatsappPhoneNumberId) phoneId = data.whatsappPhoneNumberId;
+                  if (data?.metaWhatsAppAccessToken || data?.accessToken)
+                    token = data.metaWhatsAppAccessToken || data.accessToken;
+                  if (data?.graphApiVersion) version = data.graphApiVersion;
+                }
+              } catch (e) {
+                console.warn('[stageNotificationService] Could not read meta_integrations/default:', e);
+              }
+            }
+
+            const res = await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: finalPhone,
+                type: 'text',
+                text: { body: renderedMessage },
+              }),
+            });
+
+            const resJson = await res.json();
+            if (resJson.error) {
+              lastWaError = resJson.error.message || 'Meta Cloud API error';
+            } else if (resJson.messages?.[0]?.id) {
+              const wamid = resJson.messages[0].id;
+              sentWhatsApp = true;
+
+              if (db) {
+                await addDoc(collection(db, 'messages'), {
+                  leadId: lead.id,
+                  senderPhone: finalPhone,
+                  direction: 'outbound',
+                  type: 'text',
+                  content: renderedMessage,
+                  metaMessageId: wamid,
+                  platform: 'whatsapp',
+                  triggeredBy: 'stage_change',
+                  created_at: serverTimestamp(),
+                });
+              }
+            }
+          } catch (directErr: any) {
+            lastWaError = directErr?.message || String(directErr);
+          }
+        }
+
+        if (sentWhatsApp) {
+          notificationStatus.whatsapp = 'sent';
           notificationHistoryEntries.push({
-            id: `wa_err_${Date.now()}`,
+            id: `wa_${Date.now()}`,
             stage_id: toStage.id,
             stage_name: toStage.label,
             channel: 'whatsapp',
-            recipient: finalPhone,
+            recipient: resolvedRecipientPhone || contactLookupName || 'WhatsApp Contact',
             message: renderedMessage,
-            status: 'pending',
+            status: 'sent',
+            sent_at: now,
+            sent_by: sentFromNumber
+              ? `${currentUserName} (via ${formatWhatsAppNumberDisplay(sentFromNumber)})`
+              : currentUserName,
+          });
+          const leadBackfill: Record<string, string> = {};
+          if (sentFromNumber && !lead.source_whatsapp_number) {
+            leadBackfill.source_whatsapp_number = sentFromNumber;
+            leadBackfill.source_whatsapp_label = formatWhatsAppNumberDisplay(sentFromNumber);
+          }
+          if (resolvedRecipientPhone && !finalPhone) {
+            leadBackfill.phone = resolvedRecipientPhone;
+            leadBackfill.normalized_phone = resolvedRecipientPhone;
+            leadBackfill.whatsapp_number = resolvedRecipientPhone;
+          }
+          if (Object.keys(leadBackfill).length > 0 && db) {
+            updateDoc(doc(db, 'leads', lead.id), leadBackfill).catch(() => { });
+          }
+        } else {
+          // Failed (e.g. missing originating tab, offline session, or 24h Meta Cloud window closed)
+          // Record as failed notification so lead movement is NOT blocked
+          const is24hWindow = lastWaError.includes('24 hours') || lastWaError.includes('131047');
+          const reasonNotice = is24hWindow
+            ? 'Customer 24h reply window closed. Use WhatsApp Web.'
+            : lastWaError;
+          whatsappFailureReason = reasonNotice;
+
+          notificationStatus.whatsapp = 'failed';
+          notificationHistoryEntries.push({
+            id: `wa_failed_${Date.now()}`,
+            stage_id: toStage.id,
+            stage_name: toStage.label,
+            channel: 'whatsapp',
+            recipient: finalPhone || contactLookupName || 'No phone',
+            message: renderedMessage,
+            status: 'failed',
             sent_at: now,
             sent_by: currentUserName,
-            error: apiErr?.message || 'WhatsApp message pending – integration not configured',
+            error: reasonNotice,
           });
         }
       }
@@ -323,7 +623,7 @@ export async function executeManualStageMove(params: {
 
   const updatedNotificationsSent = {
     ...existingSentMap,
-    ...(sendMessage ? { [toStage.id]: true } : {}),
+    ...(notificationStatus.whatsapp === 'sent' ? { [toStage.id]: true } : {}),
   };
 
   const leadUpdatePayload: any = {
@@ -343,9 +643,11 @@ export async function executeManualStageMove(params: {
   await updateDoc(doc(db, 'leads', lead.id), leadUpdatePayload);
 
   // 4. Record Activity Entry
-  const activityMsg = sendMessage
+  const activityMsg = effectiveSendMessage
     ? `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName}. Customer notification (${notificationStatus.whatsapp === 'sent' ? 'WhatsApp Sent' : 'Message Logged'}) triggered.`
-    : `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Notification skipped).`;
+    : skippedDueToDuplicate
+      ? `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Duplicate stage notification skipped).`
+      : `Stage moved: "${fromStage.label}" ➔ "${toStage.label}" by ${currentUserName} (Notification skipped).`;
 
   await addDoc(collection(db, 'activities'), {
     lead_id: lead.id,
@@ -355,9 +657,70 @@ export async function executeManualStageMove(params: {
     created_at: serverTimestamp(),
   });
 
+  const formattedOrigin = lead.source_whatsapp_number
+    ? formatWhatsAppNumberDisplay(lead.source_whatsapp_number)
+    : '';
+  let returnMessage = `Moved "${lead.name}" to ${toStage.label}.`;
+  if (skippedDueToDuplicate) {
+    returnMessage = `Moved "${lead.name}" to ${toStage.label}. (Notification skipped because update for this stage was already sent earlier).`;
+  } else if (effectiveSendMessage && notificationStatus.whatsapp === 'sent') {
+    returnMessage = formattedOrigin
+      ? `Moved "${lead.name}" to ${toStage.label} and sent WhatsApp message from ${formattedOrigin}.`
+      : `Moved "${lead.name}" to ${toStage.label} and sent WhatsApp update.`;
+  } else if (effectiveSendMessage && notificationStatus.whatsapp === 'failed') {
+    const cleanReason = whatsappFailureReason || (formattedOrigin ? `Connect ${formattedOrigin} in EcoBill Desktop Browser` : 'Connect WhatsApp Web in EcoBill Desktop Browser');
+    returnMessage = formattedOrigin
+      ? `Moved "${lead.name}" to ${toStage.label}. (WhatsApp from ${formattedOrigin} not sent: ${cleanReason})`
+      : `Moved "${lead.name}" to ${toStage.label}. (WhatsApp not sent: ${cleanReason})`;
+  } else if (effectiveSendMessage && notificationStatus.whatsapp === 'disabled') {
+    returnMessage = `Moved "${lead.name}" to ${toStage.label}. (WhatsApp auto-message is disabled for this stage in Settings).`;
+  }
+
   return {
     success: true,
-    message: `Moved "${lead.name}" to ${toStage.label}.`,
+    message: returnMessage,
     notificationStatus,
   };
+}
+
+/**
+ * Shared helper for zero-click stage transitions in PipelineBoard & LeadDetail:
+ * moves stage immediately, sends WhatsApp from originating number (skipping duplicate sends), and surfaces toast status.
+ */
+export async function runAutoStageMoveWithToast(params: {
+  lead: Lead;
+  fromStage: PipelineStage;
+  toStage: PipelineStage;
+  pipelineId: string;
+  pipelineName: string;
+}): Promise<StageMoveResult> {
+  const { lead, fromStage, toStage, pipelineId, pipelineName } = params;
+  const originNumDisplay = formatWhatsAppNumberDisplay(lead.source_whatsapp_number);
+  const loadingToast = toast.loading(
+    originNumDisplay
+      ? `Moving "${lead.name}" to ${toStage.label} & sending WhatsApp from ${originNumDisplay}...`
+      : `Moving "${lead.name}" to ${toStage.label} & sending WhatsApp update...`
+  );
+
+  try {
+    const result = await executeManualStageMove({
+      lead,
+      fromStage,
+      toStage,
+      pipelineId,
+      pipelineName,
+      sendMessage: true,
+      skipDuplicateSend: true,
+    });
+    if (result.notificationStatus?.whatsapp === 'failed') {
+      toast.error(result.message, { id: loadingToast, duration: 5500 });
+    } else {
+      toast.success(result.message, { id: loadingToast, duration: 4500 });
+    }
+    return result;
+  } catch (err: any) {
+    const errMsg = err?.message || `Failed to move "${lead.name}" to ${toStage.label}.`;
+    toast.error(errMsg, { id: loadingToast, duration: 5000 });
+    return { success: false, message: errMsg, error: errMsg };
+  }
 }

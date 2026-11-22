@@ -10,5 +10,20 @@ service firebase.storage {
       allow read: if request.auth != null;
       allow write: if false; // Only Cloud Functions can write to processed
     }
+    match /shared_documents/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    match /lead_mockups/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    match /qc_photos/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    match /chat_media/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    match /whatsapp_welcome_kit/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
   }
 }

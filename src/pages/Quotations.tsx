@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Plus, Search, Filter, Loader2, Sparkles, FileText, Download, Trash2, Edit, ChevronDown } from 'lucide-react';
+import { Plus, Search, Filter, Loader2, Sparkles, FileText, Download, Trash2, Edit, ChevronDown, Share2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { db, functions } from '../lib/firebase';
 import { collection, query, orderBy, onSnapshot, doc, getDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import type { Quotation, Customer } from '../types';
 import { downloadPDF } from '../utils/pdfGenerator';
+import WhatsAppShareModal from '../components/Billing/WhatsAppShareModal';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import { useSettings } from '../contexts/SettingsContext';
 import autoTable from 'jspdf-autotable';
+import ExportReportModal from '../components/Shared/ExportReportModal';
+import ConvertDocumentModal, { type ConvertSourceDoc } from '../components/Billing/ConvertDocumentModal';
 
 export default function Quotations() {
   const navigate = useNavigate();
@@ -19,7 +22,10 @@ export default function Quotations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [convertingId, setConvertingId] = useState<string | null>(null);
-  const [showReportDropdown, setShowReportDropdown] = useState(false);
+  const [shareQuotation, setShareQuotation] = useState<Quotation | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [convertModalDoc, setConvertModalDoc] = useState<ConvertSourceDoc | null>(null);
   const { settings } = useSettings();
  
   useEffect(() => {
@@ -61,71 +67,52 @@ export default function Quotations() {
     return () => unsubscribe();
   }, [customers]);
 
-  const handleConvert = async (quotation: Quotation, force: boolean = false) => {
-    const isGST = quotation.customer_type === 'gst' || !quotation.customer_type;
-    const targetDoc = isGST ? 'Proforma Invoice' : 'Cash Memo';
-    
-    // Validation check before proceeding
+  const handleOpenConvertModal = (quotation: Quotation) => {
     if (!quotation.items || quotation.items.length === 0) {
       alert("Unable to convert: This quotation contains no line items.");
       return;
     }
+    setConvertModalDoc({
+      id: quotation.id,
+      number: quotation.number,
+      customer_id: quotation.customer_id,
+      customer_name: customers[quotation.customer_id]?.name || quotation.customer_name,
+      customer_type: quotation.customer_type,
+      grand_total: quotation.grand_total,
+    });
+  };
 
-    if (!force && (quotation.status === 'converted' || (quotation as any).conversion_status === 'converted')) {
-      const viewExisting = window.confirm(`This quotation is already marked as converted. Would you like to view ${targetDoc}s?`);
-      if (viewExisting) {
-        navigate(isGST ? '/proforma-invoices' : '/cash-memos');
-      }
-      return;
-    }
-    
-    const confirm = window.confirm(`Generate ${targetDoc} from quotation "${quotation.number}"?`);
-    if (!confirm) return;
-
-    setConvertingId(quotation.id);
-    try {
-      let docNum: string = '';
-      const { clientConvertQuotationToProforma, clientConvertQuotationToCashMemo, deriveProformaNumberFromQuotation, deriveCashMemoNumberFromQuotation } = await import('../utils/clientBillingCreator');
-      const result = isGST 
-        ? await clientConvertQuotationToProforma(quotation.id, force) 
-        : await clientConvertQuotationToCashMemo(quotation.id);
-      docNum = (result as any).proformaNumber || (result as any).memoNumber || (isGST ? deriveProformaNumberFromQuotation(quotation.number) : deriveCashMemoNumberFromQuotation(quotation.number));
-
-      alert(`${targetDoc} ${docNum} created successfully!`);
-      navigate(isGST ? '/proforma-invoices' : '/cash-memos');
-    } catch (error: any) {
-      console.error("Conversion failed:", error);
-      const errMsg = error?.message || error?.details || "Failed to convert quotation. Please check your network and permissions.";
-      alert(`Conversion Error: ${errMsg}`);
-    } finally {
-      setConvertingId(null);
-    }
+  const handleConvertedSuccess = (targetType: 'invoice' | 'proforma' | 'memo', docNumber: string) => {
+    const label = targetType === 'invoice' ? 'Tax Invoice' : (targetType === 'proforma' ? 'Proforma Invoice' : 'Cash Memo');
+    const path = targetType === 'invoice' ? '/invoices' : (targetType === 'proforma' ? '/proforma-invoices' : '/cash-memos');
+    alert(`${label} ${docNumber} created successfully!`);
+    navigate(path);
   };
 
   const handleViewOrConvert = async (quotation: Quotation) => {
-    const isGST = quotation.customer_type === 'gst' || !quotation.customer_type;
-    const targetColl = isGST ? 'proforma_invoices' : 'cash_memos';
-    const targetRoute = isGST ? '/proforma-invoices' : '/cash-memos';
-    const linkedId = quotation.linked_proforma_id || (quotation as any).proformaInvoiceId || (quotation as any).linked_memo_id;
+    const linkedInvoiceId = quotation.linked_invoice_id || (quotation as any).invoiceId;
+    const linkedProformaId = quotation.linked_proforma_id || (quotation as any).proformaInvoiceId;
+    const linkedMemoId = quotation.linked_memo_id;
 
-    if (db && linkedId) {
-      try {
-        const docSnap = await getDoc(doc(db, targetColl, linkedId));
-        if (docSnap.exists()) {
-          navigate(targetRoute);
-          return;
-        }
-      } catch (err) {
-        console.warn("Error checking linked document:", err);
-      }
+    if (linkedInvoiceId) {
+      navigate('/invoices');
+      return;
+    }
+    if (linkedProformaId) {
+      navigate('/proforma-invoices');
+      return;
+    }
+    if (linkedMemoId) {
+      navigate('/cash-memos');
+      return;
     }
 
-    const retry = window.confirm(`The ${isGST ? 'Proforma Invoice' : 'Cash Memo'} record was not found in the database. Generate it now?`);
-    if (retry) {
-      await handleConvert(quotation, true);
-    } else {
-      navigate(targetRoute);
-    }
+    handleOpenConvertModal(quotation);
+  };
+
+  const openShareModal = (q: Quotation) => {
+    setShareQuotation(q);
+    setIsShareModalOpen(true);
   };
 
   const updateStatus = async (q: Quotation, newStatus: string) => {
@@ -145,6 +132,23 @@ export default function Quotations() {
           const qSnap = await getDoc(qRef);
           if (qSnap.exists()) {
             const qData = qSnap.data();
+            const linkedInvoiceId = qData.linked_invoice_id || qData.invoiceId;
+            if (linkedInvoiceId) {
+              try {
+                const invRef = doc(db, 'invoices', linkedInvoiceId);
+                const invSnap = await getDoc(invRef);
+                if (invSnap.exists()) {
+                  await updateDoc(invRef, {
+                    linked_quotation_id: null,
+                    sourceQuotationId: null,
+                    sourceQuotationNumber: null
+                  });
+                }
+              } catch (unlinkInvErr) {
+                console.warn("Could not unlink invoice:", unlinkInvErr);
+              }
+            }
+
             const linkedPiId = qData.linked_proforma_id || qData.proformaInvoiceId;
             if (linkedPiId) {
               try {
@@ -200,7 +204,7 @@ export default function Quotations() {
     if (status === 'converted' || (q as any).conversion_status === 'converted') {
       return (
         <div className="flex flex-col items-center gap-0.5">
-          <span className="neo-badge text-success bg-surface shadow-neo-surface">Converted</span>
+          <span className="neo-badge text-success bg-transparent shadow-neo-surface">Converted</span>
           {((q as any).proformaInvoiceNumber || (q as any).proforma_number) && (
             <span 
               onClick={() => navigate('/proforma-invoices')}
@@ -218,7 +222,7 @@ export default function Quotations() {
       <select 
         value={status} 
         onChange={(e) => updateStatus(q, e.target.value)}
-        className="neo-input py-1 px-2 text-xs bg-surface cursor-pointer min-w-[100px]"
+        className="neo-input py-1 px-2 text-xs bg-transparent cursor-pointer min-w-[100px]"
       >
         <option value="draft">Draft</option>
         <option value="sent">Sent</option>
@@ -234,10 +238,65 @@ export default function Quotations() {
     navigate('/quotations/new', { state: { voiceData: { customerName, items, customerType } } });
   };
 
-  const handleDownloadReport = (format: 'excel' | 'pdf') => {
-    const filteredQuotations = quotations
+  const handleDownloadReport = (options: { type: 'month' | 'fy' | 'custom', format: 'excel' | 'pdf' | 'bulk_pdf', startDate?: Date, endDate?: Date }) => {
+    let filteredQuotations = quotations
       .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
       .filter(q => statusFilter === 'all' || q.status === statusFilter);
+
+    const now = new Date();
+    filteredQuotations = filteredQuotations.filter(q => {
+      const date = q.created_at ? q.created_at.toDate() : new Date();
+      if (options.type === 'month') {
+        return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+      } else if (options.type === 'fy') {
+        const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+        const fyStart = new Date(startYear, 3, 1);
+        const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59);
+        return date >= fyStart && date <= fyEnd;
+      } else if (options.type === 'custom' && options.startDate && options.endDate) {
+        const endOfDay = new Date(options.endDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        return date >= options.startDate && date <= endOfDay;
+      }
+      return true;
+    });
+
+    if (filteredQuotations.length === 0) {
+      alert("No data found for the selected period.");
+      return;
+    }
+
+    const format = options.format;
+
+    if (format === 'bulk_pdf') {
+      import('react-hot-toast').then(({ toast }) => {
+        const toastId = toast.loading('Generating bulk PDFs... This may take a while.');
+        import('jszip').then(async (JSZipModule) => {
+          const JSZip = JSZipModule.default;
+          import('file-saver').then(async (FileSaver) => {
+            try {
+              const zip = new JSZip();
+              const { downloadPDF } = await import('../utils/pdfGenerator');
+              for (const item of filteredQuotations) {
+                const blob = await downloadPDF(item, customers[item.customer_id] || 'Unknown Customer', 'Quotation', 'blob', settings);
+                if (blob) {
+                  const customerName = customers[item.customer_id]?.name || 'Unknown';
+                  const filename = `Quotation_${item.number}_${customerName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                  zip.file(filename, blob);
+                }
+              }
+              const content = await zip.generateAsync({ type: 'blob' });
+              FileSaver.saveAs(content, 'Quotations_Bulk.zip');
+              toast.success('Bulk download complete!', { id: toastId });
+            } catch (err) {
+              console.error(err);
+              toast.error('Failed to generate bulk PDFs', { id: toastId });
+            }
+          });
+        });
+      });
+      return;
+    }
 
     if (format === 'excel') {
       const reportData = filteredQuotations.map(q => ({
@@ -278,6 +337,10 @@ export default function Quotations() {
     }
   };
 
+  const displayQuotations = quotations
+    .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .filter(q => statusFilter === 'all' || q.status === statusFilter);
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
@@ -286,33 +349,17 @@ export default function Quotations() {
           <p className="text-secondary mt-1">Manage standard quotes and conversion requests.</p>
         </div>
         <div className="flex gap-4 items-center">
-                    <div className="relative">
-            <button 
-              onClick={() => setShowReportDropdown(!showReportDropdown)} 
-              className="neo-btn flex items-center gap-2"
-            >
-              <Download size={18} /> Report <ChevronDown size={14} />
-            </button>
-            {showReportDropdown && (
-              <div 
-                className="absolute right-0 mt-2 w-40 bg-surface border border-shadow-darker/20 rounded-xl shadow-neo-raised z-50 py-1"
-                onMouseLeave={() => setShowReportDropdown(false)}
-              >
-                <button 
-                  onClick={() => { handleDownloadReport('excel'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  Excel (.xlsx)
-                </button>
-                <button 
-                  onClick={() => { handleDownloadReport('pdf'); setShowReportDropdown(false); }}
-                  className="w-full text-left px-4 py-2 hover:bg-shadow-darker/5 transition-colors text-sm font-semibold text-secondary"
-                >
-                  PDF (.pdf)
-                </button>
-              </div>
-            )}
-          </div>
+          <button 
+            onClick={() => setIsExportModalOpen(true)} 
+            className="neo-btn flex items-center gap-2"
+          >
+            <Download size={18} /> Export Report
+          </button>
+          <ExportReportModal 
+            isOpen={isExportModalOpen} 
+            onClose={() => setIsExportModalOpen(false)} 
+            onExport={handleDownloadReport} 
+          />
           <button 
             onClick={() => navigate('/quotations/new')}
             className="neo-btn-primary flex items-center gap-2"
@@ -338,7 +385,7 @@ export default function Quotations() {
             </div>
             <div className="relative">
               <select 
-                className="neo-btn !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-surface"
+                className="neo-btn !px-4 !pl-10 flex items-center gap-2 text-secondary appearance-none cursor-pointer bg-transparent"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
               >
@@ -357,7 +404,8 @@ export default function Quotations() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          {/* Desktop Table View */}
+          <table className="w-full text-left border-collapse hidden md:table">
             <thead>
               <tr className="border-b border-shadow-darker/20 text-sm font-semibold text-secondary">
                 <th className="pb-3 px-4 pl-0 w-32">Quotation ID</th>
@@ -373,85 +421,191 @@ export default function Quotations() {
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">
                   <Loader2 className="animate-spin mx-auto mb-2" /> Loading quotations...
                 </td></tr>
-              ) : quotations.length === 0 ? (
+              ) : displayQuotations.length === 0 ? (
                 <tr><td colSpan={6} className="py-8 text-center text-secondary">No quotations found.</td></tr>
-              ) : quotations
-                  .filter(q => q.number.toLowerCase().includes(searchTerm.toLowerCase()) || (customers[q.customer_id]?.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-                  .filter(q => statusFilter === 'all' || q.status === statusFilter)
-                  .map((q) => (
+              ) : displayQuotations.map((q) => (
                 <tr key={q.id} className="border-b border-shadow-darker/10 hover:bg-shadow-darker/5 transition-colors group">
-                  <td className="py-4 px-4 pl-0 font-medium text-primary-dark">{q.number}</td>
+                  <td className="py-4 px-4 pl-0 font-medium text-primary-dark">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span>{q.number}</span>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold" title={`Active version: v${q.version || 1}`}>
+                        v{q.version || 1}
+                      </span>
+                    </div>
+                    {q.versions && q.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {q.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/quotations/edit/${q.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (q.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary hover:bg-shadow-darker/20 hover:text-primary-dark'
+                            }`}
+                            title={`Click to edit Version ${v.versionNumber}`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="py-4 px-4 font-semibold text-secondary">{customers[q.customer_id]?.name || 'Loading...'}</td>
                   <td className="py-4 px-4 text-secondary">{q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}</td>
-                  <td className="py-4 px-4 font-bold text-primary-dark text-right">{q.grand_total?.toLocaleString() || '0'}</td>
+                  <td className="py-4 px-4 font-bold text-primary-dark text-right">
+                    {q.grand_total ? q.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                  </td>
                   <td className="py-4 px-4 text-center">{getStatusBadge(q)}</td>
                   <td className="py-4 px-4 pr-0 text-right">
                     <div className="flex items-center justify-end gap-2">
                         {q.status !== 'converted' && (q as any).conversion_status !== 'converted' ? (
                           <button 
-                            onClick={() => handleConvert(q)}
-                            disabled={convertingId === q.id}
+                            onClick={() => handleOpenConvertModal(q)}
                             className="neo-btn !p-2 !px-2.5 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center gap-1 text-xs font-bold whitespace-nowrap"
-                            title={(q.customer_type === 'gst' || !q.customer_type) ? "Convert to Proforma Invoice" : "Convert to Cash Memo"}
+                            title="Convert to Tax Invoice, Proforma, or Cash Memo"
                           >
-                            {convertingId === q.id ? (
-                              <>
-                                <Loader2 size={14} className="animate-spin" />
-                                <span>Converting...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles size={14} />
-                                <span>Convert</span>
-                              </>
-                            )}
+                            <Sparkles size={14} />
+                            <span>Convert</span>
                           </button>
                         ) : (
                           <button 
                             onClick={() => handleViewOrConvert(q)}
                             className="neo-btn !p-2 !px-2.5 text-xs text-primary font-semibold hover:text-primary-dark transition-all flex items-center gap-1 whitespace-nowrap"
-                            title="View or verify converted document"
+                            title="View converted document"
                           >
-                            <span>View {(q.customer_type === 'gst' || !q.customer_type) ? 'PI' : 'Memo'}</span>
+                            <span>View {q.linked_invoice_id || (q as any).invoiceId ? 'Invoice' : (q.linked_memo_id ? 'Memo' : 'PI')}</span>
                             <span>→</span>
                           </button>
                         )}
-                        <button 
-                          onClick={() => navigate(`/quotations/edit/${q.id}`)}
-                          className="p-2 text-secondary hover:text-primary transition-colors"
-                          title="Edit Quotation"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <button 
-                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)}
-                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                          title="View PDF"
-                        >
-                          <FileText size={18} />
-                        </button>
-                        <button 
-                          onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)}
-                          className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark"
-                          title="Download PDF"
-                        >
-                          <Download size={18} />
-                        </button>
-                        <button 
-                          onClick={() => deleteQuotation(q)}
-                          className="p-2 text-secondary hover:text-red-600 transition-colors"
-                          title="Delete Quotation"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                        <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="p-2 text-secondary hover:text-primary transition-colors" title="Edit Quotation"><Edit size={18} /></button>
+                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="View PDF"><FileText size={18} /></button>
+                        <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-primary-dark" title="Download PDF"><Download size={18} /></button>
+                        <button onClick={() => openShareModal(q)} className="p-2 neo-btn !px-3 !py-2 text-secondary hover:text-emerald-700" title="Share via WhatsApp"><Share2 size={18} /></button>
+                        <button onClick={() => deleteQuotation(q)} className="p-2 text-secondary hover:text-red-600 transition-colors" title="Delete Quotation"><Trash2 size={18} /></button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+
+          {/* Mobile Card View */}
+          <div className="md:hidden divide-y divide-shadow-darker/10">
+            {loading ? (
+              <div className="p-8 text-center text-secondary">
+                <Loader2 className="animate-spin mx-auto mb-2" /> Loading quotations...
+              </div>
+            ) : displayQuotations.length === 0 ? (
+              <div className="p-8 text-center text-secondary">No quotations found.</div>
+            ) : displayQuotations.map((q) => (
+              <div key={q.id} className="p-4 space-y-3 bg-transparent hover:bg-shadow-darker/5 transition-colors">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-bold text-primary-dark text-lg leading-tight">{q.number}</h3>
+                      <span className="neo-badge text-primary bg-primary/10 border border-primary/20 text-[10px] px-1.5 py-0.5 font-bold">
+                        v{q.version || 1}
+                      </span>
+                    </div>
+                    {q.versions && q.versions.length > 1 && (
+                      <div className="flex items-center gap-1 mt-1 flex-wrap">
+                        <span className="text-[10px] text-secondary">Revs:</span>
+                        {q.versions.map(v => (
+                          <button
+                            key={v.versionNumber}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/quotations/edit/${q.id}?version=${v.versionNumber}`);
+                            }}
+                            className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                              v.versionNumber === (q.version || 1)
+                                ? 'bg-emerald-600 text-white font-bold'
+                                : 'bg-shadow-darker/10 text-secondary'
+                            }`}
+                          >
+                            v{v.versionNumber}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-secondary font-medium mt-0.5">{customers[q.customer_id]?.name || 'Loading...'}</p>
+                    <p className="text-xs text-secondary/70 mt-1">
+                      {q.created_at ? q.created_at.toDate().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Syncing...'}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <div className="font-black text-lg text-primary-dark tracking-tight">
+                      ₹ {q.grand_total ? q.grand_total.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00'}
+                    </div>
+                    <div className="mt-1">{getStatusBadge(q)}</div>
+                  </div>
+                </div>
+                
+                <div className="flex flex-col gap-2 pt-2 border-t border-shadow-darker/5">
+                  <div className="flex justify-between items-center w-full">
+                    {q.status !== 'converted' && (q as any).conversion_status !== 'converted' ? (
+                      <button 
+                        onClick={() => handleOpenConvertModal(q)}
+                        className="neo-btn !p-2 text-primary-dark hover:text-white hover:bg-primary-dark transition-all flex items-center justify-center gap-1 text-xs font-bold w-full mr-2"
+                        title="Convert to Tax Invoice, Proforma, or Cash Memo"
+                      >
+                        <Sparkles size={14} />
+                        <span>Convert</span>
+                      </button>
+                    ) : (
+                      <button 
+                        onClick={() => handleViewOrConvert(q)}
+                        className="neo-btn !p-2 text-xs text-primary font-semibold hover:text-primary-dark transition-all flex items-center justify-center gap-1 w-full mr-2"
+                      >
+                        <span>View {q.linked_invoice_id || (q as any).invoiceId ? 'Invoice' : (q.linked_memo_id ? 'Memo' : 'PI')}</span>
+                        <span>→</span>
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center gap-1 w-full mt-1">
+                    <button onClick={() => navigate(`/quotations/edit/${q.id}`)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary transition-colors"><Edit size={16} /></button>
+                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'view', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><FileText size={16} /></button>
+                    <button onClick={() => downloadPDF(q, customers[q.customer_id] || 'Unknown Customer', 'Quotation', 'download', settings)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-primary-dark transition-colors"><Download size={16} /></button>
+                    <button onClick={() => openShareModal(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-emerald-700 transition-colors" title="Share via WhatsApp"><Share2 size={16} /></button>
+                    <button onClick={() => deleteQuotation(q)} className="flex-1 flex justify-center py-2 bg-shadow-darker/5 rounded-lg text-secondary hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
+
+      {shareQuotation && (
+        <WhatsAppShareModal
+          isOpen={isShareModalOpen}
+          onClose={() => {
+            setIsShareModalOpen(false);
+            setShareQuotation(null);
+          }}
+          document={shareQuotation}
+          documentType="Quotation"
+          customer={customers[shareQuotation.customer_id]}
+          settings={settings}
+        />
+      )}
+
+      {convertModalDoc && (
+        <ConvertDocumentModal
+          isOpen={!!convertModalDoc}
+          onClose={() => setConvertModalDoc(null)}
+          sourceDoc={convertModalDoc}
+          sourceType="quotation"
+          onConverted={handleConvertedSuccess}
+        />
+      )}
     </div>
   );
 }
+

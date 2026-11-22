@@ -149,11 +149,22 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
     .map((t: string) => `<li>${escapeHtml(t)}</li>`)
     .join('');
 
-  const companyDetails = [
-    settings?.companyAddress ? escapeHtml(settings.companyAddress).replace(/\n/g, '<br>') : '',
-    settings?.companyGstin ? `<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}<br>` : '',
-    settings?.companyEmail ? `<strong>Email:</strong> ${escapeHtml(settings.companyEmail)}` : '',
-  ].join('');
+  const companyParts: string[] = [];
+  const fullAddress = settings?.companyAddress || [settings?.companyCity, settings?.companyState, settings?.companyPincode].filter(Boolean).join(', ');
+  if (fullAddress) {
+    companyParts.push(escapeHtml(fullAddress).replace(/\n/g, '<br>'));
+  }
+  if (isGstBill && settings?.companyGstin) {
+    companyParts.push(`<strong>GSTIN:</strong> ${escapeHtml(settings.companyGstin)}`);
+  }
+  if (settings?.companyPhone) {
+    companyParts.push(`<strong>Phone:</strong> ${escapeHtml(settings.companyPhone)}`);
+  }
+  if (settings?.companyEmail) {
+    companyParts.push(`<strong>Email:</strong> ${escapeHtml(settings.companyEmail)}`);
+  }
+
+  const companyDetails = companyParts.join('<br>');
 
   return `
     <div id="quotation-paper-wrapper">
@@ -182,7 +193,7 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
         .client-name { font-weight: bold; font-size: 13px; margin-bottom: 2px; display: block; }
         .client-address { font-size: 12px; line-height: 1.3; color: #444; white-space: pre-line; }
         .items-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-        .items-table th { background: ${theme.primary}; color: white; padding: 6px 8px; font-size: 11px; text-align: left; font-weight: 600; text-transform: uppercase; }
+        .items-table th { background: ${theme.primary}; color: white; padding: 6px 8px; font-size: 11px; text-align: left; vertical-align: middle; font-weight: 600; text-transform: uppercase; }
         .items-table td { border-bottom: 1px solid #eee; padding: 6px 8px; font-size: 12px; vertical-align: top; }
         .col-sno { width: 30px; text-align: center; }
         .col-qty { width: 50px; text-align: center; }
@@ -191,10 +202,10 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
         .item-title { font-weight: 600; font-size: 12px; color: #000; }
         .item-desc { font-size: 11px; color: #666; margin-top: 2px; display: block; line-height: 1.2; }
         .totals-container { display: flex; justify-content: flex-end; margin-bottom: 15px; }
-        .totals-table { width: 220px; border-collapse: collapse; }
+        .totals-table { width: 300px; border-collapse: collapse; }
         .totals-table td { padding: 4px 8px; text-align: right; font-size: 12px; }
-        .total-label { color: ${theme.muted}; }
-        .total-value { font-weight: 600; }
+        .total-label { color: ${theme.muted}; white-space: nowrap; }
+        .total-value { font-weight: 600; white-space: nowrap; }
         .grand-total-row { background: ${theme.primary}; color: white; }
         .grand-total-row td { padding: 8px; font-size: 13px; font-weight: bold; }
         .amount-words { border-top: 1px solid #ddd; padding-top: 8px; font-size: 12px; margin-bottom: 20px; font-style: italic; color: #555; }
@@ -213,13 +224,13 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
       <div id="quotation-paper">
           <div class="header">
               <div>
-                  ${docType === 'Cash Memo' ? '' : `
-                      ${settings?.companyLogo ? `<img src="${settings.companyLogo}" style="max-height: 50px; margin-bottom: 10px;" />` : ''}
-                      <h1 class="company-name">${escapeHtml(settings?.companyName || 'Company Name')}</h1>
-                      <div class="company-details">
-                          ${companyDetails}
-                      </div>
-                  `}
+                  ${settings?.companyLogo ? `<img src="${settings.companyLogo}" style="max-height: 50px; margin-bottom: 10px;" />` : ''}
+                  <h1 class="company-name">${escapeHtml(settings?.companyName || 'ECOTROPHY INNOVATIONS (OPC) PVT LTD')}</h1>
+                  ${companyDetails ? `
+                  <div class="company-details">
+                      ${companyDetails}
+                  </div>
+                  ` : ''}
               </div>
               <div class="quote-meta">
                   <h2 class="quote-label">${docType}</h2>
@@ -263,7 +274,10 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
                   </tr>
                   ${discountAmt > 0 ? `
                   <tr>
-                      <td class="total-label">Discount (${(docData as any).discount_percent || 0}%)</td>
+                      <td class="total-label">
+                        Discount (${(docData as any).discount_percent || 0}%)
+                        <span style="display:inline-block;margin-left:6px;background:#dcfce7;color:#15803d;font-size:9px;font-weight:600;padding:2px 7px;border-radius:999px;vertical-align:middle;white-space:nowrap;">You save ${formatCurrency(discountAmt)}</span>
+                      </td>
                       <td class="total-value">-${formatCurrency(discountAmt)}</td>
                   </tr>
                   ` : ''}
@@ -324,12 +338,8 @@ function buildDocumentHtml(theme: PdfTheme, ctx: PdfRenderContext) {
   `;
 }
 
-export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   const { docData, customer, docType } = ctx;
-  if (docType === 'Cash Memo' && (docData as any).payment_status !== 'paid') {
-    alert('Mark this Cash Memo as Paid to enable PDF download.');
-    return;
-  }
 
   const html = buildDocumentHtml(theme, ctx);
   const container = document.createElement('div');
@@ -358,7 +368,36 @@ export async function renderDocumentPdf(theme: PdfTheme, ctx: PdfRenderContext, 
     return;
   }
 
+  if (action === 'blob') {
+    return new Promise<Blob>((resolve) => {
+      html2pdf().set(opt).from(element as HTMLElement).output('blob').then((blob: Blob) => {
+        document.body.removeChild(container);
+        resolve(blob);
+      });
+    });
+  }
+
+  if (action === 'share') {
+    return new Promise<Blob>((resolve) => {
+      html2pdf().set(opt).from(element as HTMLElement).output('blob').then(async (blob: Blob) => {
+        document.body.removeChild(container);
+        try {
+          const file = new File([blob], opt.filename, { type: 'application/pdf' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              title: opt.filename,
+              text: `${prefix} for ${buyerName}`,
+              files: [file]
+            });
+          }
+        } catch (shareErr) {
+          console.warn('Web share was dismissed or unsupported:', shareErr);
+        }
+        resolve(blob);
+      });
+    });
+  }
+
   await html2pdf().set(opt).from(element as HTMLElement).save();
   document.body.removeChild(container);
 }
-

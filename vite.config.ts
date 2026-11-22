@@ -2,7 +2,38 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
+export default defineConfig(() => ({
   plugins: [react()],
-  base: command === 'build' ? '/bill-pro/' : '/',
+  base: '/',
+  server: {
+    host: true,
+    port: 5173,
+    proxy: {
+      '/api/whatsapp': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      },
+      '/api/reconciliation': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      },
+      '/api/desktop': {
+        target: 'http://127.0.0.1:5001',
+        changeOrigin: true
+      }
+    }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react')) return 'react-vendor';
+          if (id.includes('node_modules/firebase')) return 'firebase-vendor';
+          if (id.includes('node_modules/jspdf') || id.includes('node_modules/html2canvas')) return 'pdf-vendor';
+          if (id.includes('node_modules/xlsx')) return 'excel-vendor';
+          if (id.includes('node_modules/lucide-react') || id.includes('node_modules/date-fns')) return 'ui-vendor';
+        }
+      }
+    }
+  }
 }))

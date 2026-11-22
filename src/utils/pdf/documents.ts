@@ -2,19 +2,19 @@ import type { DocumentKind, PdfRenderContext } from './types';
 import { pdfTheme } from './theme';
 import { renderDocumentPdf } from './renderer';
 
-export async function renderQuotationPdf(ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderQuotationPdf(ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   return renderDocumentPdf(pdfTheme, { ...ctx, docType: 'Quotation' }, action);
 }
 
-export async function renderInvoicePdf(ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderInvoicePdf(ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   return renderDocumentPdf(pdfTheme, { ...ctx, docType: 'Invoice' }, action);
 }
 
-export async function renderCashMemoPdf(ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderCashMemoPdf(ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   return renderDocumentPdf(pdfTheme, { ...ctx, docType: 'Cash Memo' }, action);
 }
 
-export async function renderProformaInvoicePdf(ctx: PdfRenderContext, action: 'download' | 'view') {
+export async function renderProformaInvoicePdf(ctx: PdfRenderContext, action: 'download' | 'view' | 'share' | 'blob'): Promise<Blob | void> {
   return renderDocumentPdf(pdfTheme, { ...ctx, docType: 'Proforma Invoice' }, action);
 }
 

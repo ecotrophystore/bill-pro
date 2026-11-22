@@ -38,9 +38,9 @@ export function calculateBillingTotals(input: {
 
   const discountAmount = exactRound((rawSubtotal * discountPercent) / 100);
   const charge = exactRound(chargeAmount);
-  const grandTotalExact = subtotalAfterDiscount + taxTotal + charge;
-  const finalGrandTotal = Math.round(grandTotalExact);
-  const roundOff = exactRound(finalGrandTotal - grandTotalExact);
+  const grandTotalExact = exactRound(subtotalAfterDiscount + taxTotal + charge);
+  const finalGrandTotal = grandTotalExact;
+  const roundOff = 0;
 
   let cgst = 0, sgst = 0, igst = 0;
   if (customerType !== 'non_gst') {

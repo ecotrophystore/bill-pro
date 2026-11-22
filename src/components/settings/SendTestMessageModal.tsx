@@ -95,7 +95,7 @@ export function SendTestMessageModal({ onClose, onSuccess }: SendTestMessageModa
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-shadow-darker/50 backdrop-blur-sm animate-fade-in">
-      <div className="neo-card w-full max-w-md bg-surface flex flex-col">
+      <div className="neo-card w-full max-w-md bg-transparent flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-shadow-darker/10">
           <h3 className="font-bold text-primary-dark">Send WhatsApp Test Message</h3>
           <button onClick={onClose} className="p-2 hover:bg-shadow-darker/5 rounded-full transition-colors text-secondary">
@@ -132,7 +132,7 @@ export function SendTestMessageModal({ onClose, onSuccess }: SendTestMessageModa
             <select 
               value={mode} 
               onChange={e => setMode(e.target.value as any)} 
-              className="w-full neo-input text-sm appearance-none bg-surface"
+              className="w-full neo-input text-sm appearance-none bg-transparent"
             >
               <option value="template">Approved Template</option>
               <option value="text">Free-form Text (Requires active 24h window)</option>
@@ -181,7 +181,7 @@ export function SendTestMessageModal({ onClose, onSuccess }: SendTestMessageModa
           )}
         </div>
 
-        <div className="p-4 border-t border-shadow-darker/10 flex justify-end gap-3 bg-surface/50">
+        <div className="p-4 border-t border-shadow-darker/10 flex justify-end gap-3 bg-transparent">
           <button onClick={onClose} disabled={loading} className="neo-btn px-4 py-2 text-sm">
             Cancel
           </button>
@@ -198,3 +198,4 @@ export function SendTestMessageModal({ onClose, onSuccess }: SendTestMessageModa
     </div>
   );
 }
+

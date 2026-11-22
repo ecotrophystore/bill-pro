@@ -307,12 +307,12 @@ export function AIAuditor() {
       {/* Chat Drawer */}
       <div 
         className={clsx(
-          "fixed top-0 right-0 h-full w-full max-w-md bg-surface shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transition-transform duration-500 transform border-l border-shadow-darker/20 flex flex-col z-50",
+          "fixed top-0 right-0 h-full w-full max-w-md bg-transparent shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transition-transform duration-500 transform border-l border-shadow-darker/20 flex flex-col z-50",
           isOpen ? "translate-x-0" : "translate-x-full"
         )}
       >
         {/* Header */}
-        <div className="p-6 border-b border-shadow-darker/20 flex items-center justify-between bg-surface/50 backdrop-blur-md">
+        <div className="p-6 border-b border-shadow-darker/20 flex items-center justify-between bg-transparent backdrop-blur-md">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary shadow-neo-inset">
               <Sparkles size={20} />
@@ -342,14 +342,14 @@ export function AIAuditor() {
             >
               <div className={clsx(
                 "w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-neo-raised",
-                msg.role === 'user' ? "bg-primary text-surface" : "bg-white text-secondary"
+                msg.role === 'user' ? "bg-primary text-surface" : "bg-transparent text-secondary"
               )}>
                 {msg.role === 'user' ? <UserIcon size={14} /> : <Bot size={14} />}
               </div>
               
               <div className={clsx(
                 "neo-card !p-3 !rounded-2xl text-sm leading-relaxed",
-                msg.role === 'user' ? "!bg-primary !text-surface !shadow-neo-pressed" : "!bg-white/80"
+                msg.role === 'user' ? "!bg-primary !text-surface !shadow-neo-pressed" : "!bg-transparent"
               )}>
                 {renderMarkdown(msg.parts[0].text)}
               </div>
@@ -358,10 +358,10 @@ export function AIAuditor() {
           
           {isTyping && (
             <div className="flex gap-3 mr-auto items-center">
-              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center shadow-neo-raised">
+              <div className="w-8 h-8 rounded-full bg-transparent flex items-center justify-center shadow-neo-raised">
                 <Bot size={14} className="text-secondary animate-bounce" />
               </div>
-              <div className="flex gap-1.5 p-3 rounded-2xl bg-white/50 shadow-neo-inset">
+              <div className="flex gap-1.5 p-3 rounded-2xl bg-transparent shadow-neo-inset">
                 <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
                 <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
                 <span className="w-1.5 h-1.5 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
@@ -371,7 +371,7 @@ export function AIAuditor() {
         </div>
 
         {/* Input Area */}
-        <div className="p-6 bg-surface border-t border-shadow-darker/20">
+        <div className="p-6 bg-transparent border-t border-shadow-darker/20">
           <form 
             onSubmit={sendMessage}
             className="flex items-center gap-3"
@@ -409,3 +409,5 @@ export function AIAuditor() {
     </div>
   );
 }
+
+
